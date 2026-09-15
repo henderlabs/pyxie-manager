@@ -1,0 +1,171 @@
+#!/bin/bash
+# /usr/local/sbin/pyxie-maint
+#
+# PyXie Manager's restricted host-maintenance wrapper. Root-owned, mode
+# 0700, invoked via `sudo` by the dedicated 'pyxie-hostmaint' SSH identity.
+# /etc/sudoers.d/pyxie-maint restricts that identity to running ONLY this
+# exact binary with ONLY the six exact subcommand invocations below --
+# there is no wildcard sudo entry anywhere in this deployment.
+#
+# This script accepts exactly one argument, matched against a fixed
+# allowlist below. It NEVER uses eval, `sh -c`, or any other construct that
+# evaluates part of its own input as a shell command, and it never accepts
+# a package name or any other argument from the caller -- every apt-get
+# invocation below is a fixed, literal command line. Extra arguments are
+# rejected outright.
+#
+# Contract version 1 -- keep CONTRACT_VERSION in lock-step with
+# shared/pyxie_core/host_maintenance_client.py's SUPPORTED_CONTRACT_VERSION.
+# Bump it (and update both sides together) any time an existing
+# subcommand's output shape changes; PyXie refuses to proceed past its own
+# dry-run if the two don't match.
+
+set -euo pipefail
+
+WRAPPER_VERSION="1.0.0"
+CONTRACT_VERSION=1
+CAPABILITIES='["version","status","refresh","plan","apply","verify"]'
+
+# Fail closed on a held dpkg/apt lock (e.g. unattended-upgrades or a
+# concurrent PVE web UI session) rather than hanging indefinitely -- wait a
+# bounded 10s, then let apt-get's own non-zero exit propagate as failure.
+APT_LOCK_OPTS=(-o DPkg::Lock::Timeout=10)
+
+iso_now() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
+
+json_escape() {
+  # Minimal JSON string escaping for values we build ourselves (paths,
+  # short log tails) -- python3 is present on every PVE host, so lean on
+  # its json module rather than hand-rolling escaping.
+  python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))'
+}
+
+strip_ansi() {
+  # Sanitize captured command output before it's ever embedded in JSON and
+  # sent back to PyXie for storage/logging: strip ANSI escape/control
+  # sequences (apt's progress output uses them) and low control bytes.
+  python3 -c '
+import re, sys
+data = sys.stdin.read()
+data = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", data)
+data = re.sub(r"\x1b\][^\x07]*\x07", "", data)
+data = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", data)
+sys.stdout.write(data)
+'
+}
+
+cmd_version() {
+  printf '{"wrapper_version":"%s","contract_version":%d,"capabilities":%s}\n' \
+    "$WRAPPER_VERSION" "$CONTRACT_VERSION" "$CAPABILITIES"
+}
+
+cmd_status() {
+  local kernel pve_ver upgradable reboot_req disk_free
+  kernel=$(uname -r)
+  pve_ver=$(pveversion 2>/dev/null | head -1 || echo "unknown")
+  upgradable=$(apt-get "${APT_LOCK_OPTS[@]}" -s dist-upgrade 2>/dev/null | grep -c '^Inst ' || true)
+
+  # /var/run/reboot-required is an Ubuntu update-notifier-common convention
+  # -- that package is NOT installed on stock PVE, so the file can never
+  # exist here regardless of whether a reboot is actually needed (proven
+  # live: reported false right after a real kernel install on this exact
+  # host). The reliable signal on PVE is comparing the RUNNING kernel
+  # against the newest INSTALLED proxmox-kernel package -- PVE keeps old
+  # kernels installed for rollback, so take the highest by version, not
+  # just "is one installed that isn't running".
+  local running_kernel_base latest_kernel_version
+  running_kernel_base="${kernel%-pve}"
+  latest_kernel_version=$(dpkg-query -W -f='${Version}\n' 'proxmox-kernel-*-pve-signed' 2>/dev/null | sort -V | tail -1)
+  reboot_req=false
+  if [ -n "$latest_kernel_version" ] && [ "$running_kernel_base" != "$latest_kernel_version" ]; then
+    reboot_req=true
+  fi
+  if [ -f /var/run/reboot-required ]; then reboot_req=true; fi
+
+  disk_free=$(df --output=avail -B1 / | tail -1 | tr -d ' ')
+  printf '{"kernel_version":"%s","pve_version":"%s","upgradable_count":%s,"reboot_required":%s,"disk_free_bytes":%s,"checked_at":"%s"}\n' \
+    "$kernel" "$pve_ver" "$upgradable" "$reboot_req" "$disk_free" "$(iso_now)"
+}
+
+cmd_refresh() {
+  if apt-get "${APT_LOCK_OPTS[@]}" update -qq > /tmp/pyxie-maint-refresh.log 2>&1; then
+    printf '{"success":true,"refreshed_at":"%s"}\n' "$(iso_now)"
+  else
+    printf '{"success":false,"refreshed_at":"%s"}\n' "$(iso_now)"
+    exit 1
+  fi
+}
+
+cmd_plan() {
+  # apt-get -s dist-upgrade's "Inst" line shape:
+  #   Inst pkgname [current_ver] (new_ver repo [arch]) [trigger annotations...]
+  # current_ver's bracket is OMITTED entirely for a package newly pulled in
+  # as a dependency (not a version bump of something already installed).
+  # A naive sed/greedy-regex parse latches onto the LAST bracket on the
+  # line instead of the first (there's always at least one more later --
+  # the new-version parenthetical itself ends in "[arch]", and dependency
+  # trigger annotations add more) -- proven wrong against this host's real
+  # output. Parsed properly in Python instead of shell text tools.
+  # `grep` exits 1 when it finds no matching lines -- which is exactly
+  # what a fully-patched host with zero pending packages looks like, a
+  # normal/successful outcome, not an error. Under `set -e -o pipefail`
+  # (this whole script) that non-zero exit aborts the entire wrapper even
+  # though the pipeline's actual output (an empty package list) is
+  # correct. `|| true` on just the grep stage stops that false failure
+  # without masking a REAL failure anywhere else in the pipeline.
+  apt-get "${APT_LOCK_OPTS[@]}" -s dist-upgrade 2>/dev/null | { grep '^Inst ' || true; } | python3 -c '
+import json, re, sys
+
+pattern = re.compile(r"^Inst (\S+)(?: \[([^\]]*)\])? \(([^ )]+)")
+packages = []
+for line in sys.stdin:
+    m = pattern.match(line)
+    if not m:
+        continue
+    pkg, current, new = m.group(1), m.group(2), m.group(3)
+    packages.append({"package": pkg, "current_version": current, "new_version": new})
+
+import datetime
+print(json.dumps({
+    "packages": packages,
+    "computed_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+}))
+'
+}
+
+cmd_apply() {
+  local exit_status=0
+  DEBIAN_FRONTEND=noninteractive apt-get "${APT_LOCK_OPTS[@]}" -y -o Dpkg::Options::="--force-confold" dist-upgrade \
+    > /var/log/pyxie-maint-apply.log 2>&1 || exit_status=$?
+  local success="true"
+  [ "$exit_status" -ne 0 ] && success="false"
+  local tail_json
+  tail_json=$(tail -c 4000 /var/log/pyxie-maint-apply.log | strip_ansi | json_escape 2>/dev/null || echo '""')
+  printf '{"success":%s,"exit_status":%d,"log_tail":%s,"applied_at":"%s"}\n' \
+    "$success" "$exit_status" "$tail_json" "$(iso_now)"
+  [ "$exit_status" -eq 0 ]
+}
+
+cmd_verify() {
+  # Deliberately identical to `status` -- post-apply verification is just
+  # re-reading the same live state, never trusting apply's own self-report.
+  cmd_status
+}
+
+if [ "$#" -ne 1 ]; then
+  echo '{"error":"exactly one subcommand required"}' >&2
+  exit 2
+fi
+
+case "$1" in
+  version) cmd_version ;;
+  status)  cmd_status ;;
+  refresh) cmd_refresh ;;
+  plan)    cmd_plan ;;
+  apply)   cmd_apply ;;
+  verify)  cmd_verify ;;
+  *)
+    echo '{"error":"unknown subcommand"}' >&2
+    exit 2
+    ;;
+esac

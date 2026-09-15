@@ -1,0 +1,99 @@
+name: pyxie-manager
+
+networks:
+  edge:
+    external: true
+  internal:
+    driver: bridge
+
+volumes:
+  pyxie_manager_db_data:
+  pyxie_manager_redis_data:
+
+services:
+  pyxie-manager-db:
+    image: postgres:16-alpine
+    container_name: pyxie-manager-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pyxie_manager_db_data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pyxie-manager-redis:
+    image: redis:7-alpine
+    container_name: pyxie-manager-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - pyxie_manager_redis_data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pyxie-manager-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: pyxie-manager-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - internal
+    depends_on:
+      pyxie-manager-db:
+        condition: service_healthy
+      pyxie-manager-redis:
+        condition: service_healthy
+
+  pyxie-manager-worker:
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
+    container_name: pyxie-manager-worker
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      - internal
+    depends_on:
+      pyxie-manager-api:
+        condition: service_healthy
+      pyxie-manager-redis:
+        condition: service_healthy
+
+  pyxie-manager-web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    container_name: pyxie-manager-web
+    restart: unless-stopped
+    environment:
+      API_INTERNAL_URL: http://pyxie-manager-api:8000
+      NODE_ENV: production
+      # Next's standalone server.js binds to $HOSTNAME if set. Docker auto-sets
+      # HOSTNAME to the container id on every container; on a multi-network
+      # container (this one joins both `internal` and `edge`) that resolves to
+      # only one of its several IPs, making the other network unreachable and
+      # even 127.0.0.1 healthchecks fail. Force it to bind all interfaces.
+      HOSTNAME: "0.0.0.0"
+    networks:
+      - internal
+      - edge
+    depends_on:
+      pyxie-manager-api:
+        condition: service_healthy

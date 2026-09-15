@@ -1,0 +1,600 @@
+import base64
+import hashlib
+import uuid
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+
+from datetime import datetime, timezone
+
+from pyxie_core.audit import write_audit_event
+from pyxie_core.discovery import build_pve_client
+from pyxie_core.maintenance import _qemu_config, _workload_disk_storage_names
+from pyxie_core.metrics import latest_workload_metrics
+from pyxie_core.credentials import (
+    CredentialNotConfigured,
+    HostNotAddressable,
+    load_host_maintenance_credentials,
+)
+from pyxie_core.host_maintenance_client import (
+    HostKeyMismatchError,
+    HostKeyNotPinnedError,
+    HostMaintenanceClient,
+    HostMaintenanceConnectionError,
+    HostMaintenanceProtocolError,
+    SUPPORTED_CONTRACT_VERSION,
+    probe_host_key,
+)
+from pyxie_core.models import (
+    AppSettings,
+    Cluster,
+    HostMaintenanceCredential,
+    Node,
+    Operation,
+    Organization,
+    PveTarget,
+    PveTask,
+    Site,
+    Storage,
+    Workload,
+)
+
+from ..auth_deps import get_current_user, require_admin
+from ..deps import get_db
+from .. import schemas
+
+router = APIRouter(prefix="/api", tags=["inventory"], dependencies=[Depends(get_current_user)])
+
+
+@router.get("/organizations", response_model=list[schemas.OrganizationOut])
+def list_organizations(db: Session = Depends(get_db)):
+    return db.query(Organization).order_by(Organization.name).all()
+
+
+@router.patch("/organizations/{org_id}", response_model=schemas.OrganizationOut, dependencies=[Depends(require_admin)])
+def update_organization(
+    org_id: uuid.UUID, payload: schemas.OrganizationUpdate,
+    user=Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Rename the deployment's organization. PyXie is one org per deployment
+    (a fresh install seeds a single placeholder org/site row) -- this is how
+    that placeholder gets turned into the real company name, there's no
+    separate 'create organization' endpoint since a second one is never
+    needed within a single deployment."""
+    org = db.query(Organization).filter(Organization.id == org_id).one_or_none()
+    if org is None:
+        raise HTTPException(404, "Organization not found")
+    before = {"name": org.name, "slug": org.slug}
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(org, field, value)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(400, "an organization with that slug already exists")
+    write_audit_event(
+        db,
+        event_category="organization",
+        event_type="organization.updated",
+        actor=user.email, actor_type="user",
+        state_before=before,
+        state_after={"name": org.name, "slug": org.slug},
+    )
+    db.commit()
+    db.refresh(org)
+    return org
+
+
+@router.get("/sites", response_model=list[schemas.SiteOut])
+def list_sites(db: Session = Depends(get_db)):
+    return db.query(Site).order_by(Site.name).all()
+
+
+@router.post("/sites", response_model=schemas.SiteOut, dependencies=[Depends(require_admin)])
+def create_site(payload: schemas.SiteCreate, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    org = db.query(Organization).filter(Organization.id == payload.organization_id).one_or_none()
+    if org is None:
+        raise HTTPException(404, "Organization not found")
+    site = Site(organization_id=payload.organization_id, name=payload.name, slug=payload.slug)
+    db.add(site)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(400, "a site with that slug already exists in this organization")
+    write_audit_event(
+        db,
+        event_category="site",
+        event_type="site.created",
+        actor=user.email, actor_type="user",
+        site_id=site.id,
+        state_after={"name": site.name, "slug": site.slug, "organization_id": str(payload.organization_id)},
+    )
+    db.commit()
+    db.refresh(site)
+    return site
+
+
+@router.patch("/sites/{site_id}", response_model=schemas.SiteOut, dependencies=[Depends(require_admin)])
+def update_site(site_id: uuid.UUID, payload: schemas.SiteUpdate, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    site = db.query(Site).filter(Site.id == site_id).one_or_none()
+    if site is None:
+        raise HTTPException(404, "Site not found")
+    before = {"name": site.name, "slug": site.slug}
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(site, field, value)
+    try:
+        db.flush()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(400, "a site with that slug already exists in this organization")
+    write_audit_event(
+        db,
+        event_category="site",
+        event_type="site.updated",
+        actor=user.email, actor_type="user",
+        site_id=site.id,
+        state_before=before,
+        state_after={"name": site.name, "slug": site.slug},
+    )
+    db.commit()
+    db.refresh(site)
+    return site
+
+
+@router.get("/clusters", response_model=list[schemas.ClusterOut])
+def list_clusters(db: Session = Depends(get_db)):
+    return db.query(Cluster).order_by(Cluster.name).all()
+
+
+@router.get("/clusters/{cluster_id}", response_model=schemas.ClusterOut)
+def get_cluster(cluster_id: uuid.UUID, db: Session = Depends(get_db)):
+    return db.query(Cluster).filter(Cluster.id == cluster_id).one()
+
+
+def _attach_allocated_memory(db: Session, nodes: list[Node]) -> None:
+    """Sum of running workloads' configured memory_bytes, grouped by node --
+    not a real column, attached here so NodeOut (from_attributes) can pick
+    it up via plain getattr. Same allocation-based measure the migration
+    safety checks (placement.py) use, so the UI's "tight" warning means
+    the same thing as what will actually block a migration."""
+    node_ids = [n.id for n in nodes]
+    if not node_ids:
+        return
+    rows = (
+        db.query(Workload.node_id, func.sum(Workload.memory_bytes))
+        .filter(Workload.node_id.in_(node_ids), Workload.is_missing.is_(False), Workload.status == "running")
+        .group_by(Workload.node_id)
+        .all()
+    )
+    by_node = {node_id: total or 0 for node_id, total in rows}
+    for n in nodes:
+        n.allocated_memory_bytes = by_node.get(n.id, 0)
+
+
+@router.get("/nodes", response_model=list[schemas.NodeOut])
+def list_nodes(db: Session = Depends(get_db)):
+    nodes = db.query(Node).order_by(Node.name).all()
+    _attach_allocated_memory(db, nodes)
+    return nodes
+
+
+@router.get("/nodes/{node_id}", response_model=schemas.NodeOut)
+def get_node(node_id: uuid.UUID, db: Session = Depends(get_db)):
+    node = db.query(Node).filter(Node.id == node_id).one()
+    _attach_allocated_memory(db, [node])
+    return node
+
+
+@router.get("/nodes/{node_id}/workloads", response_model=list[schemas.WorkloadOut])
+def get_node_workloads(node_id: uuid.UUID, db: Session = Depends(get_db)):
+    return db.query(Workload).filter(Workload.node_id == node_id).order_by(Workload.vmid).all()
+
+
+@router.post("/nodes/{node_id}/ssh-host-key/probe", dependencies=[Depends(require_admin)])
+def probe_node_ssh_host_key(node_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Read-only network probe -- connects at the SSH transport level ONLY,
+    no authentication, and returns the fingerprint for the OPERATOR to
+    compare against the host's own console output. Never pins anything by
+    itself; see the PUT endpoint below."""
+    node = db.query(Node).filter(Node.id == node_id).one_or_none()
+    if node is None:
+        raise HTTPException(404, "node not found")
+    if not node.management_ip:
+        raise HTTPException(409, "no management_ip on record for this node yet -- run discovery first")
+    try:
+        key_type, key_base64, fingerprint = probe_host_key(node.management_ip)
+    except HostMaintenanceConnectionError as exc:
+        raise HTTPException(502, f"could not reach {node.management_ip}: {exc}")
+    return {"key_type": key_type, "key_base64": key_base64, "fingerprint": fingerprint}
+
+
+class PinHostKeyRequest(BaseModel):
+    key_type: str
+    key_base64: str
+
+
+@router.put("/nodes/{node_id}/ssh-host-key", dependencies=[Depends(require_admin)])
+def pin_node_ssh_host_key(
+    node_id: uuid.UUID, payload: PinHostKeyRequest,
+    user=Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Explicit, operator-confirmed pin -- the caller is expected to have
+    already compared the probe's fingerprint against the host's own
+    console output before calling this. Never invoked automatically by
+    anything else in this app."""
+    node = db.query(Node).filter(Node.id == node_id).one_or_none()
+    if node is None:
+        raise HTTPException(404, "node not found")
+    node.ssh_host_key_type = payload.key_type
+    node.ssh_host_key_base64 = payload.key_base64
+    node.ssh_host_key_fingerprint = "SHA256:" + base64.b64encode(
+        hashlib.sha256(base64.b64decode(payload.key_base64)).digest()
+    ).decode().rstrip("=")
+    node.ssh_host_key_pinned_at = datetime.now(timezone.utc)
+    node.ssh_host_key_pinned_by = user.email
+    write_audit_event(
+        db, event_category="credential", event_type="node.ssh_host_key_pinned",
+        actor=user.email, actor_type="user", site_id=node.site_id,
+        metadata={"node_id": str(node_id), "fingerprint": node.ssh_host_key_fingerprint},
+    )
+    db.commit()
+    return {"pinned": True, "fingerprint": node.ssh_host_key_fingerprint}
+
+
+@router.delete("/nodes/{node_id}/ssh-host-key", dependencies=[Depends(require_admin)])
+def disconnect_node_ssh_host_key(
+    node_id: uuid.UUID, user=Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """'Disconnect' -- app-side only. Clears the pinned host key, which
+    means PyXie's strict-pinning check refuses to reach this node again
+    until it's re-probed and re-pinned. Does NOT touch the node itself --
+    the pyxie-hostmaint user/wrapper/sudoers stay in place there until
+    someone runs uninstall.sh (see the host-maintenance-uninstall-script
+    endpoint on the pve-targets router). Reversible from the UI alone."""
+    node = db.query(Node).filter(Node.id == node_id).one_or_none()
+    if node is None:
+        raise HTTPException(404, "node not found")
+    was_pinned = bool(node.ssh_host_key_base64)
+    node.ssh_host_key_type = None
+    node.ssh_host_key_base64 = None
+    node.ssh_host_key_fingerprint = None
+    node.ssh_host_key_pinned_at = None
+    node.ssh_host_key_pinned_by = None
+    write_audit_event(
+        db, event_category="credential", event_type="node.ssh_host_key_unpinned",
+        actor=user.email, actor_type="user", site_id=node.site_id,
+        metadata={"node_id": str(node_id), "was_pinned": was_pinned},
+    )
+    db.commit()
+    return {"disconnected": True}
+
+
+@router.get("/nodes/{node_id}/host-maintenance-status")
+def get_node_host_maintenance_status(node_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Live readiness check for Stage W4 on this specific node -- never
+    cached, always a fresh (short-timeout) probe, since 'is this actually
+    reachable right now' is the whole point."""
+    node = db.query(Node).filter(Node.id == node_id).one_or_none()
+    if node is None:
+        raise HTTPException(404, "node not found")
+    cluster = db.query(Cluster).filter(Cluster.id == node.cluster_id).one()
+    target = db.query(PveTarget).filter(PveTarget.id == cluster.pve_target_id).one()
+
+    cred_row = (
+        db.query(HostMaintenanceCredential)
+        .filter(HostMaintenanceCredential.pve_target_id == target.id)
+        .one_or_none()
+    )
+    base = {
+        "node": node.name,
+        "credential_configured": cred_row is not None,
+        "management_ip_known": bool(node.management_ip),
+        "host_key_pinned": bool(node.ssh_host_key_base64),
+        "host_key_fingerprint": node.ssh_host_key_fingerprint,
+        "host_key_pinned_at": node.ssh_host_key_pinned_at,
+    }
+    if cred_row is None or not node.management_ip or not node.ssh_host_key_base64:
+        return {**base, "provisioned": False, "reachable": False}
+
+    try:
+        creds = load_host_maintenance_credentials(db, target, node)
+    except (CredentialNotConfigured, HostNotAddressable) as exc:
+        return {**base, "provisioned": False, "reachable": False, "error": str(exc)}
+
+    try:
+        with HostMaintenanceClient(creds, connect_timeout=5.0) as client:
+            version_info = client.version()
+            status_info = client.status()
+    except (HostKeyMismatchError, HostKeyNotPinnedError) as exc:
+        return {**base, "provisioned": True, "reachable": False, "error": f"HOST KEY MISMATCH: {exc}"}
+    except (HostMaintenanceConnectionError, HostMaintenanceProtocolError) as exc:
+        return {**base, "provisioned": True, "reachable": False, "error": str(exc)}
+
+    contract_version = version_info.get("contract_version")
+    return {
+        **base,
+        "provisioned": True,
+        "reachable": True,
+        "wrapper_version": version_info.get("wrapper_version"),
+        "contract_version": contract_version,
+        "contract_compatible": contract_version == SUPPORTED_CONTRACT_VERSION,
+        "capabilities": version_info.get("capabilities", []),
+        "kernel_version": status_info.get("kernel_version"),
+        "upgradable_count": status_info.get("upgradable_count"),
+        "reboot_required": status_info.get("reboot_required"),
+        "disk_free_bytes": status_info.get("disk_free_bytes"),
+        "status_checked_at": status_info.get("checked_at"),
+    }
+
+
+@router.get("/nodes/{node_id}/tasks", response_model=list[schemas.PveTaskOut])
+def get_node_tasks(node_id: uuid.UUID, db: Session = Depends(get_db)):
+    return (
+        db.query(PveTask)
+        .filter(PveTask.node_id == node_id)
+        .order_by(PveTask.started_at.desc().nullslast())
+        .limit(20)
+        .all()
+    )
+
+
+@router.get("/workloads", response_model=list[schemas.WorkloadOut])
+def list_workloads(db: Session = Depends(get_db), type: str | None = None):
+    q = db.query(Workload)
+    if type:
+        q = q.filter(Workload.type == type)
+    return q.order_by(Workload.vmid).all()
+
+
+@router.get("/workloads/latest-metrics")
+def workloads_latest_metrics(db: Session = Depends(get_db)):
+    """cpu_pct/mem_pct as of the most recent poll, keyed by workload id --
+    for quick-glance meters (Maintenance page). Not live -- same 'as of
+    last discovery cycle' freshness a node's own cpu_usage_pct/mem_usage_pct
+    columns already imply."""
+    return latest_workload_metrics(db)
+
+
+@router.get("/workloads/current-storage")
+def workloads_current_storage(db: Session = Depends(get_db)):
+    """Each VM's actual current storage, parsed live from its qemu config --
+    Storage isn't linked to a specific workload in the DB, only to a
+    node/scope, so this is the only way to know which storage a given VM's
+    disk(s) actually sit on right now. Batches one PVE client connection
+    per cluster (not per workload). LXC/unreadable-config workloads are
+    simply omitted, not reported as an error -- same fail-quiet-and-skip
+    posture as everywhere else this pattern is used."""
+    out: dict[str, dict] = {}
+    workloads = db.query(Workload).filter(Workload.is_missing.is_(False), Workload.type == "vm").all()
+    by_cluster: dict = {}
+    for w in workloads:
+        by_cluster.setdefault(w.cluster_id, []).append(w)
+
+    node_cache: dict = {}
+    storage_scope_cache: dict = {}
+
+    def scope_for(name: str, node_id) -> str | None:
+        key = (name, node_id)
+        if key not in storage_scope_cache:
+            row = (
+                db.query(Storage).filter(Storage.name == name, Storage.node_id == node_id).one_or_none()
+                or db.query(Storage).filter(Storage.name == name, Storage.scope == "cluster-shared").one_or_none()
+            )
+            storage_scope_cache[key] = row.scope if row else None
+        return storage_scope_cache[key]
+
+    for cluster_id, cluster_workloads in by_cluster.items():
+        cluster = db.query(Cluster).filter(Cluster.id == cluster_id).one_or_none()
+        if cluster is None:
+            continue
+        target = db.query(PveTarget).filter(PveTarget.id == cluster.pve_target_id).one_or_none()
+        if target is None:
+            continue
+        try:
+            client, _cred = build_pve_client(db, target)
+        except Exception:
+            continue
+        with client:
+            for w in cluster_workloads:
+                node = node_cache.get(w.node_id)
+                if node is None:
+                    node = db.query(Node).filter(Node.id == w.node_id).one_or_none()
+                    node_cache[w.node_id] = node
+                if node is None:
+                    continue
+                config = _qemu_config(client, node.name, w)
+                if config is None:
+                    continue
+                names = sorted(_workload_disk_storage_names(config))
+                if not names:
+                    continue
+                primary = names[0]
+                out[str(w.id)] = {"name": primary, "scope": scope_for(primary, node.id)}
+    return out
+
+
+class WorkloadPlacementProfileUpdate(BaseModel):
+    sensitivity: str | None = None  # standard | restricted
+    downtime_tolerance: str | None = None  # low | standard | high
+    placement_notes: str | None = None  # PyXie-only free text -- why, not synced from/to PVE
+    storage_preference: str | None = "__unset__"  # 'local' | 'shared' | null -- sentinel default lets a real null clear it explicitly
+    preferred_node_id: str | None = "__unset__"  # sticky soft preferred host (node UUID string), or null to clear it -- kept as str (not uuid.UUID) so the "__unset__" sentinel default doesn't fail UUID validation; parsed below
+
+
+@router.patch("/workloads/{workload_id}/placement-profile", response_model=schemas.WorkloadOut, dependencies=[Depends(require_admin)])
+def set_workload_placement_profile(
+    workload_id: uuid.UUID, payload: WorkloadPlacementProfileUpdate,
+    user=Depends(get_current_user), db: Session = Depends(get_db),
+):
+    if payload.sensitivity is not None and payload.sensitivity not in ("standard", "restricted"):
+        raise HTTPException(400, "sensitivity must be 'standard' or 'restricted'")
+    if payload.downtime_tolerance is not None and payload.downtime_tolerance not in ("low", "standard", "high"):
+        raise HTTPException(400, "downtime_tolerance must be 'low', 'standard', or 'high'")
+    if payload.storage_preference not in ("__unset__", None, "local", "shared"):
+        raise HTTPException(400, "storage_preference must be 'local', 'shared', or null")
+    wl = db.query(Workload).filter(Workload.id == workload_id).one_or_none()
+    if wl is None:
+        raise HTTPException(404, "workload not found")
+    preferred_node_id: uuid.UUID | None = None
+    if payload.preferred_node_id != "__unset__" and payload.preferred_node_id is not None:
+        try:
+            preferred_node_id = uuid.UUID(payload.preferred_node_id)
+        except ValueError:
+            raise HTTPException(400, "preferred_node_id must be a valid node UUID or null")
+        if db.query(Node).filter(Node.id == preferred_node_id, Node.cluster_id == wl.cluster_id).one_or_none() is None:
+            raise HTTPException(400, "preferred_node_id must be a node in this workload's own cluster")
+
+    before = {
+        "sensitivity": wl.sensitivity, "downtime_tolerance": wl.downtime_tolerance,
+        "placement_notes": wl.placement_notes, "storage_preference": wl.storage_preference,
+        "preferred_node_id": str(wl.preferred_node_id) if wl.preferred_node_id else None,
+    }
+    if payload.sensitivity is not None:
+        wl.sensitivity = payload.sensitivity
+    if payload.downtime_tolerance is not None:
+        wl.downtime_tolerance = payload.downtime_tolerance
+    if payload.placement_notes is not None:
+        wl.placement_notes = payload.placement_notes
+    if payload.storage_preference != "__unset__":
+        wl.storage_preference = payload.storage_preference
+    if payload.preferred_node_id != "__unset__":
+        wl.preferred_node_id = preferred_node_id
+    db.commit()
+    db.refresh(wl)
+    write_audit_event(
+        db, event_category="settings", event_type="workload.placement_profile_changed",
+        actor=user.email, actor_type="user", workload_id=wl.id,
+        state_before=before,
+        state_after={
+            "sensitivity": wl.sensitivity, "downtime_tolerance": wl.downtime_tolerance,
+            "placement_notes": wl.placement_notes, "storage_preference": wl.storage_preference,
+            "preferred_node_id": str(wl.preferred_node_id) if wl.preferred_node_id else None,
+        },
+    )
+    return wl
+
+
+@router.get("/storage", response_model=list[schemas.StorageOut])
+def list_storage(db: Session = Depends(get_db)):
+    return db.query(Storage).order_by(Storage.name).all()
+
+
+@router.get("/tasks", response_model=list[schemas.PveTaskOut])
+def list_tasks(db: Session = Depends(get_db), limit: int = 50):
+    return db.query(PveTask).order_by(PveTask.started_at.desc().nullslast()).limit(limit).all()
+
+
+@router.get("/dashboard/summary")
+def dashboard_summary(db: Session = Depends(get_db)):
+    clusters = db.query(Cluster).filter(Cluster.is_missing.is_(False)).all()
+    nodes = db.query(Node).filter(Node.is_missing.is_(False)).all()
+    workloads = db.query(Workload).filter(Workload.is_missing.is_(False)).all()
+    storage = db.query(Storage).filter(Storage.is_missing.is_(False)).all()
+
+    nodes_online = sum(1 for n in nodes if n.status == "online")
+    workloads_running = sum(1 for w in workloads if w.status == "running")
+    nodes_with_updates = sum(1 for n in nodes if (n.pending_updates or 0) > 0)
+    nodes_in_maintenance = sum(1 for n in nodes if n.maintenance_mode)
+
+    operations_awaiting_approval = (
+        db.query(func.count(Operation.id))
+        .filter(Operation.status == "awaiting_approval", Operation.dismissed.is_(False))
+        .scalar()
+    ) or 0
+
+    failed_tasks = (
+        db.query(func.count(PveTask.id))
+        .filter(PveTask.exit_status.isnot(None), PveTask.exit_status != "OK")
+        .scalar()
+    )
+
+    total_capacity = sum((s.capacity_bytes or 0) for s in storage)
+    total_used = sum((s.used_bytes or 0) for s in storage)
+    storage_pct = round(total_used / total_capacity * 100, 1) if total_capacity else None
+
+    cluster_status = "healthy"
+    for c in clusters:
+        if c.quorate is False:
+            cluster_status = "critical"
+            break
+    if cluster_status == "healthy" and nodes_online < len(nodes):
+        cluster_status = "warning"
+
+    return {
+        "counts": {
+            "clusters": len(clusters),
+            "nodes": len(nodes),
+            "vms": sum(1 for w in workloads if w.type == "vm"),
+            "containers": sum(1 for w in workloads if w.type == "lxc"),
+            "storage": len(storage),
+        },
+        "cluster_status": cluster_status,
+        "nodes_online": nodes_online,
+        "nodes_total": len(nodes),
+        "workloads_running": workloads_running,
+        "workloads_total": len(workloads),
+        "storage_used_pct": storage_pct,
+        "nodes_with_updates": nodes_with_updates,
+        "nodes_in_maintenance": nodes_in_maintenance,
+        "operations_awaiting_approval": operations_awaiting_approval,
+        "failed_tasks": failed_tasks or 0,
+        "nodes_detail": [
+            {
+                "id": str(n.id),
+                "name": n.name,
+                "status": n.status,
+                "cpu_usage_pct": n.cpu_usage_pct,
+                "mem_usage_pct": n.mem_usage_pct,
+                "pending_updates": n.pending_updates,
+                "maintenance_mode": n.maintenance_mode,
+            }
+            for n in sorted(nodes, key=lambda x: x.name)
+        ],
+    }
+
+
+
+@router.get("/settings", response_model=schemas.AppSettingsOut)
+def get_settings(db: Session = Depends(get_db)):
+    return db.query(AppSettings).filter(AppSettings.id == 1).one()
+
+
+@router.put("/settings", response_model=schemas.AppSettingsOut, dependencies=[Depends(require_admin)])
+def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(get_db)):
+    from pyxie_core.audit import write_audit_event
+
+    row = db.query(AppSettings).filter(AppSettings.id == 1).one()
+    before = {
+        "inventory_refresh_interval_seconds": row.inventory_refresh_interval_seconds,
+        "tls_verify_default": row.tls_verify_default,
+        "timezone": row.timezone,
+        "rightsizing_cpu_peak_target_pct": row.rightsizing_cpu_peak_target_pct,
+        "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
+        "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
+    }
+    for field, value in payload.model_dump(exclude_unset=True).items():
+        setattr(row, field, value)
+    db.commit()
+    db.refresh(row)
+    after = {
+        "inventory_refresh_interval_seconds": row.inventory_refresh_interval_seconds,
+        "tls_verify_default": row.tls_verify_default,
+        "timezone": row.timezone,
+        "rightsizing_cpu_peak_target_pct": row.rightsizing_cpu_peak_target_pct,
+        "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
+        "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
+    }
+    write_audit_event(
+        db,
+        event_category="settings",
+        event_type="settings.changed",
+        actor="user",
+        actor_type="user",
+        state_before=before,
+        state_after=after,
+    )
+    return row

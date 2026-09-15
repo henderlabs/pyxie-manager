@@ -1,0 +1,8 @@
+import { redirect } from "next/navigation";
+
+// Retired 2026-09-15 -- merged into Platform > Logging (Audit Log + PVE
+// Tasks + Internal Jobs, Event-Viewer-style channels on one page). Kept as
+// a redirect, not deleted, so old bookmarks/links don't 404.
+export default function TasksRedirect() {
+  redirect("/platform/logging?channel=tasks");
+}
