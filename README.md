@@ -33,7 +33,7 @@ The root `VERSION` file (plain text, e.g. `0.3.0`) is the single source of
 truth -- not an environment variable, which would let a running deployment's
 version silently drift from what's actually committed. `api/app/config.py`
 reads it directly at startup (`Settings.APP_VERSION`, surfaced via
-`GET /health` and the FastAPI app's own `version` field); `web/src/app/layout.tsx`
+`GET /api/health` and the FastAPI app's own `version` field); `web/src/app/layout.tsx`
 reads the same file server-side on every request and threads it down to the
 sidebar footer -- both always reflect exactly what's on disk, no rebuild
 required to pick up a bump. Follows semver (pre-1.0: breaking changes can
