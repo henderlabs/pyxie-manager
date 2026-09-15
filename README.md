@@ -13,6 +13,20 @@ rebalancing, per-workload NIC VLAN reassignment, and PBS backup-job
 membership -- see the Safety Contract section below for exactly how every
 one of those is gated.
 
+## Screenshots
+
+**Dashboard** -- cluster resource usage, environment health, and what needs attention right now:
+
+![Dashboard](docs/screenshots/dashboard.png)
+
+**Rightsizing** -- per-workload observation status with evidence-backed sizing suggestions:
+
+![Rightsizing](docs/screenshots/rightsizing.png)
+
+**Maintenance** -- node evacuation, guest lifecycle, host updates, and full maintenance runs, every action previewed before approval:
+
+![Maintenance](docs/screenshots/maintenance.png)
+
 ## Configuration
 
 Every environment-specific value (database connection, Redis connection,
