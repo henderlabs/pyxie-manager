@@ -76,7 +76,7 @@ def seed_defaults(db: Session):
 
     settings_row = db.query(AppSettings).filter(AppSettings.id == 1).one_or_none()
     if settings_row is None:
-        settings_row = AppSettings(id=1, organization_name=org.name, site_name=site.name)
+        settings_row = AppSettings(id=1)
         db.add(settings_row)
 
     for scope_type, key, value in DEFAULT_POLICIES:
