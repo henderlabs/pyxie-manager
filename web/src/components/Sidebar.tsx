@@ -61,7 +61,7 @@ const SECTIONS: NavSection[] = [
   },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ version }: { version: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const [me, setMe] = useState<{ email: string; display_name: string | null; is_admin: boolean } | null>(null);
@@ -173,6 +173,7 @@ export default function Sidebar() {
           <span className="text-muted">Read-only</span>
         )}
       </div>
+      <div className="px-4 py-1.5 text-[10px] text-muted/50 tracking-wide">v{version}</div>
     </aside>
   );
 }

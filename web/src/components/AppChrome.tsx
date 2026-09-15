@@ -6,7 +6,7 @@ import TaskPanel, { PANEL_WIDTH_PX } from "@/components/TaskPanel";
 
 const PIN_STORAGE_KEY = "pyxie.taskpanel.pinned";
 
-export default function AppChrome({ children }: { children: React.ReactNode }) {
+export default function AppChrome({ children, version }: { children: React.ReactNode; version: string }) {
   const [pinned, setPinned] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -31,7 +31,7 @@ export default function AppChrome({ children }: { children: React.ReactNode }) {
 
   return (
     <>
-      <Sidebar />
+      <Sidebar version={version} />
       <main
         className="flex-1 min-w-0 p-6 transition-[margin-right] duration-200 ease-out"
         style={{ marginRight: reserved ? PANEL_WIDTH_PX : 0 }}

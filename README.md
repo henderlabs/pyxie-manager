@@ -27,6 +27,22 @@ one of those is gated.
 
 ![Maintenance](docs/screenshots/maintenance.png)
 
+## Versioning
+
+The root `VERSION` file (plain text, e.g. `0.3.0`) is the single source of
+truth -- not an environment variable, which would let a running deployment's
+version silently drift from what's actually committed. `api/app/config.py`
+reads it directly at startup (`Settings.APP_VERSION`, surfaced via
+`GET /health` and the FastAPI app's own `version` field); `web/src/app/layout.tsx`
+reads the same file server-side on every request and threads it down to the
+sidebar footer -- both always reflect exactly what's on disk, no rebuild
+required to pick up a bump. Follows semver (pre-1.0: breaking changes can
+still happen between minor bumps). Every version bump gets a matching
+annotated git tag (`vX.Y.Z`) pushed to GitHub, so `git tag`/the repo's Tags
+page is the authoritative version history across every deployment running
+this codebase -- multiple independent deployments can be on different
+versions at different times, and the tag is how you know which is which.
+
 ## Configuration
 
 Every environment-specific value (database connection, Redis connection,
