@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Node, StorageItem, Workload } from "@/lib/api";
 import OperationCard from "@/components/OperationCard";
+import WorkloadSearchSelect from "@/components/WorkloadSearchSelect";
 import { Table } from "@/components/Table";
 import { Meter } from "@/components/Gauges";
 import { useOperationPolling } from "@/lib/useOperationPolling";
@@ -101,7 +102,7 @@ export default function WorkloadLifecycleForm({
 
   const [filterByNode, setFilterByNode] = useState(true);
   const [workloadId, setWorkloadId] = useState(initialWorkloadId || "");
-  const [action, setAction] = useState("shutdown");
+  const [action, setAction] = useState("");
   const [timeoutSeconds, setTimeoutSeconds] = useState(120);
   const [justification, setJustification] = useState("");
   const [destNodeId, setDestNodeId] = useState("");
@@ -247,7 +248,7 @@ export default function WorkloadLifecycleForm({
         <span className="text-xs text-muted">{visibleVms.length} VM{visibleVms.length === 1 ? "" : "s"}</span>
       </div>
 
-      <div className="max-h-72 overflow-y-auto" ref={tableScrollRef}>
+      <div className="max-h-[34rem] overflow-y-auto" ref={tableScrollRef}>
         <Table
           rows={visibleVms}
           emptyMessage={filterByNode && selectedNodeIds.length > 0 ? "No VMs on the selected node(s)." : "No VMs."}
@@ -314,18 +315,7 @@ export default function WorkloadLifecycleForm({
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <label className="block text-xs text-muted mb-1">Workload</label>
-          <select
-            className="bg-surface2 border border-border rounded px-2 py-1.5 text-sm min-w-[200px]"
-            value={workloadId}
-            onChange={(e) => selectWorkload(e.target.value)}
-          >
-            <option value="">Select a VM…</option>
-            {vms.map((w) => (
-              <option key={w.id} value={w.id}>
-                {w.name ? `${w.name} (vmid ${w.vmid})` : `vmid ${w.vmid}`} · {w.status}
-              </option>
-            ))}
-          </select>
+          <WorkloadSearchSelect vms={vms} value={workloadId} onChange={selectWorkload} />
         </div>
         <div>
           <label className="block text-xs text-muted mb-1">Action</label>
@@ -337,6 +327,7 @@ export default function WorkloadLifecycleForm({
               setOp(null);
             }}
           >
+            <option value="">Select an action…</option>
             <option value="shutdown">Graceful Shutdown</option>
             <option value="start">Start</option>
             <option value="force_stop">Force Stop (higher-risk)</option>
@@ -410,6 +401,7 @@ export default function WorkloadLifecycleForm({
           onClick={runDryRun}
           disabled={
             !workloadId ||
+            !action ||
             pending ||
             (action === "force_stop" && !justification.trim()) ||
             (action === "move" && !destNodeId)
@@ -419,7 +411,11 @@ export default function WorkloadLifecycleForm({
         >
           Preview
         </button>
-        {!workloadId && <p className="text-xs text-muted w-full">Select a VM above to enable Preview.</p>}
+        {!workloadId ? (
+          <p className="text-xs text-muted w-full">Select a VM above to enable Preview.</p>
+        ) : !action ? (
+          <p className="text-xs text-muted w-full">Select an action above to enable Preview.</p>
+        ) : null}
       </div>
       )}
 
