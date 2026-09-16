@@ -93,6 +93,10 @@ export default function PveTargetForm({ sites }: { sites: Site[] }) {
           placeholder="e.g. Main Cluster"
         />
       </Field>
+      <div className="text-xs text-muted -mt-2">
+        Your own label for this connection -- not required to match the PVE cluster's real name, which PyXie
+        auto-detects on first sync.
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Hostname / IP">
           <input
@@ -111,6 +115,10 @@ export default function PveTargetForm({ sites }: { sites: Site[] }) {
             className="input"
           />
         </Field>
+      </div>
+      <div className="text-xs text-muted -mt-2">
+        Any one node in the cluster -- PyXie reads cluster-wide state from a single node's API and discovers the
+        rest (other nodes, VMs, storage) from there.
       </div>
       <label className="flex items-center gap-2 text-sm text-text">
         <input type="checkbox" checked={form.tls_verify} onChange={(e) => update("tls_verify", e.target.checked)} />
