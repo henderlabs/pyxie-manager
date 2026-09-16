@@ -70,8 +70,12 @@ the ONLY module in this codebase allowed to issue a write request against
 PVE -- `pve_client.py` stays GET-only by design. Every write goes through
 two independent guardrails checked on every call, not just at startup:
 
-1. **`PVE_MUTATIONS_ENABLED` must be exactly `"true"`.** A global kill
-   switch.
+1. **"Allow PyXie to write to Proxmox VE" must be turned on**, under
+   Platform -> Settings. A global kill switch -- backed by
+   `app_settings.pve_mutations_enabled`, not an env var (it used to be
+   `PVE_MUTATIONS_ENABLED` in `.env`; moved to a live Settings toggle so
+   it doesn't need a redeploy to change), and re-checked fresh on every
+   single write call, not cached from operation-creation time.
 2. **The credential used must come from the `maintenance` slot**, never
    `inventory` -- the two are loaded through separate code paths on
    purpose, so they can never accidentally cross.

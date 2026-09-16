@@ -148,9 +148,10 @@ REDIS_URL=redis://127.0.0.1:6379/0
 
 PYXIE_CREDENTIAL_KEY=${FERNET_KEY}
 
-# Keep false until you've deliberately decided to allow PyXie to submit
-# writes to PVE -- see README.md "Safety Contract for every PVE write".
-PVE_MUTATIONS_ENABLED=false
+# The write-capability kill switch is a Settings-page toggle now, not an
+# env var -- defaults to off (app_settings.pve_mutations_enabled=false)
+# until deliberately turned on under Platform > Settings. See README.md
+# "Safety Contract for every PVE write".
 
 TZ=${TZ_DETECTED}
 API_INTERNAL_URL=http://127.0.0.1:8000
