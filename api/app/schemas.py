@@ -166,6 +166,13 @@ class PveTargetCreate(BaseModel):
     token_secret: str
 
 
+class PveTargetUpdate(BaseModel):
+    name: str
+    hostname: str
+    api_port: int = 8006
+    tls_verify: bool = True
+
+
 class CredentialOut(OrmModel):
     id: uuid.UUID
     pve_target_id: uuid.UUID
@@ -180,6 +187,12 @@ class CredentialOut(OrmModel):
 
 class CredentialCreate(BaseModel):
     slot_name: str  # inventory | maintenance | administrative
+    token_user: str
+    token_id: str
+    token_secret: str
+
+
+class CredentialUpdate(BaseModel):
     token_user: str
     token_id: str
     token_secret: str

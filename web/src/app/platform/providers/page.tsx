@@ -2,8 +2,8 @@ import { apiFetch } from "@/lib/api";
 import type { Organization, Provider, PveTarget, Site } from "@/lib/api";
 import { Card, CardTitle, PageHeader } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
-import ActionButton from "@/components/ActionButton";
 import PveTargetForm from "@/components/PveTargetForm";
+import PveTargetRow from "@/components/PveTargetRow";
 import AddSiteForm from "@/components/AddSiteForm";
 import SiteRow from "@/components/SiteRow";
 import { PlugIcon } from "@/components/Icons";
@@ -61,18 +61,7 @@ export default async function ProvidersPage() {
 
         <div className="mt-3 space-y-3">
           {targets.map((t) => (
-            <div key={t.id} className="flex items-center justify-between bg-surface2 rounded p-3">
-              <div>
-                <div className="text-sm text-text">{t.name}</div>
-                <div className="text-xs text-muted">
-                  {t.hostname}:{t.api_port} · TLS {t.tls_verify ? "verified" : "not verified"}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <ActionButton href={`/api/pve-targets/${t.id}/test-connection`} label="Test Connection" />
-                <ActionButton href={`/api/pve-targets/${t.id}/discover`} label="Sync Now" variant="primary" />
-              </div>
-            </div>
+            <PveTargetRow key={t.id} target={t} />
           ))}
         </div>
 

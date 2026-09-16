@@ -4,6 +4,7 @@ import { Card, CardTitle, EmptyState, PageHeader } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import HostMaintenanceSetup from "@/components/HostMaintenanceSetup";
 import AddCredentialForm from "@/components/AddCredentialForm";
+import EditCredentialForm from "@/components/EditCredentialForm";
 import { KeyIcon } from "@/components/Icons";
 import Link from "next/link";
 
@@ -51,18 +52,21 @@ export default async function CredentialsPage() {
           <CardTitle>{t.name}</CardTitle>
           <div className="divide-y divide-border mb-4">
             {credentialsByTarget[i].map((c) => (
-              <div key={c.id} className="flex items-center justify-between py-2 text-sm">
-                <div>
-                  <div className="text-text font-medium">{c.slot_name}</div>
+              <div key={c.id} className="py-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-text font-medium">{c.slot_name}</div>
+                    <div className="text-xs text-muted">
+                      {c.token_user}!{c.token_id}
+                    </div>
+                  </div>
+                  <div className="text-xs text-muted font-mono">{c.masked_secret}</div>
+                  <StatusBadge status={c.status} />
                   <div className="text-xs text-muted">
-                    {c.token_user}!{c.token_id}
+                    {c.last_validated_at ? `validated ${new Date(c.last_validated_at).toLocaleString()}` : "never validated"}
                   </div>
                 </div>
-                <div className="text-xs text-muted font-mono">{c.masked_secret}</div>
-                <StatusBadge status={c.status} />
-                <div className="text-xs text-muted">
-                  {c.last_validated_at ? `validated ${new Date(c.last_validated_at).toLocaleString()}` : "never validated"}
-                </div>
+                <EditCredentialForm targetId={t.id} credential={c} />
               </div>
             ))}
           </div>
