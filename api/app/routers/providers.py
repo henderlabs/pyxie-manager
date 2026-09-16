@@ -1,6 +1,7 @@
 import io
 import tarfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -11,18 +12,22 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from pyxie_core.audit import write_audit_event
+from pyxie_core.credentials import CredentialNotConfigured, load_pve_credentials
 from pyxie_core.crypto import decrypt_secret, encrypt_secret, mask_secret
 from pyxie_core.discovery import run_discovery
 from pyxie_core.host_maintenance_client import derive_public_key_line
 from pyxie_core.models import (
     Capability,
     CapabilityGrant,
+    Cluster,
     HostMaintenanceCredential,
+    Node,
     Provider,
     ProviderCapability,
     PveCredential,
     PveTarget,
 )
+from pyxie_core.pve_client import PveClient
 
 # Resolves to <api>/host_maintenance_kit regardless of where <api> actually
 # lives on disk (Docker's /app or a native install's own path) -- this file
@@ -284,6 +289,75 @@ def update_credential(
     item = schemas.CredentialOut.model_validate(cred)
     item.masked_secret = mask_secret(payload.token_secret)
     return item
+
+
+@router.post(
+    "/pve-targets/{target_id}/credentials/{credential_id}/test-connection",
+    dependencies=[Depends(require_admin)],
+)
+def test_credential(target_id: uuid.UUID, credential_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Validate one specific credential slot against live PVE. The target-
+    level test-connection/discover only ever exercises and marks the
+    `inventory` slot valid -- `maintenance`/`administrative` tokens had no
+    path to leave 'untested' even when correctly configured and working.
+
+    For `maintenance`/`administrative`, base connectivity alone isn't a
+    meaningful check -- PVE's own API quirk means even reading pending
+    updates requires Sys.Modify, not just Sys.Audit, so a successful call
+    to that endpoint specifically proves the elevated grant these slots
+    exist for, not just that the token authenticates at all."""
+    cred = (
+        db.query(PveCredential)
+        .filter(PveCredential.id == credential_id, PveCredential.pve_target_id == target_id)
+        .one_or_none()
+    )
+    if cred is None:
+        raise HTTPException(404, "credential not found")
+    target = db.query(PveTarget).filter(PveTarget.id == target_id).one_or_none()
+    if target is None:
+        raise HTTPException(404, "pve target not found")
+
+    try:
+        creds = load_pve_credentials(db, target, cred.slot_name)
+    except CredentialNotConfigured:
+        raise HTTPException(404, "credential not found")
+
+    try:
+        client = PveClient(creds)
+        with client:
+            client.version()
+            if cred.slot_name == "inventory":
+                client.cluster_status()
+                ok = True
+            else:
+                cluster = db.query(Cluster).filter(Cluster.pve_target_id == target_id).first()
+                node = db.query(Node).filter(Node.cluster_id == cluster.id).first() if cluster else None
+                # Nothing discovered yet to test the elevated privilege
+                # against -- base auth succeeding is the best available
+                # signal until a discovery run gives us a real node.
+                ok = True if node is None else client.node_apt_update_count(node.name) is not None
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+    if not ok:
+        return {
+            "status": "failed",
+            "error": "authenticated, but the expected privilege check failed -- confirm the PVE role grant for this token",
+        }
+
+    cred.status = "valid"
+    cred.last_validated_at = datetime.now(timezone.utc)
+    write_audit_event(
+        db,
+        event_category="credential",
+        event_type="credential.connection_tested",
+        actor="user",
+        actor_type="user",
+        provider_id=target.provider_id,
+        metadata={"pve_target_id": str(target_id), "slot_name": cred.slot_name},
+    )
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/pve-targets/{target_id}/host-maintenance-credential", response_model=Optional[schemas.HostMaintenanceCredentialOut])

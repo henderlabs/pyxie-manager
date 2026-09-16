@@ -2,6 +2,7 @@ import { apiFetch } from "@/lib/api";
 import type { Cluster, Credential, HostMaintenanceCredentialRecord, Node, PveTarget } from "@/lib/api";
 import { Card, CardTitle, EmptyState, PageHeader } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
+import ActionButton from "@/components/ActionButton";
 import HostMaintenanceSetup from "@/components/HostMaintenanceSetup";
 import AddCredentialForm from "@/components/AddCredentialForm";
 import EditCredentialForm from "@/components/EditCredentialForm";
@@ -65,6 +66,7 @@ export default async function CredentialsPage() {
                   <div className="text-xs text-muted">
                     {c.last_validated_at ? `validated ${new Date(c.last_validated_at).toLocaleString()}` : "never validated"}
                   </div>
+                  <ActionButton href={`/api/pve-targets/${t.id}/credentials/${c.id}/test-connection`} label="Test Connection" />
                 </div>
                 <EditCredentialForm targetId={t.id} credential={c} />
               </div>
