@@ -65,6 +65,22 @@ def upgrade():
     )
 
     conn = op.get_bind()
+
+    # The capabilities insert below has a FK to provider_categories.id='protection'.
+    # That category is normally seeded by api/app/seed.py's own seed_defaults()
+    # at app startup -- but on a genuinely fresh deploy (initial `alembic upgrade
+    # head` before the app has ever run once), this migration executes first and
+    # that row doesn't exist yet, so the capabilities insert below fails its FK
+    # constraint. Idempotent, matches PROVIDER_CATEGORIES in
+    # shared/pyxie_core/seed_data.py -- seed_defaults() re-running later is a
+    # harmless no-op against an already-present row.
+    conn.execute(
+        sa.text(
+            "INSERT INTO provider_categories (id, description) "
+            "VALUES ('protection', 'Backup and data protection') ON CONFLICT (id) DO NOTHING"
+        )
+    )
+
     conn.execute(
         sa.text(
             "INSERT INTO capabilities (id, category_id, description, created_at) "
