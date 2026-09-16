@@ -107,7 +107,12 @@ export const OPERATION_TYPE_LABELS: Record<string, string> = {
 function operationSummary(op: Operation): string {
   const r = op.dry_run_result;
   if (op.operation_type_id === "vm.live_migrate") {
-    return `${r?.workload_name || `vmid ${r?.vmid}`}${r?.workload_name ? ` (vmid ${r?.vmid})` : ""} — ${r?.source_node} → ${r?.target_node}${r?.target_storage ? ` · storage → ${r.target_storage}` : ""}`;
+    const storagePart = r?.target_storage
+      ? ` · storage → ${r.target_storage}`
+      : r?.current_storage
+      ? ` · storage: ${r.current_storage} (unchanged)`
+      : "";
+    return `${r?.workload_name || `vmid ${r?.vmid}`}${r?.workload_name ? ` (vmid ${r?.vmid})` : ""} — ${r?.source_node} → ${r?.target_node}${storagePart}`;
   }
   if (op.operation_type_id === "host.update") {
     const count = r?.planned_package_count;
