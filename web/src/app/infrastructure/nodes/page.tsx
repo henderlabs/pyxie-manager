@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/api";
 import type { Cluster, Node, PolicyRow, Site, StorageItem, Workload } from "@/lib/api";
-import { Card, CardTitle, EmptyState, PageHeader, StatTile } from "@/components/Card";
+import { Card, CardTitle, EmptyState, NoInfrastructureHint, PageHeader, StatTile } from "@/components/Card";
 import NodesTable, { type TierSuggestion } from "@/components/tables/NodesTable";
 import ClusterStoragePreference from "@/components/ClusterStoragePreference";
 import StatusBadge from "@/components/StatusBadge";
@@ -75,7 +75,7 @@ async function ClusterOverview({ clusterId }: { clusterId?: string }) {
   ]);
 
   const cluster = clusters.find((c) => c.id === (clusterId ?? clusters[0]?.id));
-  if (!cluster) return <EmptyState message="No clusters discovered yet." />;
+  if (!cluster) return <EmptyState message={<NoInfrastructureHint subject="clusters" />} />;
 
   const clusterNodes = nodes.filter((n) => n.cluster_id === cluster.id);
   const clusterWorkloads = workloads.filter((w) => w.cluster_id === cluster.id);

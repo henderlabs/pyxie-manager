@@ -166,6 +166,13 @@ class PveTargetCreate(BaseModel):
     token_secret: str
 
 
+class PveTargetUpdate(BaseModel):
+    name: str
+    hostname: str
+    api_port: int = 8006
+    tls_verify: bool = True
+
+
 class CredentialOut(OrmModel):
     id: uuid.UUID
     pve_target_id: uuid.UUID
@@ -180,6 +187,12 @@ class CredentialOut(OrmModel):
 
 class CredentialCreate(BaseModel):
     slot_name: str  # inventory | maintenance | administrative
+    token_user: str
+    token_id: str
+    token_secret: str
+
+
+class CredentialUpdate(BaseModel):
     token_user: str
     token_id: str
     token_secret: str
@@ -229,6 +242,7 @@ class AppSettingsOut(OrmModel):
     rightsizing_cpu_peak_target_pct: int
     rightsizing_mem_peak_target_pct: int
     rightsizing_round_vcpu_even: bool
+    pve_mutations_enabled: bool
 
 
 class AppSettingsUpdate(BaseModel):
@@ -238,3 +252,4 @@ class AppSettingsUpdate(BaseModel):
     rightsizing_cpu_peak_target_pct: Optional[int] = None
     rightsizing_mem_peak_target_pct: Optional[int] = None
     rightsizing_round_vcpu_even: Optional[bool] = None
+    pve_mutations_enabled: Optional[bool] = None

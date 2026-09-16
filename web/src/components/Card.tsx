@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return <div className={`bg-surface border border-border rounded-lg p-4 ${className}`}>{children}</div>;
 }
@@ -29,8 +31,23 @@ export function StatTile({
   );
 }
 
-export function EmptyState({ message }: { message: string }) {
+export function EmptyState({ message }: { message: React.ReactNode }) {
   return <div className="text-sm text-muted text-center py-10">{message}</div>;
+}
+
+/** Standard "nothing discovered yet" copy for a page that depends on a PVE
+ * target being configured -- points a brand-new deployment at the one setup
+ * step it's actually missing, instead of leaving a bare "no data" message. */
+export function NoInfrastructureHint({ subject }: { subject: string }) {
+  return (
+    <>
+      No {subject} discovered yet.{" "}
+      <Link href="/platform/providers" className="text-accent hover:underline">
+        Configure a PVE target
+      </Link>
+      .
+    </>
+  );
 }
 
 export function PageHeader({

@@ -107,7 +107,12 @@ export const OPERATION_TYPE_LABELS: Record<string, string> = {
 function operationSummary(op: Operation): string {
   const r = op.dry_run_result;
   if (op.operation_type_id === "vm.live_migrate") {
-    return `${r?.workload_name || `vmid ${r?.vmid}`}${r?.workload_name ? ` (vmid ${r?.vmid})` : ""} — ${r?.source_node} → ${r?.target_node}${r?.target_storage ? ` · storage → ${r.target_storage}` : ""}`;
+    const storagePart = r?.target_storage
+      ? ` · storage → ${r.target_storage}`
+      : r?.current_storage
+      ? ` · storage: ${r.current_storage} (unchanged)`
+      : "";
+    return `${r?.workload_name || `vmid ${r?.vmid}`}${r?.workload_name ? ` (vmid ${r?.vmid})` : ""} — ${r?.source_node} → ${r?.target_node}${storagePart}`;
   }
   if (op.operation_type_id === "host.update") {
     const count = r?.planned_package_count;
@@ -197,6 +202,7 @@ type MigratePlanItem = {
   destination_node_id: string; destination_node: string;
   candidates?: PlanCandidate[];
   currently_on_shared?: boolean;
+  current_storage?: string | null;
   // "shutdown_in_place" opts a workload that DOES have a clean auto-found
   // destination out of migrating at all -- just power it off for the
   // maintenance window and back on here afterward (node.exit_maintenance's
@@ -400,6 +406,14 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
         {plan.map((item) => (
           <div key={item.workload_id} className="flex items-center justify-between px-2 py-1.5 text-xs gap-2">
             <span className="text-text truncate flex-1 min-w-0">{item.name || `vmid ${item.vmid}`}</span>
+            {item.current_storage && (
+              <span
+                className="text-muted shrink-0 hidden sm:inline"
+                title={`Current storage${item.currently_on_shared ? " (shared -- reachable from any node)" : " (node-local)"}`}
+              >
+                on {item.current_storage}
+              </span>
+            )}
             <select
               value={item.transport || "live"}
               disabled={savingId === item.workload_id || op.status !== "awaiting_approval" || !isAdmin}
@@ -615,7 +629,7 @@ export default function OperationCard({
 
 type PlannedPackage = { package: string; current_version: string | null; new_version: string };
 
-function HostUpdatePlan({ result }: { result: NonNullable<Operation["dry_run_result"]> }) {
+export function HostUpdatePlan({ result }: { result: NonNullable<Operation["dry_run_result"]> }) {
   const packages = (result.planned_packages as PlannedPackage[] | undefined) || [];
   const kernel = result.kernel_version as string | undefined;
   const diskFree = result.disk_free_bytes as number | null | undefined;

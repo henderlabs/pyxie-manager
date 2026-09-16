@@ -51,6 +51,7 @@ from .locks import LockContention, acquire_lock, release_locks_for_operation
 from .maintenance import (
     _has_pci_passthrough,
     _qemu_config,
+    _workload_disk_storage_names,
     check_crs_affinity,
     check_cpu_compatibility,
     workload_node_local_disk_storages,
@@ -167,6 +168,8 @@ def _evaluate_migration_hard_blocks(
             except Exception:
                 expected_disk_bytes = None
         config = _qemu_config(client, source_node.name, workload)
+        current_storage_names = sorted(_workload_disk_storage_names(config)) if config else []
+        extra["current_storage"] = current_storage_names[0] if current_storage_names else None
         node_local_disks = workload_node_local_disk_storages(db, source_node, config)
         node_local_storage = node_local_disks is None or len(node_local_disks) > 0
         if node_local_storage:
@@ -348,6 +351,7 @@ def dry_run_migration(
         "source_node": source_node.name,
         "target_node": destination_node.name,
         "target_storage": destination_storage.name if destination_storage else None,
+        "current_storage": extra.get("current_storage"),
         "vmid": workload.vmid,
         "workload_name": workload.name,
         "transport": transport,

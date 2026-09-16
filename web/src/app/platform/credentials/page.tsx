@@ -2,9 +2,12 @@ import { apiFetch } from "@/lib/api";
 import type { Cluster, Credential, HostMaintenanceCredentialRecord, Node, PveTarget } from "@/lib/api";
 import { Card, CardTitle, EmptyState, PageHeader } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
+import ActionButton from "@/components/ActionButton";
 import HostMaintenanceSetup from "@/components/HostMaintenanceSetup";
 import AddCredentialForm from "@/components/AddCredentialForm";
+import EditCredentialForm from "@/components/EditCredentialForm";
 import { KeyIcon } from "@/components/Icons";
+import Link from "next/link";
 
 export default async function CredentialsPage() {
   const [targets, clusters, nodes] = await Promise.all([
@@ -32,7 +35,17 @@ export default async function CredentialsPage() {
       <PageHeader title="Credentials" subtitle="One API token per access level (credential purpose), per PVE target — secret material is never redisplayed" icon={<KeyIcon className="w-5 h-5" />} />
       {targets.length === 0 && (
         <Card>
-          <EmptyState message="No PVE targets configured yet." />
+          <EmptyState
+            message={
+              <>
+                No PVE targets configured yet.{" "}
+                <Link href="/platform/providers" className="text-accent hover:underline">
+                  Add one under Integrations
+                </Link>
+                .
+              </>
+            }
+          />
         </Card>
       )}
       {targets.map((t, i) => (
@@ -40,18 +53,22 @@ export default async function CredentialsPage() {
           <CardTitle>{t.name}</CardTitle>
           <div className="divide-y divide-border mb-4">
             {credentialsByTarget[i].map((c) => (
-              <div key={c.id} className="flex items-center justify-between py-2 text-sm">
-                <div>
-                  <div className="text-text font-medium">{c.slot_name}</div>
-                  <div className="text-xs text-muted">
-                    {c.token_user}!{c.token_id}
+              <div key={c.id} className="py-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-text font-medium">{c.slot_name}</div>
+                    <div className="text-xs text-muted">
+                      {c.token_user}!{c.token_id}
+                    </div>
                   </div>
+                  <div className="text-xs text-muted font-mono">{c.masked_secret}</div>
+                  <StatusBadge status={c.status} />
+                  <div className="text-xs text-muted">
+                    {c.last_validated_at ? `validated ${new Date(c.last_validated_at).toLocaleString()}` : "never validated"}
+                  </div>
+                  <ActionButton href={`/api/pve-targets/${t.id}/credentials/${c.id}/test-connection`} label="Test Connection" />
                 </div>
-                <div className="text-xs text-muted font-mono">{c.masked_secret}</div>
-                <StatusBadge status={c.status} />
-                <div className="text-xs text-muted">
-                  {c.last_validated_at ? `validated ${new Date(c.last_validated_at).toLocaleString()}` : "never validated"}
-                </div>
+                <EditCredentialForm targetId={t.id} credential={c} />
               </div>
             ))}
           </div>

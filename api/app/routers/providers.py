@@ -1,6 +1,7 @@
 import io
 import tarfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -11,18 +12,22 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from pyxie_core.audit import write_audit_event
+from pyxie_core.credentials import CredentialNotConfigured, load_pve_credentials
 from pyxie_core.crypto import decrypt_secret, encrypt_secret, mask_secret
 from pyxie_core.discovery import run_discovery
 from pyxie_core.host_maintenance_client import derive_public_key_line
 from pyxie_core.models import (
     Capability,
     CapabilityGrant,
+    Cluster,
     HostMaintenanceCredential,
+    Node,
     Provider,
     ProviderCapability,
     PveCredential,
     PveTarget,
 )
+from pyxie_core.pve_client import PveClient
 
 # Resolves to <api>/host_maintenance_kit regardless of where <api> actually
 # lives on disk (Docker's /app or a native install's own path) -- this file
@@ -137,6 +142,44 @@ def create_pve_target(payload: schemas.PveTargetCreate, db: Session = Depends(ge
     return target
 
 
+@router.patch("/pve-targets/{target_id}", response_model=schemas.PveTargetOut, dependencies=[Depends(require_admin)])
+def update_pve_target(
+    target_id: uuid.UUID, payload: schemas.PveTargetUpdate,
+    user=Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Edit an existing target's connection settings (name, hostname, API port,
+    TLS verification). Previously there was no path to fix any of these after
+    creation -- e.g. a self-signed PVE cert failing tls_verify meant deleting
+    and recreating the whole target, losing its credentials too."""
+    target = db.query(PveTarget).filter(PveTarget.id == target_id).one_or_none()
+    if target is None:
+        raise HTTPException(404, "PVE target not found")
+
+    before = {"name": target.name, "hostname": target.hostname, "api_port": target.api_port, "tls_verify": target.tls_verify}
+    target.name = payload.name
+    target.hostname = payload.hostname
+    target.api_port = payload.api_port
+    target.tls_verify = payload.tls_verify
+
+    provider = db.query(Provider).filter(Provider.id == target.provider_id).one_or_none()
+    if provider is not None:
+        provider.instance_name = payload.name
+
+    write_audit_event(
+        db,
+        event_category="provider",
+        event_type="pve_target.updated",
+        actor=user.email, actor_type="user",
+        site_id=target.site_id,
+        provider_id=target.provider_id,
+        state_before=before,
+        state_after={"name": payload.name, "hostname": payload.hostname, "api_port": payload.api_port, "tls_verify": payload.tls_verify},
+    )
+    db.commit()
+    db.refresh(target)
+    return target
+
+
 @router.get("/pve-targets/{target_id}/credentials", response_model=list[schemas.CredentialOut])
 def list_credentials(target_id: uuid.UUID, db: Session = Depends(get_db)):
     creds = db.query(PveCredential).filter(PveCredential.pve_target_id == target_id).all()
@@ -200,6 +243,121 @@ def create_credential(
     item = schemas.CredentialOut.model_validate(cred)
     item.masked_secret = mask_secret(payload.token_secret)
     return item
+
+
+@router.patch(
+    "/pve-targets/{target_id}/credentials/{credential_id}",
+    response_model=schemas.CredentialOut,
+    dependencies=[Depends(require_admin)],
+)
+def update_credential(
+    target_id: uuid.UUID, credential_id: uuid.UUID, payload: schemas.CredentialUpdate,
+    user=Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Rotate an existing credential slot's token (user/ID/secret) -- e.g. a
+    mistyped secret during onboarding, or a token regenerated on the PVE side.
+    Previously the only way to fix a bad secret was direct DB access; a slot
+    still can't be renamed to a different slot_name here, only its token
+    material replaced. Resets status to 'untested' since the new key hasn't
+    been proven against PVE yet."""
+    cred = (
+        db.query(PveCredential)
+        .filter(PveCredential.id == credential_id, PveCredential.pve_target_id == target_id)
+        .one_or_none()
+    )
+    if cred is None:
+        raise HTTPException(404, "credential not found")
+
+    target = db.query(PveTarget).filter(PveTarget.id == target_id).one_or_none()
+
+    cred.token_user = payload.token_user
+    cred.token_id = payload.token_id
+    cred.encrypted_secret = encrypt_secret(payload.token_secret)
+    cred.status = "untested"
+    cred.last_validated_at = None
+
+    write_audit_event(
+        db,
+        event_category="credential",
+        event_type="credential.updated",
+        actor=user.email, actor_type="user",
+        provider_id=target.provider_id if target else None,
+        metadata={"pve_target_id": str(target_id), "slot_name": cred.slot_name, "token_user": payload.token_user},
+    )
+    db.commit()
+    db.refresh(cred)
+    item = schemas.CredentialOut.model_validate(cred)
+    item.masked_secret = mask_secret(payload.token_secret)
+    return item
+
+
+@router.post(
+    "/pve-targets/{target_id}/credentials/{credential_id}/test-connection",
+    dependencies=[Depends(require_admin)],
+)
+def test_credential(target_id: uuid.UUID, credential_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Validate one specific credential slot against live PVE. The target-
+    level test-connection/discover only ever exercises and marks the
+    `inventory` slot valid -- `maintenance`/`administrative` tokens had no
+    path to leave 'untested' even when correctly configured and working.
+
+    For `maintenance`/`administrative`, base connectivity alone isn't a
+    meaningful check -- PVE's own API quirk means even reading pending
+    updates requires Sys.Modify, not just Sys.Audit, so a successful call
+    to that endpoint specifically proves the elevated grant these slots
+    exist for, not just that the token authenticates at all."""
+    cred = (
+        db.query(PveCredential)
+        .filter(PveCredential.id == credential_id, PveCredential.pve_target_id == target_id)
+        .one_or_none()
+    )
+    if cred is None:
+        raise HTTPException(404, "credential not found")
+    target = db.query(PveTarget).filter(PveTarget.id == target_id).one_or_none()
+    if target is None:
+        raise HTTPException(404, "pve target not found")
+
+    try:
+        creds = load_pve_credentials(db, target, cred.slot_name)
+    except CredentialNotConfigured:
+        raise HTTPException(404, "credential not found")
+
+    try:
+        client = PveClient(creds)
+        with client:
+            client.version()
+            if cred.slot_name == "inventory":
+                client.cluster_status()
+                ok = True
+            else:
+                cluster = db.query(Cluster).filter(Cluster.pve_target_id == target_id).first()
+                node = db.query(Node).filter(Node.cluster_id == cluster.id).first() if cluster else None
+                # Nothing discovered yet to test the elevated privilege
+                # against -- base auth succeeding is the best available
+                # signal until a discovery run gives us a real node.
+                ok = True if node is None else client.node_apt_update_count(node.name) is not None
+    except Exception as e:
+        return {"status": "failed", "error": str(e)}
+
+    if not ok:
+        return {
+            "status": "failed",
+            "error": "authenticated, but the expected privilege check failed -- confirm the PVE role grant for this token",
+        }
+
+    cred.status = "valid"
+    cred.last_validated_at = datetime.now(timezone.utc)
+    write_audit_event(
+        db,
+        event_category="credential",
+        event_type="credential.connection_tested",
+        actor="user",
+        actor_type="user",
+        provider_id=target.provider_id,
+        metadata={"pve_target_id": str(target_id), "slot_name": cred.slot_name},
+    )
+    db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/pve-targets/{target_id}/host-maintenance-credential", response_model=Optional[schemas.HostMaintenanceCredentialOut])

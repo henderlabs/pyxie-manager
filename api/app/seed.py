@@ -62,13 +62,20 @@ def seed_defaults(db: Session):
             )
     db.flush()
 
-    org = db.query(Organization).filter(Organization.slug == "default").one_or_none()
+    # Matched by existence, not by slug -- this is a "one org, one baseline
+    # site per deployment" model (see README), and both name and slug are
+    # user-editable after creation (Settings / Providers pages). Matching on
+    # slug == "default" meant renaming the seeded site's slug away from
+    # "default" made it invisible to this idempotent check, so the very next
+    # restart silently created a second "Default Site" alongside the
+    # renamed one. Existence alone is the right invariant here.
+    org = db.query(Organization).first()
     if org is None:
         org = Organization(name="Default Organization", slug="default")
         db.add(org)
         db.flush()
 
-    site = db.query(Site).filter(Site.organization_id == org.id, Site.slug == "default").one_or_none()
+    site = db.query(Site).filter(Site.organization_id == org.id).first()
     if site is None:
         site = Site(organization_id=org.id, name="Default Site", slug="default")
         db.add(site)

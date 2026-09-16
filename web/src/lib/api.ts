@@ -246,6 +246,7 @@ export type AppSettings = {
   rightsizing_cpu_peak_target_pct: number;
   rightsizing_mem_peak_target_pct: number;
   rightsizing_round_vcpu_even: boolean;
+  pve_mutations_enabled: boolean;
 };
 
 export type DashboardSummary = {

@@ -51,7 +51,7 @@ const SECTIONS: NavSection[] = [
   {
     label: "Platform",
     items: [
-      { label: "Providers", href: "/platform/providers", icon: <PlugIcon /> },
+      { label: "Integrations", href: "/platform/providers", icon: <PlugIcon /> },
       { label: "Credentials", href: "/platform/credentials", icon: <KeyIcon /> },
       { label: "Users", href: "/platform/users", icon: <UsersIcon />, adminOnly: true },
       { label: "Logging", href: "/platform/logging", icon: <ScrollIcon /> },

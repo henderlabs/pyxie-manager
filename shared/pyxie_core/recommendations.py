@@ -14,6 +14,7 @@ from .capacity import compute_capacity
 from .discovery import build_pve_client
 from .models import Cluster, Node, PveTarget, Recommendation, Workload
 from .placement import (
+    current_storage_name,
     get_cluster_storage_preference,
     is_currently_on_shared_storage,
     rank_with_simulated_load,
@@ -314,8 +315,10 @@ def _placement_recommendations(db: Session, source_node_ids: set | None = None) 
                 effective_pref = wl.storage_preference or get_cluster_storage_preference(db, cluster.id)
                 try:
                     currently_on_shared = is_currently_on_shared_storage(client, node_by_id.get(wl.node_id), wl, db)
+                    current_storage = current_storage_name(client, node_by_id.get(wl.node_id), wl)
                 except Exception:
                     currently_on_shared = False
+                    current_storage = None
                 storage_rec = recommend_storage_for_candidate(
                     db, best.node_id, currently_on_shared, storage_preference=effective_pref
                 )
@@ -347,6 +350,7 @@ def _placement_recommendations(db: Session, source_node_ids: set | None = None) 
                             # plan items support the same editable-destination
                             # dropdown every other batch migration plan does.
                             "currently_on_shared": currently_on_shared,
+                            "current_storage": current_storage,
                             "storage_preference": effective_pref,
                             "candidates": [
                                 {

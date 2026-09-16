@@ -6,6 +6,7 @@ client having no executable path to mutate PVE, not merely by hiding buttons
 in the UI. Do not add write methods here without an explicit Phase 1 approval.
 """
 
+import time
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -35,7 +36,13 @@ class PveCredentials:
 
 
 class PveClient:
-    def __init__(self, creds: PveCredentials, timeout: float = 10.0):
+    # 10s was too tight for a genuinely heavy node -- pve-slc-m401 (nearly
+    # 2x any other node's VM count, ~80% RAM under real load) consistently
+    # takes ~14.5s for its own /qemu listing specifically, measured 5/5 real
+    # requests. That's real, reproducible latency from a large response on a
+    # loaded host, not a hang -- a timeout retry can't fix a call that's
+    # reliably slower than the timeout itself, only a longer timeout can.
+    def __init__(self, creds: PveCredentials, timeout: float = 25.0):
         self._creds = creds
         base_url = f"https://{creds.hostname}:{creds.api_port}/api2/json"
         self._client = httpx.Client(
@@ -59,17 +66,33 @@ class PveClient:
     def __exit__(self, *exc):
         self.close()
 
-    def _get(self, path: str, params: Optional[dict] = None) -> Any:
-        try:
-            resp = self._client.get(path, params=params)
-        except httpx.ConnectError as exc:
-            if "certificate" in str(exc).lower() or "SSL" in str(exc):
-                raise PveTlsError(str(exc)) from exc
-            raise PveConnectionError(str(exc)) from exc
-        except httpx.TimeoutException as exc:
-            raise PveConnectionError(f"timeout: {exc}") from exc
-        except httpx.TransportError as exc:
-            raise PveConnectionError(str(exc)) from exc
+    def _get(self, path: str, params: Optional[dict] = None, *, retries: int = 1) -> Any:
+        """retries=1 means one extra attempt after the first timeout, not one
+        attempt total -- found live against a real node whose /qemu listing
+        times out intermittently (roughly half the time) but responds in
+        under a second when it does work, consistent with the PVE API
+        worker being transiently busy rather than genuinely broken. Only
+        retried for httpx.TimeoutException specifically -- a connect/TLS/
+        auth failure won't resolve itself on a second attempt a moment
+        later, so those still raise immediately."""
+        attempt = 0
+        while True:
+            try:
+                resp = self._client.get(path, params=params)
+            except httpx.ConnectError as exc:
+                if "certificate" in str(exc).lower() or "SSL" in str(exc):
+                    raise PveTlsError(str(exc)) from exc
+                raise PveConnectionError(str(exc)) from exc
+            except httpx.TimeoutException as exc:
+                if attempt < retries:
+                    attempt += 1
+                    time.sleep(1)
+                    continue
+                raise PveConnectionError(f"timeout: {exc}") from exc
+            except httpx.TransportError as exc:
+                raise PveConnectionError(str(exc)) from exc
+            else:
+                break
 
         if resp.status_code in (401, 403):
             raise PveAuthError(f"{resp.status_code}: {resp.text[:300]}")
@@ -103,6 +126,15 @@ class PveClient:
             return len(updates or [])
         except Exception:
             return None
+
+    def node_apt_updates(self, node: str) -> list[dict]:
+        """Full pending-package detail (Package/OldVersion/Version/Priority/
+        Section/...), not just the count -- same endpoint as
+        node_apt_update_count(), which discards everything but the length.
+        Unlike that method, this does not swallow exceptions: a caller
+        showing a real package list to a user needs to know when it failed,
+        not silently see an empty list and assume nothing is pending."""
+        return self._get(f"/nodes/{node}/apt/update") or []
 
     def qemu_list(self, node: str) -> list[dict]:
         return self._get(f"/nodes/{node}/qemu")

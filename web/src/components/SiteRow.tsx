@@ -40,9 +40,15 @@ export default function SiteRow({ site }: { site: Site }) {
 
   if (editing) {
     return (
-      <div className="flex items-center gap-2 py-1.5">
-        <input className="input" value={name} onChange={(e) => setName(e.target.value)} style={{ width: 160 }} />
-        <input className="input" value={slug} onChange={(e) => setSlug(e.target.value)} style={{ width: 140 }} />
+      <div className="flex items-end gap-2 py-1.5">
+        <label className="block text-xs text-muted space-y-1">
+          <span>Name</span>
+          <input className="input" value={name} onChange={(e) => setName(e.target.value)} style={{ width: 160 }} />
+        </label>
+        <label className="block text-xs text-muted space-y-1">
+          <span>Slug</span>
+          <input className="input" value={slug} onChange={(e) => setSlug(e.target.value)} style={{ width: 140 }} />
+        </label>
         <button
           onClick={save}
           disabled={pending}

@@ -42,7 +42,7 @@ from .operations_engine import (
     enter_stage,
     fail_operation,
 )
-from .placement import get_cluster_storage_preference, is_currently_on_shared_storage, rank_with_simulated_load, recommend_destinations, recommend_storage_for_candidate
+from .placement import current_storage_name, get_cluster_storage_preference, is_currently_on_shared_storage, rank_with_simulated_load, recommend_destinations, recommend_storage_for_candidate
 from .discovery import build_pve_client
 
 
@@ -142,6 +142,7 @@ def dry_run_enter_maintenance(db: Session, node: Node, *, actor: str, reason: st
                     destination_node = db.query(Node).filter(Node.id == top.node_id).one()
                     simulated_added_bytes[destination_node.id] = simulated_added_bytes.get(destination_node.id, 0) + (wl.memory_bytes or 0)
                     currently_on_shared = is_currently_on_shared_storage(client, node, wl, db)
+                    current_storage = current_storage_name(client, node, wl)
                     effective_pref = wl.storage_preference or get_cluster_storage_preference(db, cluster.id)
                     storage_rec = recommend_storage_for_candidate(db, destination_node.id, currently_on_shared, storage_preference=effective_pref)
                     migrate_plan.append({
@@ -152,6 +153,7 @@ def dry_run_enter_maintenance(db: Session, node: Node, *, actor: str, reason: st
                         # storage for an alternate destination purely from
                         # the DB, without needing a fresh PVE client call.
                         "currently_on_shared": currently_on_shared,
+                        "current_storage": current_storage,
                         "storage_preference": effective_pref,
                         # Full ranked field, not just the pick -- lets the
                         # approval preview offer an alternate destination

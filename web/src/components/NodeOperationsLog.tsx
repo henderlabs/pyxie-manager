@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import type { Operation } from "@/lib/api";
 import { Card, CardTitle, EmptyState } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
+import { HostUpdatePlan } from "@/components/OperationCard";
 import { MigrateIcon, WorkloadIcon, PackageIcon, ClockIcon, WrenchIcon, CpuIcon, PlugIcon, RestartIcon } from "@/components/Icons";
 import { notifyOperationsChanged, onOperationsChanged } from "@/lib/operationsBus";
 import { useMe } from "@/lib/useMe";
@@ -163,36 +164,43 @@ export default function NodeOperationsLog({ initialOperations }: { initialOperat
       ) : (
         <div className="divide-y divide-border">
           {visible.map((op) => (
-            <div key={op.id} className={`flex items-center justify-between py-2 ${op.dismissed ? "opacity-50" : ""}`}>
-              <div>
-                <div className="text-sm text-text flex items-center gap-1.5">
-                  <span className="text-muted">{TYPE_ICONS[op.operation_type_id]}</span>
-                  {TYPE_LABELS[op.operation_type_id] || op.operation_type_id} — {subtitleFor(op)}
+            <div key={op.id} className={`py-2 ${op.dismissed ? "opacity-50" : ""}`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-text flex items-center gap-1.5">
+                    <span className="text-muted">{TYPE_ICONS[op.operation_type_id]}</span>
+                    {TYPE_LABELS[op.operation_type_id] || op.operation_type_id} — {subtitleFor(op)}
+                  </div>
+                  <div className="text-xs text-muted">{new Date(op.created_at).toLocaleString()} · {op.created_by}</div>
+                  {op.status === "blocked" && op.blocking_safety_rules && op.blocking_safety_rules.length > 0 && (
+                    <div className="text-xs text-bad mt-0.5">Blocked by: {op.blocking_safety_rules.join(", ")}</div>
+                  )}
+                  {op.status === "failed" && op.error && <div className="text-xs text-bad mt-0.5">{op.error}</div>}
                 </div>
-                <div className="text-xs text-muted">{new Date(op.created_at).toLocaleString()} · {op.created_by}</div>
-                {op.status === "blocked" && op.blocking_safety_rules && op.blocking_safety_rules.length > 0 && (
-                  <div className="text-xs text-bad mt-0.5">Blocked by: {op.blocking_safety_rules.join(", ")}</div>
-                )}
-                {op.status === "failed" && op.error && <div className="text-xs text-bad mt-0.5">{op.error}</div>}
+                <div className="flex items-center gap-2">
+                  {op.stage && <span className="text-xs text-muted">{op.stage}</span>}
+                  <StatusBadge status={op.status} />
+                  {op.status === "awaiting_approval" && !op.dismissed && isAdmin && (
+                    <button
+                      onClick={() => approve(op)}
+                      disabled={approving === op.id}
+                      className="px-2 py-1 rounded text-xs font-medium bg-black text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
+                    >
+                      {approving === op.id ? "Submitting…" : "Approve & Execute"}
+                    </button>
+                  )}
+                  {(TERMINAL_STATUSES.includes(op.status) || op.status === "awaiting_approval") && isAdmin && (
+                    <button onClick={() => toggleDismiss(op)} className="text-xs text-muted hover:underline">
+                      {op.dismissed ? "Restore" : "Dismiss"}
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {op.stage && <span className="text-xs text-muted">{op.stage}</span>}
-                <StatusBadge status={op.status} />
-                {op.status === "awaiting_approval" && !op.dismissed && isAdmin && (
-                  <button
-                    onClick={() => approve(op)}
-                    disabled={approving === op.id}
-                    className="px-2 py-1 rounded text-xs font-medium bg-black text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
-                  >
-                    {approving === op.id ? "Submitting…" : "Approve & Execute"}
-                  </button>
-                )}
-                {(TERMINAL_STATUSES.includes(op.status) || op.status === "awaiting_approval") && isAdmin && (
-                  <button onClick={() => toggleDismiss(op)} className="text-xs text-muted hover:underline">
-                    {op.dismissed ? "Restore" : "Dismiss"}
-                  </button>
-                )}
-              </div>
+              {op.operation_type_id === "host.update" && op.dry_run_result?.planned_packages != null && (
+                <div className="mt-1.5">
+                  <HostUpdatePlan result={op.dry_run_result} />
+                </div>
+              )}
             </div>
           ))}
         </div>

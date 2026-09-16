@@ -5,7 +5,7 @@ import { useState } from "react";
 import { useMe } from "@/lib/useMe";
 
 // Every usage of this component fires a POST -- it's the generic
-// write-trigger button used across Providers, Protection, and
+// write-trigger button used across Integrations, Protection, and
 // NodeActionsForm. Gating it here once covers all of them rather than
 // gating each call site separately.
 export default function ActionButton({

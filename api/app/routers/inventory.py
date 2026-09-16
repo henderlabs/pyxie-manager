@@ -18,7 +18,9 @@ from pyxie_core.credentials import (
     CredentialNotConfigured,
     HostNotAddressable,
     load_host_maintenance_credentials,
+    load_pve_credentials,
 )
+from pyxie_core.pve_client import PveClient
 from pyxie_core.host_maintenance_client import (
     HostKeyMismatchError,
     HostKeyNotPinnedError,
@@ -192,6 +194,40 @@ def get_node(node_id: uuid.UUID, db: Session = Depends(get_db)):
 @router.get("/nodes/{node_id}/workloads", response_model=list[schemas.WorkloadOut])
 def get_node_workloads(node_id: uuid.UUID, db: Session = Depends(get_db)):
     return db.query(Workload).filter(Workload.node_id == node_id).order_by(Workload.vmid).all()
+
+
+@router.get("/nodes/{node_id}/pending-updates")
+def get_node_pending_updates(node_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Live, on-demand full package list for one node -- read-only, via the
+    same `maintenance` PVE API token already used for the pending_updates
+    COUNT surfaced elsewhere (Nodes table, node detail). Deliberately does
+    NOT require the separate SSH host-maintenance wrapper: PVE's own API
+    already returns full package detail (Package/OldVersion/Version/...)
+    from this same endpoint, that data was just being discarded down to a
+    length. This has no bearing on actually applying updates -- PVE's API
+    has no endpoint for that, only listing; that's still what the SSH
+    wrapper is for."""
+    node = db.query(Node).filter(Node.id == node_id).one_or_none()
+    if node is None:
+        raise HTTPException(404, "node not found")
+    cluster = db.query(Cluster).filter(Cluster.id == node.cluster_id).one_or_none()
+    target = db.query(PveTarget).filter(PveTarget.id == cluster.pve_target_id).one_or_none() if cluster else None
+    if target is None:
+        raise HTTPException(404, "pve target not found for this node")
+
+    try:
+        creds = load_pve_credentials(db, target, "maintenance")
+    except CredentialNotConfigured:
+        raise HTTPException(409, "no 'maintenance' credential configured for this target yet")
+
+    try:
+        client = PveClient(creds)
+        with client:
+            packages = client.node_apt_updates(node.name)
+    except Exception as e:
+        raise HTTPException(502, f"could not reach PVE: {e}")
+
+    return {"node": node.name, "packages": packages}
 
 
 @router.post("/nodes/{node_id}/ssh-host-key/probe", dependencies=[Depends(require_admin)])
@@ -575,6 +611,7 @@ def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(ge
         "rightsizing_cpu_peak_target_pct": row.rightsizing_cpu_peak_target_pct,
         "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
         "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
+        "pve_mutations_enabled": row.pve_mutations_enabled,
     }
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(row, field, value)
@@ -587,6 +624,7 @@ def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(ge
         "rightsizing_cpu_peak_target_pct": row.rightsizing_cpu_peak_target_pct,
         "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
         "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
+        "pve_mutations_enabled": row.pve_mutations_enabled,
     }
     write_audit_event(
         db,
@@ -597,4 +635,21 @@ def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(ge
         state_before=before,
         state_after=after,
     )
+    # The global write kill switch deserves its own loud, easy-to-find
+    # audit entry -- not buried in a routine settings.changed event that
+    # could just as easily be a timezone tweak. Separate from the write
+    # path's own re-check at call time; this only records the toggle
+    # itself.
+    if before["pve_mutations_enabled"] != after["pve_mutations_enabled"]:
+        write_audit_event(
+            db,
+            event_category="settings",
+            event_type="settings.pve_mutations_enabled_changed",
+            actor="user",
+            actor_type="user",
+            result="success",
+            severity="warning" if after["pve_mutations_enabled"] else "info",
+            state_before={"pve_mutations_enabled": before["pve_mutations_enabled"]},
+            state_after={"pve_mutations_enabled": after["pve_mutations_enabled"]},
+        )
     return row

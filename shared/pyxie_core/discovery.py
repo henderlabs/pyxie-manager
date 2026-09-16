@@ -9,6 +9,7 @@ marked is_missing=True, never hard-deleted, by a single scan).
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .audit import write_audit_event
@@ -73,7 +74,48 @@ def _storage_scope(entry: dict) -> str:
     return "node-local"
 
 
+_DISCOVERY_LOCK_NAMESPACE = "pyxie:discovery"
+
+
 def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict:
+    """Thin wrapper around _run_discovery_inner() that stops two concurrent
+    discovery runs against the SAME target from racing on the same rows.
+    Found live: a manual diagnostic run and the periodic 5-minute worker
+    refresh both reached pve-slc-m401's large qemu list (only reachable at
+    all after the client timeout fix) at close to the same moment, and the
+    loser hit a raw UniqueViolation on workloads' (cluster_id, vmid)
+    constraint mid-transaction instead of failing cleanly.
+
+    Uses a SESSION-scoped Postgres advisory lock, not the transaction-
+    scoped variant: _run_discovery_inner() commits multiple times
+    internally (the very first thing it does is write an audit event with
+    its default commit=True), so an xact-scoped lock would release at that
+    first commit, long before the run actually finishes -- session-scoped
+    persists across those commits and is released explicitly in `finally`
+    below (and automatically by Postgres if the connection ever dies
+    without that running, e.g. a hard process kill).
+
+    Deliberately NOT the ResourceLock/Operation system write-capable
+    operations use -- discovery isn't a staged Operation with an approval
+    lifecycle, and a lightweight advisory lock keyed by target id is the
+    right-sized tool for "don't let two of these run at once for the same
+    target", not "operations fighting over a node/workload resource"."""
+    got_lock = db.execute(
+        text("SELECT pg_try_advisory_lock(hashtext(:ns), hashtext(:key))"),
+        {"ns": _DISCOVERY_LOCK_NAMESPACE, "key": str(target.id)},
+    ).scalar()
+    if not got_lock:
+        return {"status": "skipped", "reason": "a discovery is already in progress for this target"}
+    try:
+        return _run_discovery_inner(db, target, actor)
+    finally:
+        db.execute(
+            text("SELECT pg_advisory_unlock(hashtext(:ns), hashtext(:key))"),
+            {"ns": _DISCOVERY_LOCK_NAMESPACE, "key": str(target.id)},
+        )
+
+
+def _run_discovery_inner(db: Session, target: PveTarget, actor: str = "system") -> dict:
     correlation_id = uuid.uuid4()
     provider = db.query(Provider).filter(Provider.id == target.provider_id).one()
 
@@ -149,6 +191,15 @@ def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict
             seen_workload_ids = set()
             seen_storage_ids = set()
             node_name_by_id: dict = {}
+            # Nodes where a per-node call (qemu/lxc/storage list) failed this
+            # pass -- e.g. a stuck qm process on one node hanging its own
+            # /qemu listing. Used below to skip missing-reconciliation for
+            # that node's existing workloads/storage: a failed FETCH is not
+            # evidence of REMOVAL, and wrongly flipping is_missing=True here
+            # would fire false "no longer visible to PVE" events for guests
+            # that are still very much running.
+            degraded_node_ids: set = set()
+            degraded_reasons: list = []
 
             # PVE's API oddly requires Sys.Modify just to READ pending
             # updates (/nodes/{node}/apt/update), not only to change
@@ -227,7 +278,13 @@ def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict
                 summary["nodes"] += 1
 
                 # workloads
-                for vm in client.qemu_list(node_name) or []:
+                try:
+                    qemu_entries = client.qemu_list(node_name) or []
+                except Exception as e:
+                    qemu_entries = []
+                    degraded_node_ids.add(node.id)
+                    degraded_reasons.append(f"{node_name}: qemu list failed ({e})")
+                for vm in qemu_entries:
                     os_type = None
                     try:
                         os_type = client.qemu_config(node_name, vm["vmid"]).get("ostype")
@@ -236,20 +293,39 @@ def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict
                     wl = _upsert_workload(db, cluster, node, vm, "vm", os_type=os_type)
                     seen_workload_ids.add(wl.id)
                     summary["workloads"] += 1
-                for ct in client.lxc_list(node_name) or []:
+                try:
+                    lxc_entries = client.lxc_list(node_name) or []
+                except Exception as e:
+                    lxc_entries = []
+                    degraded_node_ids.add(node.id)
+                    degraded_reasons.append(f"{node_name}: lxc list failed ({e})")
+                for ct in lxc_entries:
                     wl = _upsert_workload(db, cluster, node, ct, "lxc")
                     seen_workload_ids.add(wl.id)
                     summary["workloads"] += 1
 
                 # storage
-                for st in client.storage_list(node_name) or []:
+                try:
+                    storage_entries = client.storage_list(node_name) or []
+                except Exception as e:
+                    storage_entries = []
+                    degraded_node_ids.add(node.id)
+                    degraded_reasons.append(f"{node_name}: storage list failed ({e})")
+                for st in storage_entries:
                     s = _upsert_storage(db, target.site_id, cluster, node, st)
                     if s is not None:
                         seen_storage_ids.add(s.id)
                         summary["storage"] += 1
 
-                # recent tasks
-                for t in client.tasks(node_name, limit=20) or []:
+                # recent tasks -- not part of missing-reconciliation (append-
+                # only history, no is_missing tracking), so a failure here
+                # just means no new task rows this pass, nothing to protect.
+                try:
+                    task_entries = client.tasks(node_name, limit=20) or []
+                except Exception as e:
+                    task_entries = []
+                    degraded_reasons.append(f"{node_name}: tasks list failed ({e})")
+                for t in task_entries:
                     _upsert_task(db, cluster, node, t)
                     summary["tasks"] += 1
 
@@ -257,6 +333,25 @@ def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict
                 apt_client.close()
 
             cluster.node_count = len(seen_node_ids)
+
+            # For any node whose qemu/lxc/storage listing failed above,
+            # carry forward its existing non-missing workloads/storage into
+            # the seen-sets so the reconciliation below leaves them alone.
+            # We don't know their current state -- we just failed to ask --
+            # and "unconfirmed" must never collapse into "confirmed gone".
+            if degraded_node_ids:
+                seen_workload_ids |= {
+                    w.id
+                    for w in db.query(Workload)
+                    .filter(Workload.node_id.in_(degraded_node_ids), Workload.is_missing.is_(False))
+                    .all()
+                }
+                seen_storage_ids |= {
+                    s.id
+                    for s in db.query(Storage)
+                    .filter(Storage.node_id.in_(degraded_node_ids), Storage.is_missing.is_(False))
+                    .all()
+                }
 
             # mark stale objects (previously seen, not seen this pass) as
             # missing, with one audit event per object the moment it flips
@@ -375,9 +470,17 @@ def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict
             except Exception:
                 pass
 
-        provider.connection_health = "connected"
+        # A per-node call failing (e.g. a stuck qm process hanging that
+        # node's own /qemu listing) no longer fails discovery outright --
+        # everything else still gets recorded, and this is surfaced as a
+        # "warning" health instead of silently reporting fully "connected".
+        if degraded_reasons:
+            provider.connection_health = "warning"
+            provider.last_error = "partial discovery -- " + "; ".join(degraded_reasons)
+        else:
+            provider.connection_health = "connected"
+            provider.last_error = None
         provider.last_success_at = now()
-        provider.last_error = None
         cred.status = "valid"
         cred.last_validated_at = now()
         db.commit()
@@ -392,10 +495,10 @@ def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict
             provider_id=provider.id,
             correlation_id=correlation_id,
             result="success",
-            severity="info",
-            metadata=summary,
+            severity="warning" if degraded_reasons else "info",
+            metadata={**summary, "degraded": degraded_reasons} if degraded_reasons else summary,
         )
-        return {"status": "ok", **summary}
+        return {"status": "ok", **summary, **({"degraded": degraded_reasons} if degraded_reasons else {})}
 
     except PveTlsError as e:
         return _fail(db, provider, cred, target, correlation_id, actor, "tls_error", str(e))

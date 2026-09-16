@@ -38,7 +38,7 @@ from .operations_engine import (
     enter_stage,
     fail_operation,
 )
-from .placement import is_currently_on_shared_storage, rank_with_simulated_load, recommend_destinations, recommend_storage_for_candidate
+from .placement import current_storage_name, is_currently_on_shared_storage, rank_with_simulated_load, recommend_destinations, recommend_storage_for_candidate
 from .discovery import build_pve_client
 
 
@@ -114,6 +114,7 @@ def dry_run_evacuation(db: Session, node: Node, *, actor: str) -> Operation:
                 destination_node = db.query(Node).filter(Node.id == top.node_id).one()
                 simulated_added_bytes[destination_node.id] = simulated_added_bytes.get(destination_node.id, 0) + (wl.memory_bytes or 0)
                 currently_on_shared = is_currently_on_shared_storage(client, node, wl, db)
+                current_storage = current_storage_name(client, node, wl)
                 storage_rec = recommend_storage_for_candidate(db, destination_node.id, currently_on_shared)
                 storage_choice = storage_rec["id"] if storage_rec else None
                 plan.append({
@@ -121,6 +122,7 @@ def dry_run_evacuation(db: Session, node: Node, *, actor: str) -> Operation:
                     "destination_node_id": str(destination_node.id), "destination_node": destination_node.name,
                     "destination_storage_id": storage_choice,
                     "currently_on_shared": currently_on_shared,
+                    "current_storage": current_storage,
                     # Full ranked field, not just the pick -- lets the
                     # approval preview offer an alternate destination, so
                     # everything it's going to do has options selectable

@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from .maintenance import (
     check_crs_affinity, check_cpu_compatibility, _has_pci_passthrough, _qemu_config,
-    workload_node_local_disk_storages,
+    _workload_disk_storage_names, workload_node_local_disk_storages,
 )
 from .models import Node, PlacementAffinityRule, Policy, Storage, Workload
 
@@ -513,6 +513,25 @@ def is_currently_on_shared_storage(client, source_node: Node, workload: Workload
     config = _qemu_config(client, source_node.name, workload)
     node_local_disks = workload_node_local_disk_storages(db, source_node, config)
     return node_local_disks == []
+
+
+def current_storage_name(client, source_node: Node, workload: Workload) -> str | None:
+    """The actual storage name this workload's disk(s) currently sit on,
+    parsed from its live qemu config -- same underlying data
+    is_currently_on_shared_storage() already reads, exposed here as a real
+    name for display (a migrate-plan row previously said whether storage
+    was "shared" or not, never which storage that actually was, even when
+    keeping it unchanged). None if config can't be read or the workload
+    has no disks. When multiple disks span different storages, returns the
+    first alphabetically -- same convention as the current-storage API
+    endpoint (/api/workloads/current-storage) already uses."""
+    if client is None:
+        return None
+    config = _qemu_config(client, source_node.name, workload)
+    if config is None:
+        return None
+    names = sorted(_workload_disk_storage_names(config))
+    return names[0] if names else None
 
 
 def recommend_storage_for_candidate(

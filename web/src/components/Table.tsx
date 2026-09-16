@@ -58,7 +58,7 @@ export function Table<T extends { id: string }>({
 }: {
   columns: Column<T>[];
   rows: T[];
-  emptyMessage?: string;
+  emptyMessage?: React.ReactNode;
   storageKey: string;
   /** Extra classes for a specific row -- e.g. highlighting the currently
    * selected one. Appended to the row's default border/hover classes, not
