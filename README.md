@@ -13,6 +13,12 @@ rebalancing, per-workload NIC VLAN reassignment, and PBS backup-job
 membership -- see the Safety Contract section below for exactly how every
 one of those is gated.
 
+## Installation
+
+See [`docs/INSTALL.md`](docs/INSTALL.md) for a from-scratch install on a
+fresh Ubuntu 24.04 VM, and [`docs/adding-a-host.md`](docs/adding-a-host.md)
+for onboarding a PVE cluster once the app is running.
+
 ## Screenshots
 
 **Dashboard** -- cluster resource usage, environment health, and what needs attention right now:
