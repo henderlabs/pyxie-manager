@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { StorageItem } from "@/lib/api";
 import { Table } from "@/components/Table";
+import { NoInfrastructureHint } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import { formatBytes } from "@/lib/format";
 import { Meter } from "@/components/Gauges";
@@ -28,7 +29,7 @@ export default function StorageTable({ storage }: { storage: StorageItem[] }) {
       )}
       <Table
       rows={visibleStorage}
-      emptyMessage="No storage discovered yet."
+      emptyMessage={<NoInfrastructureHint subject="storage" />}
       storageKey="infrastructure-storage"
       columns={[
         { header: "Name", render: (s) => s.name, sortValue: (s) => s.name },

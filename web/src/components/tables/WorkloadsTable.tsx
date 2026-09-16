@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { Finding, Node, Recommendation, RightsizingAssessment, Workload } from "@/lib/api";
 import { Table } from "@/components/Table";
+import { NoInfrastructureHint } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import NotesCell from "@/components/NotesCell";
 import ApplyRightsizingForm from "@/components/ApplyRightsizingForm";
@@ -278,7 +279,7 @@ export default function WorkloadsTable({
       )}
       <Table
       rows={visibleWorkloads}
-      emptyMessage="No workloads discovered yet."
+      emptyMessage={<NoInfrastructureHint subject="workloads" />}
       storageKey="infrastructure-workloads"
       rowClassName={(w) => (w.id === highlightWorkloadId ? "bg-accent/10 pyxie-jump-target" : "")}
       columns={[

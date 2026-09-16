@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/api";
 import type { ClusterCapacity } from "@/lib/api";
-import { Card, CardTitle, EmptyState, PageHeader, StatTile } from "@/components/Card";
+import { Card, CardTitle, EmptyState, NoInfrastructureHint, PageHeader, StatTile } from "@/components/Card";
 import CapacityNodesTable from "@/components/tables/CapacityNodesTable";
 import { formatBytes } from "@/lib/format";
 import { Meter } from "@/components/Gauges";
@@ -14,7 +14,7 @@ export default async function CapacityPage() {
       <PageHeader title="Capacity" subtitle="Allocated capacity vs. observed consumption" icon={<GaugeIcon className="w-5 h-5" />} />
       {clusters.length === 0 && (
         <Card>
-          <EmptyState message="No clusters discovered yet." />
+          <EmptyState message={<NoInfrastructureHint subject="clusters" />} />
         </Card>
       )}
       {clusters.map((c) => (

@@ -5,6 +5,7 @@ import StatusBadge from "@/components/StatusBadge";
 import HostMaintenanceSetup from "@/components/HostMaintenanceSetup";
 import AddCredentialForm from "@/components/AddCredentialForm";
 import { KeyIcon } from "@/components/Icons";
+import Link from "next/link";
 
 export default async function CredentialsPage() {
   const [targets, clusters, nodes] = await Promise.all([
@@ -32,7 +33,17 @@ export default async function CredentialsPage() {
       <PageHeader title="Credentials" subtitle="One API token per access level (credential purpose), per PVE target — secret material is never redisplayed" icon={<KeyIcon className="w-5 h-5" />} />
       {targets.length === 0 && (
         <Card>
-          <EmptyState message="No PVE targets configured yet." />
+          <EmptyState
+            message={
+              <>
+                No PVE targets configured yet.{" "}
+                <Link href="/platform/providers" className="text-accent hover:underline">
+                  Add one under Providers
+                </Link>
+                .
+              </>
+            }
+          />
         </Card>
       )}
       {targets.map((t, i) => (

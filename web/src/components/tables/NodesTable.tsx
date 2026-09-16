@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { HostMaintenanceStatus, Node, StorageItem } from "@/lib/api";
 import { Table } from "@/components/Table";
+import { NoInfrastructureHint } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import NotesCell from "@/components/NotesCell";
 import DefaultStorageSelect from "@/components/DefaultStorageSelect";
@@ -241,7 +242,7 @@ export default function NodesTable({
       )}
       <Table
       rows={visibleNodes}
-      emptyMessage="No nodes discovered yet."
+      emptyMessage={<NoInfrastructureHint subject="nodes" />}
       storageKey="infrastructure-nodes"
       columns={[
         {

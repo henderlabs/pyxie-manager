@@ -1,5 +1,5 @@
 import type { NodeNetworkTopology } from "@/lib/api";
-import { Card, CardTitle } from "@/components/Card";
+import { Card, CardTitle, NoInfrastructureHint } from "@/components/Card";
 
 // Read-only. No write path exists for host-level network config here on
 // purpose -- a bad apply against /nodes/{node}/network can sever that
@@ -7,7 +7,11 @@ import { Card, CardTitle } from "@/components/Card";
 // write PyXie makes.
 export default function NetworkTopology({ topology }: { topology: NodeNetworkTopology[] }) {
   if (topology.length === 0) {
-    return <div className="text-sm text-muted">No nodes discovered yet.</div>;
+    return (
+      <div className="text-sm text-muted">
+        <NoInfrastructureHint subject="nodes" />
+      </div>
+    );
   }
 
   return (

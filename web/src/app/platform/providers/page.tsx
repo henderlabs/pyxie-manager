@@ -18,6 +18,7 @@ export default async function ProvidersPage() {
     apiFetch<Organization[]>("/api/organizations"),
   ]);
   const organization = organizations[0];
+  const pveProviders = providers.filter((p) => p.category_id === "pve");
 
   return (
     <div>
@@ -44,8 +45,8 @@ export default async function ProvidersPage() {
         <p className="text-xs text-muted mb-3 normal-case">
           The only provider category implemented so far -- connects one Proxmox cluster or standalone host per target.
         </p>
-        {providers.length === 0 && <div className="text-sm text-muted mb-3">No PVE provider configured yet.</div>}
-        {providers.map((p) => (
+        {pveProviders.length === 0 && <div className="text-sm text-muted mb-3">No PVE provider configured yet.</div>}
+        {pveProviders.map((p) => (
           <div key={p.id} className="mb-3 pb-3 border-b border-border last:border-0 last:pb-0 last:mb-0">
             <div className="flex items-center justify-between">
               <div className="text-sm font-medium text-text">{p.instance_name}</div>

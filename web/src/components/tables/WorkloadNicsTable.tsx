@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { WorkloadNic, WorkloadNics } from "@/lib/api";
 import { Table } from "@/components/Table";
+import { NoInfrastructureHint } from "@/components/Card";
 import { useMe } from "@/lib/useMe";
 import { notifyOperationsChanged } from "@/lib/operationsBus";
 import { isInFlight } from "@/lib/operationStatus";
@@ -40,7 +41,7 @@ export default function WorkloadNicsTable({ workloads }: { workloads: WorkloadNi
   return (
     <Table
       rows={rows}
-      emptyMessage="No workload NICs discovered yet."
+      emptyMessage={<NoInfrastructureHint subject="workload NICs" />}
       storageKey="infrastructure-network-nics"
       columns={[
         { header: "Workload", render: (r) => r.name || `vmid ${r.vmid}`, sortValue: (r) => r.name || String(r.vmid) },
