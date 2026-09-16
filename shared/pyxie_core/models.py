@@ -420,6 +420,14 @@ class AppSettings(Base):
     inventory_refresh_interval_seconds = Column(Integer, nullable=False, default=300)
     tls_verify_default = Column(Boolean, nullable=False, default=True)
     timezone = Column(String, nullable=False, default="UTC")
+    # Global kill switch for the write-capability engine -- see the
+    # Safety Contract in README.md. Every real PVE write re-checks this
+    # fresh at call time (shared/pyxie_core/pve_write_client.py), not
+    # just once at startup, and it is a SEPARATE gate from approving an
+    # individual operation in the UI -- both must be true for any PVE
+    # mutation to actually happen. Used to be an env var requiring a
+    # redeploy to change; moved here so it's a real Settings-page control.
+    pve_mutations_enabled = Column(Boolean, nullable=False, default=False)
     # Rightsizing's peak-safety check sizes a workload so its observed peak
     # usage lands at roughly this % of the new allocation -- see
     # rightsizing.py. Memory can be set stricter than CPU (a tight memory

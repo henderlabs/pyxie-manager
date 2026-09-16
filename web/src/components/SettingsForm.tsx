@@ -68,6 +68,35 @@ export default function SettingsForm({ initial }: { initial: AppSettings }) {
 
   return (
     <form onSubmit={submit} className="space-y-4 max-w-lg">
+      <div
+        className={`p-3 rounded border ${
+          form.pve_mutations_enabled ? "border-bad bg-bad/10" : "border-warn/40 bg-warn/5"
+        }`}
+      >
+        <label className="flex items-center gap-2 text-sm font-medium text-text">
+          <input
+            type="checkbox"
+            disabled={!isAdmin}
+            checked={form.pve_mutations_enabled}
+            onChange={(e) => setForm({ ...form, pve_mutations_enabled: e.target.checked })}
+          />
+          Allow PyXie to write to Proxmox VE
+        </label>
+        <p className="text-[11px] text-muted mt-1.5 normal-case">
+          The global switch for every real PVE write this app can make -- migrations, host reboots, package
+          updates, backup-job changes, and everything else in Maintenance/Protection. Off by default: with this
+          unchecked, every action still fully previews (dry-run, safety checks, a computed plan) but the final
+          write is refused, no matter who approves it. This is a separate, independent check from approving an
+          individual operation -- both this switch and an approval are required for anything to actually happen
+          on real infrastructure. Re-checked fresh on every single write call, so switching it off takes effect
+          immediately, even mid-operation, no restart needed either way.
+        </p>
+        {form.pve_mutations_enabled && (
+          <p className="text-[11px] text-bad mt-1.5 normal-case font-medium">
+            Currently ON -- approved operations will make real changes to real infrastructure.
+          </p>
+        )}
+      </div>
       <Field label="Sync frequency (inventory, PVE health/status, protection, recommendations -- one shared schedule)">
         <select
           className="input"

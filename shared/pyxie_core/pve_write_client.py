@@ -29,6 +29,8 @@ from typing import Optional
 
 import httpx
 
+from .db import SessionLocal
+from .models import AppSettings
 from .pve_client import PveAuthError, PveConnectionError, PveCredentials, PveTlsError
 
 
@@ -46,7 +48,24 @@ class SelfProtectionError(Exception):
 
 
 def _mutations_enabled() -> bool:
-    return os.environ.get("PVE_MUTATIONS_ENABLED", "false").strip().lower() == "true"
+    """Re-checked fresh on every write call, not cached -- was previously
+    an env var (a redeploy-to-change kill switch); now a Settings-page
+    toggle (Platform > Settings), backed by app_settings.id=1 so it stays
+    a real, live-updatable control instead of the routine settings.changed
+    audit event covering it -- see settings.pve_mutations_enabled_changed
+    for the dedicated one. Opens its own short-lived session rather than
+    threading a `db` parameter through every write method on this class
+    (and every caller of every one of them) -- this is a single cheap
+    read, not worth that blast radius."""
+    db = SessionLocal()
+    try:
+        return bool(db.query(AppSettings.pve_mutations_enabled).filter(AppSettings.id == 1).scalar())
+    finally:
+        db.close()
+
+
+def _disabled_message(action: str) -> str:
+    return f"PVE writes are disabled -- refusing to {action}. Enable them in Platform → Settings."
 
 
 def self_vmid_from_env() -> Optional[str]:
@@ -284,7 +303,7 @@ class PveMaintenanceClient:
         so a VM with any local-only disk isn't silently blocked.
         """
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to migrate")
+            raise MutationsDisabledError(_disabled_message("migrate"))
         params = {"target": target_node, "online": 1 if online else 0}
         if with_local_disks or target_storage:
             params["with-local-disks"] = 1
@@ -300,7 +319,7 @@ class PveMaintenanceClient:
         to a forced stop is Stage W3's SEPARATE, higher-risk
         workload.force_stop operation type, never an automatic fallback."""
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to shut down")
+            raise MutationsDisabledError(_disabled_message("shut down"))
         _guard_self_vmid(vmid, "shut down")
         return self._request(
             "POST", f"/nodes/{node}/qemu/{vmid}/status/shutdown",
@@ -327,7 +346,7 @@ class PveMaintenanceClient:
         operation, not like a shutdown with nothing guaranteed to bring
         it back."""
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to reboot")
+            raise MutationsDisabledError(_disabled_message("reboot"))
         return self._request(
             "POST", f"/nodes/{node}/qemu/{vmid}/status/reboot",
             data={"timeout": timeout},
@@ -336,7 +355,7 @@ class PveMaintenanceClient:
     def start_vm(self, node: str, vmid: int) -> str:
         """POST /nodes/{node}/qemu/{vmid}/status/start."""
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to start")
+            raise MutationsDisabledError(_disabled_message("start"))
         return self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/start", data={})
 
     def set_vm_config(self, node: str, vmid: int, *, cores: Optional[int] = None, memory_mb: Optional[int] = None) -> None:
@@ -348,7 +367,7 @@ class PveMaintenanceClient:
         Stage workload.resize enforces that ordering itself rather than
         relying on this method to check."""
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to reconfigure")
+            raise MutationsDisabledError(_disabled_message("reconfigure"))
         params = {}
         if cores is not None:
             params["cores"] = cores
@@ -375,7 +394,7 @@ class PveMaintenanceClient:
         safety check: the workflow's revalidation stage re-reads live
         config before ever calling this, same as every other write here."""
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to change VLAN")
+            raise MutationsDisabledError(_disabled_message("change VLAN"))
         new_net = _set_net_tag(current_net, tag)
         kind = "qemu" if guest_type == "vm" else "lxc"
         self._request("PUT", f"/nodes/{node}/{kind}/{vmid}/config", data={net_id: new_net})
@@ -400,7 +419,7 @@ class PveMaintenanceClient:
         behind for PVE to reconcile ambiguously.
         """
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to update backup job")
+            raise MutationsDisabledError(_disabled_message("update backup job"))
         if all_guests:
             params: dict = {"all": 1}
             to_delete = ["vmid"]
@@ -419,7 +438,7 @@ class PveMaintenanceClient:
         (workload.force_stop) -- never invoked as a timeout fallback from
         shutdown_vm."""
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to force-stop")
+            raise MutationsDisabledError(_disabled_message("force-stop"))
         _guard_self_vmid(vmid, "force-stop")
         return self._request("POST", f"/nodes/{node}/qemu/{vmid}/status/stop", data={})
 
@@ -441,5 +460,5 @@ class PveMaintenanceClient:
         every pre-check (quorum, HA, no active backup/migration/package
         operation) must already have passed before this is ever called."""
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to reboot")
+            raise MutationsDisabledError(_disabled_message("reboot"))
         return self._request("POST", f"/nodes/{node}/status", data={"command": "reboot"})

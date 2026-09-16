@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from pyxie_core.audit import write_audit_event
 from pyxie_core.db import SessionLocal
+from pyxie_core.models import AppSettings
 
 from . import config  # noqa: F401 -- import asserts the Phase 0 safety gate at startup
 from .routers import (
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
     db = SessionLocal()
     try:
         seed_defaults(db)
+        mutations_enabled = bool(db.query(AppSettings.pve_mutations_enabled).filter(AppSettings.id == 1).scalar())
         write_audit_event(
             db,
             event_category="system",
@@ -38,9 +40,9 @@ async def lifespan(app: FastAPI):
             actor="system",
             metadata={
                 "version": config.settings.APP_VERSION,
-                "pve_mutations_enabled": config.settings.PVE_MUTATIONS_ENABLED,
+                "pve_mutations_enabled": mutations_enabled,
             },
-            severity="warning" if config.settings.PVE_MUTATIONS_ENABLED else "info",
+            severity="warning" if mutations_enabled else "info",
         )
     finally:
         db.close()
@@ -68,4 +70,9 @@ app.include_router(network.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": config.settings.APP_VERSION, "mutations_enabled": config.settings.PVE_MUTATIONS_ENABLED}
+    db = SessionLocal()
+    try:
+        mutations_enabled = bool(db.query(AppSettings.pve_mutations_enabled).filter(AppSettings.id == 1).scalar())
+    finally:
+        db.close()
+    return {"status": "ok", "version": config.settings.APP_VERSION, "mutations_enabled": mutations_enabled}

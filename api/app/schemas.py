@@ -242,6 +242,7 @@ class AppSettingsOut(OrmModel):
     rightsizing_cpu_peak_target_pct: int
     rightsizing_mem_peak_target_pct: int
     rightsizing_round_vcpu_even: bool
+    pve_mutations_enabled: bool
 
 
 class AppSettingsUpdate(BaseModel):
@@ -251,3 +252,4 @@ class AppSettingsUpdate(BaseModel):
     rightsizing_cpu_peak_target_pct: Optional[int] = None
     rightsizing_mem_peak_target_pct: Optional[int] = None
     rightsizing_round_vcpu_even: Optional[bool] = None
+    pve_mutations_enabled: Optional[bool] = None

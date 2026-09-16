@@ -611,6 +611,7 @@ def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(ge
         "rightsizing_cpu_peak_target_pct": row.rightsizing_cpu_peak_target_pct,
         "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
         "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
+        "pve_mutations_enabled": row.pve_mutations_enabled,
     }
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(row, field, value)
@@ -623,6 +624,7 @@ def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(ge
         "rightsizing_cpu_peak_target_pct": row.rightsizing_cpu_peak_target_pct,
         "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
         "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
+        "pve_mutations_enabled": row.pve_mutations_enabled,
     }
     write_audit_event(
         db,
@@ -633,4 +635,21 @@ def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(ge
         state_before=before,
         state_after=after,
     )
+    # The global write kill switch deserves its own loud, easy-to-find
+    # audit entry -- not buried in a routine settings.changed event that
+    # could just as easily be a timezone tweak. Separate from the write
+    # path's own re-check at call time; this only records the toggle
+    # itself.
+    if before["pve_mutations_enabled"] != after["pve_mutations_enabled"]:
+        write_audit_event(
+            db,
+            event_category="settings",
+            event_type="settings.pve_mutations_enabled_changed",
+            actor="user",
+            actor_type="user",
+            result="success",
+            severity="warning" if after["pve_mutations_enabled"] else "info",
+            state_before={"pve_mutations_enabled": before["pve_mutations_enabled"]},
+            state_after={"pve_mutations_enabled": after["pve_mutations_enabled"]},
+        )
     return row
