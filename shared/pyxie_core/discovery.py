@@ -9,6 +9,7 @@ marked is_missing=True, never hard-deleted, by a single scan).
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .audit import write_audit_event
@@ -73,7 +74,48 @@ def _storage_scope(entry: dict) -> str:
     return "node-local"
 
 
+_DISCOVERY_LOCK_NAMESPACE = "pyxie:discovery"
+
+
 def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict:
+    """Thin wrapper around _run_discovery_inner() that stops two concurrent
+    discovery runs against the SAME target from racing on the same rows.
+    Found live: a manual diagnostic run and the periodic 5-minute worker
+    refresh both reached pve-slc-m401's large qemu list (only reachable at
+    all after the client timeout fix) at close to the same moment, and the
+    loser hit a raw UniqueViolation on workloads' (cluster_id, vmid)
+    constraint mid-transaction instead of failing cleanly.
+
+    Uses a SESSION-scoped Postgres advisory lock, not the transaction-
+    scoped variant: _run_discovery_inner() commits multiple times
+    internally (the very first thing it does is write an audit event with
+    its default commit=True), so an xact-scoped lock would release at that
+    first commit, long before the run actually finishes -- session-scoped
+    persists across those commits and is released explicitly in `finally`
+    below (and automatically by Postgres if the connection ever dies
+    without that running, e.g. a hard process kill).
+
+    Deliberately NOT the ResourceLock/Operation system write-capable
+    operations use -- discovery isn't a staged Operation with an approval
+    lifecycle, and a lightweight advisory lock keyed by target id is the
+    right-sized tool for "don't let two of these run at once for the same
+    target", not "operations fighting over a node/workload resource"."""
+    got_lock = db.execute(
+        text("SELECT pg_try_advisory_lock(hashtext(:ns), hashtext(:key))"),
+        {"ns": _DISCOVERY_LOCK_NAMESPACE, "key": str(target.id)},
+    ).scalar()
+    if not got_lock:
+        return {"status": "skipped", "reason": "a discovery is already in progress for this target"}
+    try:
+        return _run_discovery_inner(db, target, actor)
+    finally:
+        db.execute(
+            text("SELECT pg_advisory_unlock(hashtext(:ns), hashtext(:key))"),
+            {"ns": _DISCOVERY_LOCK_NAMESPACE, "key": str(target.id)},
+        )
+
+
+def _run_discovery_inner(db: Session, target: PveTarget, actor: str = "system") -> dict:
     correlation_id = uuid.uuid4()
     provider = db.query(Provider).filter(Provider.id == target.provider_id).one()
 
