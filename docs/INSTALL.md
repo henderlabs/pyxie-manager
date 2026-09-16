@@ -64,44 +64,42 @@ git clone https://github.com/henderlabs/pyxie-manager.git ~/pyxie-manager
 ```
 (or the `git@github.com:...` form if you used Option A.)
 
-## 3. Privileged install **[scripted]**
+## 3. Install **[scripted, one command]**
 
-Review `ops/install/00-privileged.sh` first -- it installs OS packages
-(Node 20 via NodeSource, since Ubuntu 24.04's own repo only has 18.x;
-PostgreSQL 16 and Redis are already current in the default repos), creates
-the `pyxie_manager` Postgres role + database with a freshly generated
-password, writes the three systemd unit files, and adds a narrow NOPASSWD
-sudo rule scoped to just `restart`/`status`/`is-active` on those three
-units (so routine deploys and restarts don't need a password every time,
-without granting broad sudo).
-
-```bash
-sudo bash ~/pyxie-manager/ops/install/00-privileged.sh
-```
-
-Defaults to the invoking `sudo` user's own account as the service account
-and app directory (`~<user>/pyxie-manager`). Override with
-`PYXIE_USER=someuser PYXIE_HOME=/home/someuser sudo -E bash ...` if you
-want a different service account than whoever ran `git clone`.
-
-## 4. App deploy **[scripted]**
-
-Run as the **same non-root user** from step 3, from inside the cloned repo:
+Review `ops/install/install.sh` first -- it's a single script, run once as
+root, that does everything: installs OS packages (Node 20 via NodeSource,
+since Ubuntu 24.04's own repo only has 18.x; PostgreSQL 16 and Redis are
+already current in the default repos), creates the `pyxie_manager`
+Postgres role + database with a freshly generated password, writes the
+three systemd unit files, adds a narrow NOPASSWD sudo rule scoped to just
+`restart`/`status`/`is-active` on those three units (for routine restarts
+*after* install -- this script itself runs entirely as root and never
+calls `sudo`), creates the Python venvs and builds the web app (as the
+target user, not root, so it doesn't leave root-owned files in their home
+directory), generates `.env`, runs every database migration, and starts
+all three services for the first time.
 
 ```bash
-cd ~/pyxie-manager && bash ops/install/01-app-deploy.sh
+sudo bash ~/pyxie-manager/ops/install/install.sh
 ```
 
-Creates the Python venvs for `api`/`worker`, installs `web`'s dependencies
-and builds it, generates `.env` (reads the Postgres password step 3 wrote
-to `~/.pyxie-install-secrets`, generates a fresh `PYXIE_CREDENTIAL_KEY`,
-auto-detects the VM's timezone, defaults `PVE_MUTATIONS_ENABLED=false`),
-runs every database migration, and starts all three services for the
-first time.
+Deploys as whichever user ran `sudo` (so run it as the account that should
+own the app, not as `root` directly -- it reads `$SUDO_USER`). Override
+with `sudo PYXIE_USER=someuser bash ...` for a different account.
 
-**Idempotent for re-runs**: if `.env` already exists it's left untouched,
-so re-running this script after a `git pull` (to pick up a new commit) is
-safe and just re-syncs dependencies/migrations/the running services.
+**Idempotent for re-runs**: won't touch an existing `.env`, won't recreate
+an already-present Postgres role, safe to re-run after a `git pull` (to
+pick up a new release) to resync dependencies/migrations/services.
+
+*(An earlier two-script version of this -- privileged setup, then a
+separate non-root app-deploy script -- was tried first during the CRE
+install and hit a real, reproducible `sudo: a password is required`
+failure specifically when the second script's `sudo systemctl restart`
+calls ran deep inside a long non-interactive SSH session, despite the
+identical command working fine when run directly. Root cause not fully
+pinned down; consolidating into one root-owned script removes the need
+for that inner `sudo` call entirely, which is why this is one script now,
+not two.)*
 
 ## 5. Set `PYXIE_SELF_VMID` **[manual -- can't be known until the VM exists in PVE]**
 
@@ -138,8 +136,8 @@ discovery.
   (fixed as of the commit that added this doc) -- it assumed
   `provider_categories` was already seeded by the app's own startup code,
   which is only true if the app has run at least once before this
-  migration executes. A genuinely fresh `alembic upgrade head` (this
-  script's own step 5) hits that ordering problem head-on. If you're on a
+  migration executes. A genuinely fresh `alembic upgrade head` (part of
+  `install.sh`'s step 9) hits that ordering problem head-on. If you're on a
   version of this repo from before the fix, either update, or manually
   seed just the `protection` category before re-running (see the fixed
   migration file for the exact idempotent INSERT).
