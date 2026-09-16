@@ -3,6 +3,7 @@ import { apiFetch } from "@/lib/api";
 import type { HostMaintenanceStatus, Node, PveTask, Workload } from "@/lib/api";
 import { Card, CardTitle, PageHeader } from "@/components/Card";
 import NodeLiveStats from "@/components/NodeLiveStats";
+import PendingUpdatesRow from "@/components/PendingUpdatesRow";
 import NodeWorkloadsTable from "@/components/tables/NodeWorkloadsTable";
 import StatusBadge from "@/components/StatusBadge";
 import { formatBytes } from "@/lib/format";
@@ -38,7 +39,7 @@ export default async function NodeDetailPage({ params }: { params: { id: string 
           <dl className="text-sm space-y-1">
             <Row label="Kernel" value={node.kernel_version || "—"} />
             <Row label="Memory total" value={formatBytes(node.mem_total_bytes)} />
-            <Row label="Pending updates" value={String(node.pending_updates ?? 0)} />
+            <PendingUpdatesRow nodeId={params.id} initialCount={node.pending_updates ?? 0} />
             <Row label="Last seen" value={new Date(node.last_seen).toLocaleString()} />
           </dl>
         </Card>

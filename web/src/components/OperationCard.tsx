@@ -615,7 +615,7 @@ export default function OperationCard({
 
 type PlannedPackage = { package: string; current_version: string | null; new_version: string };
 
-function HostUpdatePlan({ result }: { result: NonNullable<Operation["dry_run_result"]> }) {
+export function HostUpdatePlan({ result }: { result: NonNullable<Operation["dry_run_result"]> }) {
   const packages = (result.planned_packages as PlannedPackage[] | undefined) || [];
   const kernel = result.kernel_version as string | undefined;
   const diskFree = result.disk_free_bytes as number | null | undefined;

@@ -104,6 +104,15 @@ class PveClient:
         except Exception:
             return None
 
+    def node_apt_updates(self, node: str) -> list[dict]:
+        """Full pending-package detail (Package/OldVersion/Version/Priority/
+        Section/...), not just the count -- same endpoint as
+        node_apt_update_count(), which discards everything but the length.
+        Unlike that method, this does not swallow exceptions: a caller
+        showing a real package list to a user needs to know when it failed,
+        not silently see an empty list and assume nothing is pending."""
+        return self._get(f"/nodes/{node}/apt/update") or []
+
     def qemu_list(self, node: str) -> list[dict]:
         return self._get(f"/nodes/{node}/qemu")
 
