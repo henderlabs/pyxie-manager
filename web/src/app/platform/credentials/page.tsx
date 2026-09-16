@@ -38,7 +38,7 @@ export default async function CredentialsPage() {
               <>
                 No PVE targets configured yet.{" "}
                 <Link href="/platform/providers" className="text-accent hover:underline">
-                  Add one under Providers
+                  Add one under Integrations
                 </Link>
                 .
               </>

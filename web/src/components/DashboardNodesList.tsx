@@ -40,7 +40,7 @@ export default function DashboardNodesList({ initialNodes }: { initialNodes: Nod
   return (
     <Table
       rows={nodes}
-      emptyMessage="No nodes discovered yet. Configure a PVE target under Platform → Providers."
+      emptyMessage="No nodes discovered yet. Configure a PVE target under Platform → Integrations."
       storageKey="dashboard-nodes"
       columns={[
         {

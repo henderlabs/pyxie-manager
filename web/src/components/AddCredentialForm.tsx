@@ -77,7 +77,7 @@ export default function AddCredentialForm({ targetId, existingSlots }: { targetI
       </label>
       <div className="text-xs text-muted">
         {form.slot_name === "inventory"
-          ? "Read-only -- only used to discover and monitor this target. Same purpose as the token on the Providers page."
+          ? "Read-only -- only used to discover and monitor this target. Same purpose as the token on the Integrations page."
           : form.slot_name === "maintenance"
           ? "Required for any write action (migration, maintenance, rightsizing apply, etc). Do not use root@pam."
           : "Full administrative-scope token, if this deployment needs one beyond maintenance."}

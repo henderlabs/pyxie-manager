@@ -23,7 +23,7 @@ export default async function ProvidersPage() {
   return (
     <div>
       <PageHeader
-        title="Providers"
+        title="Integrations"
         subtitle="Connect your infrastructure in two steps: add a site (a physical location or logical grouping), then connect a provider to it."
         icon={<PlugIcon className="w-5 h-5" />}
       />
