@@ -60,6 +60,7 @@ def dry_run_balance(db: Session, *, actor: str, node_ids: list | None = None) ->
             "destination_node_id": ev["suggested_node_id"], "destination_node": ev["suggested_node"],
             "destination_storage_id": ev["suggested_storage"]["id"] if ev.get("suggested_storage") else None,
             "currently_on_shared": ev.get("currently_on_shared", False),
+            "current_storage": ev.get("current_storage"),
             "storage_preference": ev.get("storage_preference"),
             "candidates": ev.get("candidates", []),
             # Per-VM live vs. shutdown/migrate/power-on choice, editable in
