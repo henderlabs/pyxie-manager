@@ -63,6 +63,19 @@ identical everywhere it runs.
 secrets) has no recovery path if lost -- every stored credential becomes
 undecryptable. Back it up alongside any database dump, outside of git.
 
+## Email notifications
+
+SMTP settings (host/port/username/password/TLS/from-address/recipient)
+live on the `AppSettings` singleton, configured under Platform ->
+Settings -- a "send test email" action verifies the configuration
+end-to-end without waiting for a real event to trigger it. The stored
+password is never returned in plaintext once set (`smtp_password_set` is
+a boolean flag, not the value itself, same pattern as PVE credentials).
+`shared/pyxie_core/mail.py` sends via stdlib `smtplib`, no external
+dependency. Currently used for the user-invite flow (below); adding more
+triggers (e.g. failed-task alerts) is a matter of calling `send_email()`
+from the relevant workflow, not new plumbing.
+
 ## Safety Contract for every PVE write
 
 `shared/pyxie_core/pve_write_client.py` is documented as, and actually is,
@@ -184,6 +197,15 @@ cookie is HttpOnly, forwarded by `web`'s server-side code as
 `Authorization: Bearer <token>` -- the API is never reachable from the
 browser directly. Login/logout/failed-login are all audited.
 
+**Inviting users:** an admin creates an invite, which generates a
+one-time accept link; if SMTP is configured (see above) the link is
+emailed directly to the invitee rather than requiring the admin to
+copy/paste it. **Offboarding:** deleting a user is only allowed once
+that account has already been deactivated -- a deactivate-then-delete
+sequence, not a one-step delete -- so removing access is always a
+separate, reversible-until-confirmed step from permanently removing the
+account.
+
 ## Historical metrics
 
 `shared/pyxie_core/metrics.py` pulls PVE's own RRD data rather than
@@ -209,7 +231,18 @@ high 60d+).
   -- regenerating never reopens something a user dismissed.
 - **Rightsizing** (`shared/pyxie_core/rightsizing.py`): conservative by
   design -- only ever suggests a reduction, never below 30 days of
-  observed history for `moderate`/`high` confidence.
+  observed history for `moderate`/`high` confidence. Assessing all
+  workloads is a genuinely expensive pass (per-workload percentile
+  queries against `metric_points`), so results are computed by the
+  scheduled background pass and cached into a singleton
+  `rightsizing_cache` row (`GET /api/rightsizing` serves the cache,
+  falling back to a live compute only if the cache has never been
+  populated) rather than recomputed on every page load; `POST
+  /api/rightsizing/recompute` (admin-only) forces an immediate refresh.
+  Because of this, the Rightsizing page is explicitly labeled
+  **(Historical Data)** in its own title, with a note explaining it
+  reflects the last background pass, not the current instant -- unlike
+  the Workloads page, which is live.
 - **Capacity** (`shared/pyxie_core/capacity.py`): allocated vs. observed
   per node/cluster, busiest node, most-constrained resource.
 
@@ -248,6 +281,53 @@ are set to match each operation type's own real maximum runtime (its RQ
 job timeout) plus a margin, not a flat default -- a migration/evacuation/
 maintenance run needs to hold its lock for its actual multi-hour duration.
 
+The Workloads page has a paginated, searchable table (matching the same
+search logic as the Maintenance page's VM picker) and a quick single-VM
+**Migrate** action inline per row -- the same staged Safety Contract as
+every other write, just reachable without going through the Maintenance
+page first.
+
+## Logging & audit trail
+
+Platform -> Logging surfaces four distinct, clearly-labeled channels
+rather than one merged log, each kept separate because they're
+genuinely different-shaped records:
+
+- **Audit Log** -- everything PyXie itself did or recorded: user actions
+  (logins, settings changes, approvals) and its own background activity
+  (discovery cycles, etc), via the structured `audit_events` envelope.
+  Filterable by actor type (user vs. system) so user actions aren't
+  buried under the much higher-volume background events.
+- **PVE Tasks** -- PVE's own task history for the cluster (migrations,
+  backups, snapshots, updates, ...), synced every discovery pass -- the
+  same list visible in the Proxmox web UI under Tasks, plus a **"Failed
+  only"** filter for troubleshooting and an expandable detail view with
+  the workload's name (not just VMID) and its full task log fetched
+  on-demand via `GET /api/tasks/{id}/log`.
+- **PVE Cluster Log** -- PVE's own syslog-style cluster log (daemon
+  restarts, corosync/quorum events, hardware issues), a new
+  `cluster_log_entries` table synced from `/cluster/log` every discovery
+  pass. Ambient system activity, distinct from PVE Tasks (job outcomes);
+  PVE only keeps a small rolling buffer so this is expected to be sparse
+  most of the time, not busy the way Tasks is.
+- **Internal Jobs** -- whether PyXie's own background scheduler
+  (discovery/metrics/recommendation runs) is actually executing on
+  schedule.
+
+**Linking a PVE task back to the PyXie user who caused it:** when a task
+was the result of a PyXie-initiated operation, its detail view shows
+"Initiated by (PyXie)" with the acting user and operation type. This is
+*not* a foreign key -- `Operation.pve_upid` is deliberately cleared
+between workflow stages (it's a transient in-flight pointer, not a
+permanent record) -- so the link is reconstructed heuristically: a task
+matches an operation if its start time falls within that operation's
+active window (plus a small margin) and they share the same workload or
+node. Task-to-workload resolution itself is keyed by `(cluster_id,
+vmid)`, not `(node_id, vmid)`, because PVE enforces VMID uniqueness
+cluster-wide (not per-node) and a task recorded on a VM's *source* node
+during a migration would otherwise fail to resolve once `Workload.node_id`
+moves to the destination.
+
 ## Database schema summary
 
 - **Core hierarchy:** `organizations` -> `sites` -> `clusters` -> `nodes`
@@ -260,6 +340,11 @@ maintenance run needs to hold its lock for its actual multi-hour duration.
 - **Operations engine:** `operation_types` (seeded, stage list per type) +
   `operations` (one row per in-flight or historical write action, full
   state machine) + `resource_locks` + `audit_events` (full envelope).
+- **PVE logging:** `pve_tasks` (task history) + `cluster_log_entries`
+  (PVE's syslog-style cluster log, deduped on `(cluster_id, pve_id)`).
+- **Rightsizing cache:** `rightsizing_cache` -- a singleton row (same
+  pattern as `app_settings`) holding the last background pass's full
+  assessment set, so the Rightsizing page never recomputes on request.
 - **Placement:** `placement_affinity_rules` (PyXie-level keep-together/
   keep-apart, independent of PVE's own HA affinity), node performance/
   trust tiers (stored as `policies` rows), `workloads.preferred_node_id`
@@ -293,3 +378,9 @@ Alembic migrations: `api/migrations/versions/`.
 - The Workloads table is wide and several inline selects lack visible
   labels beyond their column header -- usable once you know the page, a
   genuinely new operator would benefit from a further pass here.
+- The PVE task -> PyXie operation link (Logging -> PVE Tasks) is a
+  time-window + object-scope heuristic, not a foreign key -- correct
+  against every real case tested so far, but two operations racing on
+  the same workload within the same window could in principle
+  misattribute a task. Not observed in practice; would need a real
+  correlation ID threaded through to PVE to close entirely.
