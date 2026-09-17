@@ -243,6 +243,17 @@ class AppSettingsOut(OrmModel):
     rightsizing_mem_peak_target_pct: int
     rightsizing_round_vcpu_even: bool
     pve_mutations_enabled: bool
+    smtp_enabled: bool
+    smtp_host: Optional[str] = None
+    smtp_port: int
+    smtp_username: Optional[str] = None
+    smtp_from_address: Optional[str] = None
+    smtp_use_tls: bool
+    # Never the real password -- just whether one is currently stored, so
+    # the frontend can show "leave blank to keep current" instead of a
+    # decrypted value.
+    smtp_password_set: bool
+    notification_recipient: Optional[str] = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -253,3 +264,15 @@ class AppSettingsUpdate(BaseModel):
     rightsizing_mem_peak_target_pct: Optional[int] = None
     rightsizing_round_vcpu_even: Optional[bool] = None
     pve_mutations_enabled: Optional[bool] = None
+    smtp_enabled: Optional[bool] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
+    smtp_username: Optional[str] = None
+    # Plaintext, write-only, optional -- only touches the stored
+    # (encrypted) password when a caller actually sends a non-empty value.
+    # Not a real column; the endpoint pops it before the generic
+    # setattr loop and encrypts it into smtp_encrypted_password itself.
+    smtp_password: Optional[str] = None
+    smtp_from_address: Optional[str] = None
+    smtp_use_tls: Optional[bool] = None
+    notification_recipient: Optional[str] = None
