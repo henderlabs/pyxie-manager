@@ -4,11 +4,11 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from pyxie_core.audit import write_audit_event
 from pyxie_core.discovery import build_pve_client
@@ -539,47 +539,86 @@ def list_tasks(db: Session = Depends(get_db), limit: int = 50, status: str | Non
 
     # UPID format: UPID:node:pid:pstart:starttime:type:id:user: -- the 7th
     # segment ("id") is the vmid/CT id a VM-scoped task acted on, empty for
-    # a node-level task (host reboot, storage rescan, etc).
+    # a node-level task (host reboot, storage rescan, etc). Keyed by
+    # (cluster_id, vmid), NOT (node_id, vmid) -- PVE enforces vmid
+    # uniqueness cluster-wide, not per-node, and a migration task is
+    # recorded on the SOURCE node while Workload.node_id reflects wherever
+    # the VM lives NOW (the destination, once the migration succeeded) --
+    # confirmed live: keying by node_id silently failed to resolve every
+    # migrated VM's own migration tasks, the one case this table exists to
+    # cover.
     vmid_by_task_id: dict = {}
     lookups: set = set()
     for t in tasks:
         parts = t.upid.split(":")
         vmid_str = parts[6] if len(parts) > 6 else ""
-        if vmid_str.isdigit() and t.node_id:
+        if vmid_str.isdigit():
             vmid = int(vmid_str)
             vmid_by_task_id[t.id] = vmid
-            lookups.add((t.node_id, vmid))
+            lookups.add((t.cluster_id, vmid))
 
-    name_by_node_vmid: dict = {}
+    name_by_cluster_vmid: dict = {}
+    workload_id_by_cluster_vmid: dict = {}
     if lookups:
-        node_ids = {nid for nid, _ in lookups}
-        rows = db.query(Workload.node_id, Workload.vmid, Workload.name).filter(Workload.node_id.in_(node_ids)).all()
-        for node_id, vmid, name in rows:
-            name_by_node_vmid[(node_id, vmid)] = name
+        cluster_ids = {cid for cid, _ in lookups}
+        rows = db.query(Workload.cluster_id, Workload.vmid, Workload.name, Workload.id).filter(Workload.cluster_id.in_(cluster_ids)).all()
+        for cluster_id, vmid, name, wid in rows:
+            name_by_cluster_vmid[(cluster_id, vmid)] = name
+            workload_id_by_cluster_vmid[(cluster_id, vmid)] = wid
 
     # PVE only ever shows a task as run by whichever credential/token
     # PyXie used (e.g. pyxie-maint@pve) -- Phil: "who in PyXie actually
-    # asked for this" needs the Operation this UPID came from. One batched
-    # lookup by pve_upid, not N+1.
-    upids = [t.upid for t in tasks]
-    op_by_upid: dict = {}
-    if upids:
-        op_rows = (
-            db.query(Operation.pve_upid, Operation.id, Operation.operation_type_id, Operation.created_by, Operation.approved_by)
-            .filter(Operation.pve_upid.in_(upids))
-            .all()
-        )
-        for upid, op_id, op_type, created_by, approved_by in op_rows:
-            op_by_upid[upid] = {
-                "operation_id": str(op_id),
-                "operation_type_id": op_type,
-                "initiated_by": approved_by or created_by,
-            }
+    # asked for this" needs the Operation behind it. NOT matched via
+    # Operation.pve_upid despite the column existing: confirmed live that
+    # every completed vm.live_migrate has pve_upid=NULL --
+    # migration_workflow.py deliberately clears it between stages (one
+    # migration can issue several distinct PVE tasks -- shutdown, migrate,
+    # startup -- tracking one UPID at a time, not accumulating history),
+    # so it's a live in-flight pointer, not a permanent record. Matched
+    # instead by object (workload/node) + time overlap: does the task's
+    # start time fall inside the operation's own [created_at, completed_at]
+    # window. Heuristic, not a hard foreign key -- but two operations
+    # concurrently targeting the exact same workload/node practically
+    # don't happen (locks.py's same-target lock prevents it), so object +
+    # time-window is reliable in practice.
+    relevant_workload_ids = set(workload_id_by_cluster_vmid.values())
+    relevant_node_ids = {t.node_id for t in tasks if t.node_id}
+    op_candidates: list = []
+    if relevant_workload_ids or relevant_node_ids:
+        conds = []
+        if relevant_workload_ids:
+            conds.append(Operation.workload_id.in_(relevant_workload_ids))
+        if relevant_node_ids:
+            conds.append(Operation.node_id.in_(relevant_node_ids))
+        op_candidates = db.query(Operation).filter(or_(*conds)).order_by(Operation.created_at.desc()).limit(500).all()
+
+    def _find_operation(task: PveTask, vmid: int | None):
+        if not task.started_at:
+            return None
+        # A VM-scoped task matches on its workload's stable id (works even
+        # for a migration, since workload_id doesn't change when the VM
+        # moves -- only the vmid->workload lookup that FINDS it has to be
+        # cluster-scoped, not node-scoped, see above). A node-level task
+        # (no vmid at all) matches on the operation's own node_id instead.
+        wid = workload_id_by_cluster_vmid.get((task.cluster_id, vmid)) if vmid else None
+        best, best_delta = None, None
+        for op in op_candidates:
+            is_candidate = (wid and op.workload_id == wid) or (not wid and task.node_id and op.node_id == task.node_id)
+            if not is_candidate:
+                continue
+            window_start = op.created_at
+            window_end = op.completed_at or datetime.now(timezone.utc)
+            buffer = timedelta(minutes=1)
+            if window_start - buffer <= task.started_at <= window_end + buffer:
+                delta = abs((task.started_at - op.created_at).total_seconds())
+                if best is None or delta < best_delta:
+                    best, best_delta = op, delta
+        return best
 
     out = []
     for t in tasks:
         vmid = vmid_by_task_id.get(t.id)
-        op = op_by_upid.get(t.upid)
+        op = _find_operation(t, vmid)
         out.append(
             {
                 "id": str(t.id),
@@ -593,10 +632,10 @@ def list_tasks(db: Session = Depends(get_db), limit: int = 50, status: str | Non
                 "started_at": t.started_at.isoformat() if t.started_at else None,
                 "ended_at": t.ended_at.isoformat() if t.ended_at else None,
                 "vmid": vmid,
-                "workload_name": name_by_node_vmid.get((t.node_id, vmid)) if vmid else None,
-                "operation_id": op["operation_id"] if op else None,
-                "operation_type_id": op["operation_type_id"] if op else None,
-                "initiated_by": op["initiated_by"] if op else None,
+                "workload_name": name_by_cluster_vmid.get((t.cluster_id, vmid)) if vmid else None,
+                "operation_id": str(op.id) if op else None,
+                "operation_type_id": op.operation_type_id if op else None,
+                "initiated_by": (op.approved_by or op.created_by) if op else None,
             }
         )
     return out
