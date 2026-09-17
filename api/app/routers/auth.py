@@ -376,6 +376,34 @@ def update_user(
     return _user_out(target)
 
 
+@router.delete("/users/{user_id}")
+def delete_user(user_id: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Hard-deletes a user row -- the one deliberate exception to this
+    app's otherwise-universal "nothing hard-deleted" pattern (sites,
+    nodes, workloads, etc. all soft-delete via is_missing). Phil, on
+    building out real offboarding: deactivate first (blocks login,
+    already protected by the min-one-admin trigger/check), delete only
+    once it's already deactivated -- so this endpoint refuses outright on
+    a still-active account rather than repeating that protection itself."""
+    target = db.query(User).filter(User.id == user_id).one_or_none()
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.is_active:
+        raise HTTPException(status_code=400, detail="Deactivate this user before deleting them")
+
+    write_audit_event(
+        db,
+        event_category="auth",
+        event_type="auth.user.deleted",
+        actor=admin.email,
+        actor_type="user",
+        metadata={"target_email": target.email, "was_admin": target.is_admin},
+    )
+    db.delete(target)
+    db.commit()
+    return {"status": "ok"}
+
+
 @router.post("/users/{user_id}/reinvite")
 def reinvite_user(
     user_id: str, payload: ReinviteRequest = ReinviteRequest(), admin: User = Depends(require_admin), db: Session = Depends(get_db)
