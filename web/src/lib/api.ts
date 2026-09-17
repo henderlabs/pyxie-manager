@@ -288,9 +288,12 @@ export type PveTask = {
   upid: string;
   task_type: string | null;
   status: string | null;
+  exit_status: string | null;
   user: string | null;
   started_at: string | null;
   ended_at: string | null;
+  vmid: number | null;
+  workload_name: string | null;
 };
 
 export type Finding = {

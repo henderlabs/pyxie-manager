@@ -16,16 +16,31 @@ type Channel = "audit" | "tasks" | "jobs";
 // Audit Log was Platform's own page before this; Tasks used to live
 // under Operations -- both retired in
 // favor of this one, redirecting old links here.
-const CHANNELS: { id: Channel; label: string }[] = [
-  { id: "audit", label: "Audit Log" },
-  { id: "tasks", label: "PVE Tasks" },
-  { id: "jobs", label: "Internal Jobs" },
+const CHANNELS: { id: Channel; label: string; description: string }[] = [
+  {
+    id: "audit",
+    label: "Audit Log",
+    description:
+      "What happened in PyXie itself -- both things a user did (logins, settings changes, approvals) and PyXie's own background activity (discovery cycles, etc). Use the \"Who\" filter below to see just user actions.",
+  },
+  {
+    id: "tasks",
+    label: "PVE Tasks",
+    description:
+      "PVE's own task history for this cluster (migrations, backups, snapshots, updates, ...) -- the same list you'd see in the Proxmox web UI under Tasks, synced here on every discovery pass.",
+  },
+  {
+    id: "jobs",
+    label: "Internal Jobs",
+    description:
+      "PyXie's own background scheduler -- whether discovery/metrics/recommendation runs are actually executing on schedule. Not related to individual PVE task failures; see PVE Tasks for those.",
+  },
 ];
 
 export default async function LoggingPage({
   searchParams,
 }: {
-  searchParams: { channel?: string; event_category?: string; result?: string };
+  searchParams: { channel?: string; event_category?: string; result?: string; actor_type?: string; task_status?: string };
 }) {
   const channel: Channel = CHANNELS.some((c) => c.id === searchParams.channel) ? (searchParams.channel as Channel) : "audit";
 
@@ -50,7 +65,7 @@ export default async function LoggingPage({
         icon={<ScrollIcon className="w-5 h-5" />}
       />
 
-      <div className="flex gap-2 mb-4 text-sm">
+      <div className="flex gap-2 mb-2 text-sm">
         {CHANNELS.map((c) => (
           <a
             key={c.id}
@@ -63,6 +78,7 @@ export default async function LoggingPage({
           </a>
         ))}
       </div>
+      <p className="text-xs text-muted mb-4 max-w-3xl">{CHANNELS.find((c) => c.id === channel)!.description}</p>
 
       {channel === "audit" && (
         <AuditChannel
@@ -74,7 +90,14 @@ export default async function LoggingPage({
           providerNameById={providerNameById}
         />
       )}
-      {channel === "tasks" && <TasksChannel nodeNameById={nodeNameById} clusterNameById={clusterNameById} />}
+      {channel === "tasks" && (
+        <TasksChannel
+          searchParams={searchParams}
+          nodeNameById={nodeNameById}
+          clusterNameById={clusterNameById}
+          workloads={workloads}
+        />
+      )}
       {channel === "jobs" && <JobsChannel />}
     </div>
   );
@@ -88,7 +111,7 @@ async function AuditChannel({
   siteNameById,
   providerNameById,
 }: {
-  searchParams: { event_category?: string; result?: string };
+  searchParams: { event_category?: string; result?: string; actor_type?: string };
   nodeNameById: Record<string, string>;
   workloadNameById: Record<string, string>;
   clusterNameById: Record<string, string>;
@@ -98,6 +121,7 @@ async function AuditChannel({
   const params = new URLSearchParams();
   if (searchParams.event_category) params.set("event_category", searchParams.event_category);
   if (searchParams.result) params.set("result", searchParams.result);
+  if (searchParams.actor_type) params.set("actor_type", searchParams.actor_type);
   params.set("limit", "200");
 
   const events = await apiFetch<AuditEvent[]>(`/api/audit-events?${params.toString()}`);
@@ -106,6 +130,11 @@ async function AuditChannel({
     <>
       <form className="flex gap-2 mb-4 text-sm" action="/platform/logging">
         <input type="hidden" name="channel" value="audit" />
+        <select name="actor_type" defaultValue={searchParams.actor_type || ""} className="select">
+          <option value="">Everyone (user + system)</option>
+          <option value="user">User actions only</option>
+          <option value="system">System/background only</option>
+        </select>
         <select name="event_category" defaultValue={searchParams.event_category || ""} className="select">
           <option value="">All categories</option>
           <option value="system">System</option>
@@ -138,18 +167,51 @@ async function AuditChannel({
 }
 
 async function TasksChannel({
+  searchParams,
   nodeNameById,
   clusterNameById,
+  workloads,
 }: {
+  searchParams: { task_status?: string };
   nodeNameById: Record<string, string>;
   clusterNameById: Record<string, string>;
+  workloads: Workload[];
 }) {
-  const tasks = await apiFetch<PveTask[]>("/api/tasks?limit=100");
-  const failedTasks = tasks.filter((t) => t.status && t.status !== "OK").length;
+  const failedOnly = searchParams.task_status === "failed";
+  const params = new URLSearchParams({ limit: "200" });
+  if (failedOnly) params.set("status", "failed");
+  const tasks = await apiFetch<PveTask[]>(`/api/tasks?${params.toString()}`);
+  const workloadIdByVmidNode = Object.fromEntries(workloads.map((w) => [`${w.node_id}:${w.vmid}`, w.id]));
+
   return (
     <Card>
-      <CardTitle>PVE Tasks {failedTasks > 0 && <span className="text-bad">({failedTasks} not OK)</span>}</CardTitle>
-      <PveTasksTable tasks={tasks} nodeNameById={nodeNameById} clusterNameById={clusterNameById} />
+      <div className="flex items-center justify-between mb-2">
+        <CardTitle>PVE Tasks -- historical job failures (snapshot errors, backup failures, ...) are here too</CardTitle>
+        <div className="flex gap-2 text-sm">
+          <a
+            href="/platform/logging?channel=tasks"
+            className={`px-3 py-1 rounded border ${
+              !failedOnly ? "border-accent text-accent bg-accent/10" : "border-border text-muted hover:text-text"
+            }`}
+          >
+            All tasks
+          </a>
+          <a
+            href="/platform/logging?channel=tasks&task_status=failed"
+            className={`px-3 py-1 rounded border ${
+              failedOnly ? "border-accent text-accent bg-accent/10" : "border-border text-muted hover:text-text"
+            }`}
+          >
+            Failed only
+          </a>
+        </div>
+      </div>
+      <PveTasksTable
+        tasks={tasks}
+        nodeNameById={nodeNameById}
+        clusterNameById={clusterNameById}
+        workloadIdByVmidNode={workloadIdByVmidNode}
+      />
     </Card>
   );
 }
