@@ -294,6 +294,9 @@ export type PveTask = {
   ended_at: string | null;
   vmid: number | null;
   workload_name: string | null;
+  operation_id: string | null;
+  operation_type_id: string | null;
+  initiated_by: string | null;
 };
 
 export type Finding = {

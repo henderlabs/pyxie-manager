@@ -6,6 +6,7 @@ import { Table } from "@/components/Table";
 import StatusBadge from "@/components/StatusBadge";
 import { LogDetailGrid } from "@/components/LogDetail";
 import TaskLogViewer from "@/components/TaskLogViewer";
+import OperationLinkViewer from "@/components/OperationLinkViewer";
 
 export default function PveTasksTable({
   tasks,
@@ -55,7 +56,20 @@ export default function PveTasksTable({
           render: (t) => (t.node_id && nodeNameById[t.node_id]) || "—",
           sortValue: (t) => (t.node_id && nodeNameById[t.node_id]) || "",
         },
-        { header: "User", render: (t) => t.user || "—", sortValue: (t) => t.user, optional: true },
+        {
+          header: "User",
+          tooltip: "The PVE credential/token that actually ran this task -- PyXie's own maintenance token for anything PyXie initiated, not a real person.",
+          render: (t) => t.user || "—",
+          sortValue: (t) => t.user,
+          optional: true,
+        },
+        {
+          header: "Initiated by (PyXie)",
+          tooltip: "Who in PyXie approved this, when it was initiated through PyXie at all -- blank means PVE ran it on its own (a scheduled job, HA, etc.) or someone used the PVE UI directly, not PyXie.",
+          render: (t) => t.initiated_by || "—",
+          sortValue: (t) => t.initiated_by || "",
+          optional: true,
+        },
         {
           header: "Started",
           render: (t) => (t.started_at ? new Date(t.started_at).toLocaleString() : "—"),
@@ -72,19 +86,27 @@ export default function PveTasksTable({
         // UPID:node:pid:pstart:starttime:type:id:user: -- kept here as a
         // raw reference field even though vmid/workload_name are now
         // resolved server-side and shown in their own VM column above.
+        const fields: Array<[string, React.ReactNode]> = [
+          ["UPID", t.upid],
+          ["Exit status", t.exit_status],
+          ["VMID", t.vmid],
+          ["Workload", t.workload_name],
+          ["Cluster", (t.cluster_id && clusterNameById[t.cluster_id]) || t.cluster_id],
+          ["Node", (t.node_id && nodeNameById[t.node_id]) || t.node_id],
+        ];
+        // PVE only ever shows this task as run by whichever credential
+        // PyXie used (e.g. pyxie-maint@pve) -- this is who in PyXie
+        // actually asked for it, when it was initiated through PyXie at
+        // all (a task PVE ran on its own, or that a human ran directly
+        // in the PVE UI, has no match here -- that's expected, not a bug).
+        if (t.initiated_by) {
+          fields.push(["Initiated via PyXie by", `${t.initiated_by} (${t.operation_type_id})`]);
+        }
         return (
           <div>
-            <LogDetailGrid
-              fields={[
-                ["UPID", t.upid],
-                ["Exit status", t.exit_status],
-                ["VMID", t.vmid],
-                ["Workload", t.workload_name],
-                ["Cluster", (t.cluster_id && clusterNameById[t.cluster_id]) || t.cluster_id],
-                ["Node", (t.node_id && nodeNameById[t.node_id]) || t.node_id],
-              ]}
-            />
+            <LogDetailGrid fields={fields} />
             <TaskLogViewer taskId={t.id} />
+            {t.operation_id && <OperationLinkViewer operationId={t.operation_id} />}
           </div>
         );
       }}

@@ -557,9 +557,29 @@ def list_tasks(db: Session = Depends(get_db), limit: int = 50, status: str | Non
         for node_id, vmid, name in rows:
             name_by_node_vmid[(node_id, vmid)] = name
 
+    # PVE only ever shows a task as run by whichever credential/token
+    # PyXie used (e.g. pyxie-maint@pve) -- Phil: "who in PyXie actually
+    # asked for this" needs the Operation this UPID came from. One batched
+    # lookup by pve_upid, not N+1.
+    upids = [t.upid for t in tasks]
+    op_by_upid: dict = {}
+    if upids:
+        op_rows = (
+            db.query(Operation.pve_upid, Operation.id, Operation.operation_type_id, Operation.created_by, Operation.approved_by)
+            .filter(Operation.pve_upid.in_(upids))
+            .all()
+        )
+        for upid, op_id, op_type, created_by, approved_by in op_rows:
+            op_by_upid[upid] = {
+                "operation_id": str(op_id),
+                "operation_type_id": op_type,
+                "initiated_by": approved_by or created_by,
+            }
+
     out = []
     for t in tasks:
         vmid = vmid_by_task_id.get(t.id)
+        op = op_by_upid.get(t.upid)
         out.append(
             {
                 "id": str(t.id),
@@ -574,6 +594,9 @@ def list_tasks(db: Session = Depends(get_db), limit: int = 50, status: str | Non
                 "ended_at": t.ended_at.isoformat() if t.ended_at else None,
                 "vmid": vmid,
                 "workload_name": name_by_node_vmid.get((t.node_id, vmid)) if vmid else None,
+                "operation_id": op["operation_id"] if op else None,
+                "operation_type_id": op["operation_type_id"] if op else None,
+                "initiated_by": op["initiated_by"] if op else None,
             }
         )
     return out
