@@ -32,6 +32,11 @@ export default async function RecommendationsPage() {
         subtitle="VM/CT sizing suggestions from observed usage -- explainable, evidence-backed, nothing here executes automatically"
         icon={<LightbulbIcon className="w-5 h-5" />}
       />
+      <p className="text-xs text-muted -mt-4 mb-5">
+        Historical analysis -- CPU/RAM observed over days to weeks, refreshed automatically every few minutes in the
+        background (or on demand below). Not live like the Workloads page&apos;s usage meters; see there for
+        real-time CPU/RAM.
+      </p>
 
       <Card className="mb-4">
         <div className="flex items-center justify-between mb-2">
