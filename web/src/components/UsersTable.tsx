@@ -8,7 +8,9 @@ export default function UsersTable({ initial }: { initial: UserAccount[] }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [reinviteLink, setReinviteLink] = useState<{ id: string; link: string } | null>(null);
+  const [reinviteLink, setReinviteLink] = useState<{ id: string; link: string; emailSent: boolean; emailError: string | null } | null>(
+    null
+  );
 
   async function patch(id: string, body: Record<string, boolean>) {
     setBusyId(id);
@@ -37,13 +39,22 @@ export default function UsersTable({ initial }: { initial: UserAccount[] }) {
     setError(null);
     setReinviteLink(null);
     try {
-      const res = await fetch(`/api/auth/users/${id}/reinvite`, { method: "POST" });
+      const res = await fetch(`/api/auth/users/${id}/reinvite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invite_base_url: window.location.origin }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || `Request failed (${res.status})`);
         return;
       }
-      setReinviteLink({ id, link: `${window.location.origin}/accept-invite?token=${data.invite_token}` });
+      setReinviteLink({
+        id,
+        link: `${window.location.origin}/accept-invite?token=${data.invite_token}`,
+        emailSent: !!data.email_sent,
+        emailError: data.email_error || null,
+      });
       router.refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -114,12 +125,19 @@ export default function UsersTable({ initial }: { initial: UserAccount[] }) {
               {u.last_login_at ? `last login ${new Date(u.last_login_at).toLocaleString()}` : "never logged in"}
             </div>
             {reinviteLink && reinviteLink.id === u.id && (
-              <input
-                readOnly
-                className="input mt-2"
-                value={reinviteLink.link}
-                onClick={(e) => (e.target as HTMLInputElement).select()}
-              />
+              <div className="mt-2">
+                {reinviteLink.emailSent ? (
+                  <div className="text-[11px] text-good mb-1">Emailed to the user.</div>
+                ) : reinviteLink.emailError ? (
+                  <div className="text-[11px] text-bad mb-1">Email failed ({reinviteLink.emailError}) — share this link manually.</div>
+                ) : null}
+                <input
+                  readOnly
+                  className="input"
+                  value={reinviteLink.link}
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+              </div>
             )}
           </div>
         ))}

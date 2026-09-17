@@ -9,6 +9,8 @@ export default function InviteUserForm() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [emailSent, setEmailSent] = useState(false);
+  const [emailError, setEmailError] = useState<string | null>(null);
   const [form, setForm] = useState({ email: "", display_name: "", is_admin: false });
 
   async function submit(e: React.FormEvent) {
@@ -20,7 +22,7 @@ export default function InviteUserForm() {
       const res = await fetch("/api/auth/invite", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, display_name: form.display_name || undefined }),
+        body: JSON.stringify({ ...form, display_name: form.display_name || undefined, invite_base_url: window.location.origin }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -28,6 +30,8 @@ export default function InviteUserForm() {
         return;
       }
       setInviteLink(`${window.location.origin}/accept-invite?token=${data.invite_token}`);
+      setEmailSent(!!data.email_sent);
+      setEmailError(data.email_error || null);
       setForm({ email: "", display_name: "", is_admin: false });
       router.refresh();
     } catch (e) {
@@ -55,10 +59,18 @@ export default function InviteUserForm() {
     return (
       <div className="bg-surface2 border border-border rounded-lg p-4 space-y-3 max-w-lg">
         <div className="text-sm font-semibold text-text">Invite created</div>
-        <div className="text-xs text-muted">
-          Send this link to the new user however you normally would (Slack, text, in person). It expires in 7 days
-          and works once. There is no automatic email — PyXie has no mail configured.
-        </div>
+        {emailSent ? (
+          <div className="text-xs text-good">Emailed to the new user. It expires in 7 days and works once.</div>
+        ) : emailError ? (
+          <div className="text-xs text-bad">
+            Created, but the invite email failed to send ({emailError}). Share this link manually instead.
+          </div>
+        ) : (
+          <div className="text-xs text-muted">
+            Send this link to the new user however you normally would (Slack, text, in person). It expires in 7 days
+            and works once. Email notifications aren&apos;t enabled in Settings, so no automatic email was sent.
+          </div>
+        )}
         <input
           readOnly
           className="input"
