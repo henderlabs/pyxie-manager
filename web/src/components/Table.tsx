@@ -19,7 +19,34 @@ export type Column<T> = {
   tooltip?: string;
 };
 
-type SortState = { header: string; dir: "asc" | "desc" } | null;
+export type SortState = { header: string; dir: "asc" | "desc" } | null;
+
+/** Extracted from Table's own internal sort so a parent that needs to
+ * sort BEFORE slicing (e.g. WorkloadsTable paginating -- sorting must
+ * rank across the full dataset, not just whatever page happens to be
+ * sliced out) can apply the identical logic instead of duplicating it. */
+export function sortRows<T>(rows: T[], columns: Column<T>[], sort: SortState): T[] {
+  if (!sort) return rows;
+  const col = columns.find((c) => c.header === sort.header);
+  if (!col?.sortValue && !col?.compare) return rows;
+  let sorted: T[];
+  if (col.compare) {
+    sorted = [...rows].sort(col.compare);
+  } else {
+    const withKeys = rows.map((r) => ({ r, v: col.sortValue!(r) }));
+    withKeys.sort((a, b) => {
+      if (a.v == null && b.v == null) return 0;
+      if (a.v == null) return 1;
+      if (b.v == null) return -1;
+      if (a.v < b.v) return -1;
+      if (a.v > b.v) return 1;
+      return 0;
+    });
+    sorted = withKeys.map((w) => w.r);
+  }
+  if (sort.dir === "desc") sorted.reverse();
+  return sorted;
+}
 
 type StoredPrefs = {
   order?: string[];
@@ -55,6 +82,8 @@ export function Table<T extends { id: string }>({
   rowClassName,
   onRowClick,
   renderDetail,
+  controlledSort,
+  onSortChange,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -72,10 +101,20 @@ export function Table<T extends { id: string }>({
    * null/undefined for a specific row to skip the toggle for that row
    * only (e.g. nothing more to show than the columns already have). */
   renderDetail?: (row: T) => React.ReactNode;
+  /** Together, these hand sorting to the parent instead of Table managing
+   * it internally -- e.g. WorkloadsTable sorts its full dataset and THEN
+   * paginates, so `rows` here is already sorted (and already sliced to
+   * one page); Table just reflects `controlledSort` in the header arrows
+   * and calls onSortChange instead of touching its own state. Column
+   * order/hidden/width prefs stay internally managed either way. Omit
+   * both (the default) for Table's normal self-contained sorting. */
+  controlledSort?: SortState;
+  onSortChange?: (next: SortState) => void;
 }) {
   const [order, setOrder] = useState<string[]>(columns.map((c) => c.header));
   const [hidden, setHidden] = useState<Set<string>>(new Set());
-  const [sort, setSort] = useState<SortState>(null);
+  const [internalSort, setInternalSort] = useState<SortState>(null);
+  const sort = onSortChange ? controlledSort ?? null : internalSort;
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [pickerOpen, setPickerOpen] = useState(false);
   const [dragging, setDragging] = useState<string | null>(null);
@@ -105,8 +144,8 @@ export function Table<T extends { id: string }>({
     if (prefs.hidden) {
       setHidden(new Set(prefs.hidden.filter((h) => validHeaders.has(h))));
     }
-    if (prefs.sort && validHeaders.has(prefs.sort.header)) {
-      setSort(prefs.sort);
+    if (prefs.sort && validHeaders.has(prefs.sort.header) && !onSortChange) {
+      setInternalSort(prefs.sort);
     }
     if (prefs.widths) {
       const kept: Record<string, number> = {};
@@ -119,7 +158,7 @@ export function Table<T extends { id: string }>({
   }, [storageKey]);
 
   function persist(next: Partial<StoredPrefs>) {
-    const prefs = { order, hidden: Array.from(hidden), sort, widths, ...next };
+    const prefs = { order, hidden: Array.from(hidden), sort: internalSort, widths, ...next };
     savePrefs(storageKey, prefs);
   }
 
@@ -163,37 +202,23 @@ export function Table<T extends { id: string }>({
   }, [columns, order, hidden]);
 
   const sortedRows = useMemo(() => {
-    if (!sort) return rows;
-    const col = columns.find((c) => c.header === sort.header);
-    if (!col?.sortValue && !col?.compare) return rows;
-    let sorted: T[];
-    if (col.compare) {
-      sorted = [...rows].sort(col.compare);
-    } else {
-      const withKeys = rows.map((r) => ({ r, v: col.sortValue!(r) }));
-      withKeys.sort((a, b) => {
-        if (a.v == null && b.v == null) return 0;
-        if (a.v == null) return 1;
-        if (b.v == null) return -1;
-        if (a.v < b.v) return -1;
-        if (a.v > b.v) return 1;
-        return 0;
-      });
-      sorted = withKeys.map((w) => w.r);
-    }
-    if (sort.dir === "desc") sorted.reverse();
-    return sorted;
-  }, [rows, sort, columns]);
+    // Controlled mode: the parent already sorted (and likely paginated)
+    // `rows` itself -- sorting again here would just be redundant.
+    if (onSortChange) return rows;
+    return sortRows(rows, columns, sort);
+  }, [rows, sort, columns, onSortChange]);
 
   function toggleSort(header: string) {
     const col = columns.find((c) => c.header === header);
     if (!col?.sortValue && !col?.compare) return;
-    setSort((prev) => {
-      const next: SortState =
-        prev?.header === header ? (prev.dir === "asc" ? { header, dir: "desc" } : null) : { header, dir: "asc" };
+    const next: SortState =
+      sort?.header === header ? (sort.dir === "asc" ? { header, dir: "desc" } : null) : { header, dir: "asc" };
+    if (onSortChange) {
+      onSortChange(next);
+    } else {
+      setInternalSort(next);
       persist({ sort: next });
-      return next;
-    });
+    }
   }
 
   function onDrop(targetHeader: string) {
