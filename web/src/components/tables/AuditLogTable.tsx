@@ -4,6 +4,7 @@ import type { AuditEvent } from "@/lib/api";
 import { Table } from "@/components/Table";
 import StatusBadge from "@/components/StatusBadge";
 import { LogDetailGrid, prettyJson } from "@/components/LogDetail";
+import OperationLinkViewer from "@/components/OperationLinkViewer";
 
 export default function AuditLogTable({
   events,
@@ -53,22 +54,29 @@ export default function AuditLogTable({
         },
       ]}
       renderDetail={(e) => {
-        const { summary, ...restMetadata } = e.event_metadata || {};
+        const { summary, operation_id, ...restMetadata } = e.event_metadata || {};
         const metadataJson = prettyJson(restMetadata);
         return (
-          <LogDetailGrid
-            fields={[
-              ["Event ID", e.id],
-              ["Operation", e.operation],
-              ["Node", (e.node_id && nodeNameById[e.node_id]) || e.node_id],
-              ["Workload", (e.workload_id && workloadNameById[e.workload_id]) || e.workload_id],
-              ["Cluster", (e.cluster_id && clusterNameById[e.cluster_id]) || e.cluster_id],
-              ["Site", (e.site_id && siteNameById[e.site_id]) || e.site_id],
-              ["Provider", (e.provider_id && providerNameById[e.provider_id]) || e.provider_id],
-              ["Error", e.error],
-              ["Metadata", metadataJson],
-            ]}
-          />
+          <div>
+            <LogDetailGrid
+              fields={[
+                ["Event ID", e.id],
+                ["Operation", e.operation],
+                ["Node", (e.node_id && nodeNameById[e.node_id]) || e.node_id],
+                ["Workload", (e.workload_id && workloadNameById[e.workload_id]) || e.workload_id],
+                ["Cluster", (e.cluster_id && clusterNameById[e.cluster_id]) || e.cluster_id],
+                ["Site", (e.site_id && siteNameById[e.site_id]) || e.site_id],
+                ["Provider", (e.provider_id && providerNameById[e.provider_id]) || e.provider_id],
+                ["Error", e.error],
+                ["Metadata", metadataJson],
+              ]}
+            />
+            {/* Every operation.* event carries its underlying Operation's
+                id in metadata -- resolve it to the full record (target,
+                actual PVE UPID, dry-run summary) instead of leaving it a
+                raw id buried in the JSON above. */}
+            {typeof operation_id === "string" && <OperationLinkViewer operationId={operation_id} />}
+          </div>
         );
       }}
     />

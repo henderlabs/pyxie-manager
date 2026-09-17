@@ -20,6 +20,7 @@ def list_audit_events(
     event_category: str | None = None,
     result: str | None = None,
     actor: str | None = None,
+    actor_type: str | None = None,
     site_id: uuid.UUID | None = None,
     cluster_id: uuid.UUID | None = None,
     node_id: uuid.UUID | None = None,
@@ -36,6 +37,8 @@ def list_audit_events(
         q = q.filter(AuditEvent.result == result)
     if actor:
         q = q.filter(AuditEvent.actor == actor)
+    if actor_type:
+        q = q.filter(AuditEvent.actor_type == actor_type)
     if site_id:
         q = q.filter(AuditEvent.site_id == site_id)
     if cluster_id:

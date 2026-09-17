@@ -281,6 +281,16 @@ export type DashboardSummary = {
 };
 
 
+export type ClusterLogEntry = {
+  id: string;
+  cluster_id: string;
+  node: string | null;
+  tag: string | null;
+  priority: number | null;
+  message: string | null;
+  logged_at: string | null;
+};
+
 export type PveTask = {
   id: string;
   cluster_id: string;
@@ -288,9 +298,15 @@ export type PveTask = {
   upid: string;
   task_type: string | null;
   status: string | null;
+  exit_status: string | null;
   user: string | null;
   started_at: string | null;
   ended_at: string | null;
+  vmid: number | null;
+  workload_name: string | null;
+  operation_id: string | null;
+  operation_type_id: string | null;
+  initiated_by: string | null;
 };
 
 export type Finding = {

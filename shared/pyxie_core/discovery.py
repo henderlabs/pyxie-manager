@@ -18,6 +18,7 @@ from .crypto import decrypt_secret
 from .metrics import collect_metrics_for_cluster
 from .models import (
     Cluster,
+    ClusterLogEntry,
     Node,
     PveCredential,
     PveTarget,
@@ -334,6 +335,20 @@ def _run_discovery_inner(db: Session, target: PveTarget, actor: str = "system") 
 
             cluster.node_count = len(seen_node_ids)
 
+            # Cluster-scoped, not per-node -- PVE's own syslog-style feed
+            # merged across the whole cluster (daemon restarts, corosync/
+            # quorum events, hardware issues), distinct from the per-node
+            # task history synced above. A failure here shouldn't break
+            # the rest of discovery, same "degraded, not fatal" posture
+            # as everything else in this pass.
+            try:
+                log_entries = client.cluster_log(max_entries=500) or []
+            except Exception as e:
+                log_entries = []
+                degraded_reasons.append(f"cluster log fetch failed ({e})")
+            for entry in log_entries:
+                _upsert_cluster_log_entry(db, cluster, entry)
+
             # For any node whose qemu/lxc/storage listing failed above,
             # carry forward its existing non-missing workloads/storage into
             # the seen-sets so the reconciliation below leaves them alone.
@@ -627,3 +642,31 @@ def _upsert_task(db: Session, cluster: Cluster, node: Node, data: dict):
     if data.get("status") not in (None, "running"):
         task.exit_status = data.get("status")
     task.last_seen = now()
+
+
+def _upsert_cluster_log_entry(db: Session, cluster: Cluster, data: dict):
+    # PVE's own "id" is the natural dedupe key for one log line -- an
+    # append-only feed, so once a pve_id has been seen there is never
+    # anything to update on it, only new ones to insert. Falls back to a
+    # synthetic node+timestamp+sequence key on the rare chance PVE omits
+    # id, rather than dropping the entry.
+    pve_id = data.get("id") or f"{data.get('node')}:{data.get('t')}:{data.get('n')}"
+    exists = (
+        db.query(ClusterLogEntry.id)
+        .filter(ClusterLogEntry.cluster_id == cluster.id, ClusterLogEntry.pve_id == pve_id)
+        .first()
+    )
+    if exists is not None:
+        return
+    db.add(
+        ClusterLogEntry(
+            cluster_id=cluster.id,
+            pve_id=pve_id,
+            node=data.get("node"),
+            tag=data.get("tag"),
+            priority=data.get("pri"),
+            message=data.get("msg"),
+            logged_at=datetime.fromtimestamp(data["t"], tz=timezone.utc) if data.get("t") else None,
+            first_seen=now(),
+        )
+    )

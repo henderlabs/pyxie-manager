@@ -21,7 +21,7 @@ from .placement import (
     recommend_destinations,
     recommend_storage_for_candidate,
 )
-from .rightsizing import assess_all_workloads
+from .rightsizing import assess_all_workloads, refresh_rightsizing_cache
 
 USER_OWNED_STATES = {"dismissed"}
 
@@ -89,7 +89,14 @@ def generate_recommendations(db: Session) -> dict:
     # no reason to run compute_capacity()'s per-workload observation queries
     # twice in the same pass.
     capacity_reports = compute_capacity(db)
-    current.extend(_rightsizing_recommendations(db, capacity_reports))
+    # Computed once and cached (refresh_rightsizing_cache persists it as
+    # what GET /rightsizing now serves) -- this used to be a second,
+    # redundant assess_all_workloads() call on top of the one GET
+    # /rightsizing did live on every page load; now there's exactly one
+    # computation per cycle, shared by both.
+    assessments = assess_all_workloads(db)
+    refresh_rightsizing_cache(db, assessments)
+    current.extend(_rightsizing_recommendations(assessments, capacity_reports))
     current.extend(_placement_recommendations(db))
     current.extend(_capacity_recommendations(db, capacity_reports))
     current.extend(_update_recommendations(db))
@@ -117,7 +124,7 @@ def generate_recommendations(db: Session) -> dict:
     return counts
 
 
-def _rightsizing_recommendations(db: Session, capacity_reports: list[dict]) -> list[dict]:
+def _rightsizing_recommendations(assessments: list[dict], capacity_reports: list[dict]) -> list[dict]:
     """One recommendation per workload, not one per resource dimension --
     a workload with both a CPU and a memory suggestion gets a single card
     covering both, matching how the Recommendations page's Apply action
@@ -138,7 +145,7 @@ def _rightsizing_recommendations(db: Session, capacity_reports: list[dict]) -> l
     most_constrained_by_cluster = {r["cluster_id"]: r["most_constrained_resource"] for r in capacity_reports}
 
     recs = []
-    for assessment in assess_all_workloads(db):
+    for assessment in assessments:
         cpu_s = assessment["cpu_suggestion"]
         mem_s = assessment["memory_suggestion"]
         if not cpu_s and not mem_s:

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import type { Finding, Node, Recommendation, RightsizingAssessment, StorageItem, Workload } from "@/lib/api";
-import { Table } from "@/components/Table";
+import { Table, sortRows, type Column, type SortState } from "@/components/Table";
 import { NoInfrastructureHint } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import NotesCell from "@/components/NotesCell";
@@ -219,6 +219,33 @@ export default function WorkloadsTable({
   );
   const visibleWorkloads = showRemoved ? workloads : workloads.filter((w) => !w.is_missing);
 
+  // Same match predicate as WorkloadSearchSelect.tsx (the Maintenance
+  // page's VM picker) -- case-insensitive substring on name or vmid --
+  // so a VM findable there is findable the same way here.
+  const [search, setSearch] = useState("");
+  const searchQuery = search.trim().toLowerCase();
+  const searchedWorkloads = searchQuery
+    ? visibleWorkloads.filter((w) => (w.name || "").toLowerCase().includes(searchQuery) || String(w.vmid).includes(searchQuery))
+    : visibleWorkloads;
+
+  // Server-rendering all ~130+ rows (each with several interactive
+  // per-row components -- Power/Migrate/Resize/notes) was measured at
+  // 4+ seconds on cre-pyxie's real fleet size, the actual cause of "slow
+  // page loads" (confirmed directly: individual data fetches were all
+  // under 100ms, so it was never a data/caching problem). Paginating
+  // cuts the render cost proportionally. Sorting is lifted up to here
+  // (via Table's exported sortRows(), same logic Table uses internally)
+  // and applied BEFORE pagination slices the list, so a sort ranks
+  // across the full dataset, not just whichever page happens to be
+  // showing -- this is meant to hold up at real enterprise fleet sizes,
+  // not just 130 VMs.
+  const PAGE_SIZE = 25;
+  const [sort, setSort] = useState<SortState>(null);
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, showRemoved, sort]);
+
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const nodesByCluster = new Map<string, Node[]>();
   for (const n of nodes) {
@@ -271,23 +298,7 @@ export default function WorkloadsTable({
     return () => clearInterval(interval);
   }, []);
 
-  return (
-    <div>
-      {missingWorkloads.length > 0 && (
-        <label className="flex items-center gap-2 text-xs text-muted mb-2 cursor-pointer w-fit">
-          <input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} />
-          <span>
-            Show removed ({missingWorkloads.length}){" "}
-            <span className="text-text/70">-- no longer visible to PVE, kept here for history</span>
-          </span>
-        </label>
-      )}
-      <Table
-      rows={visibleWorkloads}
-      emptyMessage={<NoInfrastructureHint subject="workloads" />}
-      storageKey="infrastructure-workloads"
-      rowClassName={(w) => (w.id === highlightWorkloadId ? "bg-accent/10 pyxie-jump-target" : "")}
-      columns={[
+  const columns: Column<Workload>[] = [
         { header: "VMID", render: (w) => w.vmid, sortValue: (w) => w.vmid },
         {
           header: "Name",
@@ -553,8 +564,70 @@ export default function WorkloadsTable({
           sortValue: (w) => notes[w.id],
           optional: true,
         },
-      ]}
+  ];
+
+  const sortedSearchedWorkloads = sortRows(searchedWorkloads, columns, sort);
+  const totalPages = Math.max(1, Math.ceil(sortedSearchedWorkloads.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedWorkloads = sortedSearchedWorkloads.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  return (
+    <div>
+      <div className="flex items-center gap-4 mb-2">
+        {missingWorkloads.length > 0 && (
+          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer w-fit shrink-0">
+            <input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} />
+            <span>
+              Show removed ({missingWorkloads.length}){" "}
+              <span className="text-text/70">-- no longer visible to PVE, kept here for history</span>
+            </span>
+          </label>
+        )}
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or vmid…"
+          className="bg-surface2 border border-border rounded px-2 py-1.5 text-sm w-64"
+        />
+      </div>
+      <Table
+        rows={pagedWorkloads}
+        controlledSort={sort}
+        onSortChange={setSort}
+        emptyMessage={searchQuery ? <span className="text-muted">No workloads match &quot;{search}&quot;.</span> : <NoInfrastructureHint subject="workloads" />}
+        storageKey="infrastructure-workloads"
+        rowClassName={(w) => (w.id === highlightWorkloadId ? "bg-accent/10 pyxie-jump-target" : "")}
+        columns={columns}
       />
+      {sortedSearchedWorkloads.length > 0 && (
+        <div className="flex items-center justify-between mt-2 text-xs text-muted">
+          <span>
+            {sortedSearchedWorkloads.length} workload{sortedSearchedWorkloads.length === 1 ? "" : "s"}
+          </span>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage <= 1}
+                className="px-2 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-40"
+              >
+                ← Prev
+              </button>
+              <span>
+                Page {currentPage} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+                className="px-2 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-40"
+              >
+                Next →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

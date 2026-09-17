@@ -8,7 +8,10 @@ export default function UsersTable({ initial }: { initial: UserAccount[] }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [reinviteLink, setReinviteLink] = useState<{ id: string; link: string } | null>(null);
+  const [reinviteLink, setReinviteLink] = useState<{ id: string; link: string; emailSent: boolean; emailError: string | null } | null>(
+    null
+  );
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   async function patch(id: string, body: Record<string, boolean>) {
     setBusyId(id);
@@ -37,13 +40,41 @@ export default function UsersTable({ initial }: { initial: UserAccount[] }) {
     setError(null);
     setReinviteLink(null);
     try {
-      const res = await fetch(`/api/auth/users/${id}/reinvite`, { method: "POST" });
+      const res = await fetch(`/api/auth/users/${id}/reinvite`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ invite_base_url: window.location.origin }),
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || `Request failed (${res.status})`);
         return;
       }
-      setReinviteLink({ id, link: `${window.location.origin}/accept-invite?token=${data.invite_token}` });
+      setReinviteLink({
+        id,
+        link: `${window.location.origin}/accept-invite?token=${data.invite_token}`,
+        emailSent: !!data.email_sent,
+        emailError: data.email_error || null,
+      });
+      router.refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteUser(id: string) {
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/auth/users/${id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || `Request failed (${res.status})`);
+        return;
+      }
+      setConfirmDeleteId(null);
       router.refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -108,18 +139,52 @@ export default function UsersTable({ initial }: { initial: UserAccount[] }) {
                     Reinvite
                   </button>
                 )}
+                {!u.is_active && (
+                  <button
+                    disabled={busyId === u.id}
+                    onClick={() => setConfirmDeleteId(u.id)}
+                    title="Permanently removes this account. Deactivated users can't sign in, but stay listed until deleted -- unlike everything else in PyXie (sites, nodes, workloads), this is a real hard delete, not a soft one."
+                    className="px-2 py-1 rounded text-xs font-medium bg-surface text-bad border border-bad hover:bg-bad/10 disabled:opacity-50"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
             <div className="text-[11px] text-muted mt-1">
               {u.last_login_at ? `last login ${new Date(u.last_login_at).toLocaleString()}` : "never logged in"}
             </div>
+            {confirmDeleteId === u.id && (
+              <div className="mt-2 border border-bad rounded p-2 bg-bad/5 text-xs flex items-center gap-3">
+                <span className="text-text">
+                  Permanently delete {u.display_name || u.email}? This cannot be undone.
+                </span>
+                <button
+                  disabled={busyId === u.id}
+                  onClick={() => deleteUser(u.id)}
+                  className="px-2 py-1 rounded font-medium bg-bad text-white hover:bg-bad/80 disabled:opacity-50 shrink-0"
+                >
+                  {busyId === u.id ? "Deleting…" : "Confirm delete"}
+                </button>
+                <button onClick={() => setConfirmDeleteId(null)} className="text-muted hover:text-text shrink-0">
+                  cancel
+                </button>
+              </div>
+            )}
             {reinviteLink && reinviteLink.id === u.id && (
-              <input
-                readOnly
-                className="input mt-2"
-                value={reinviteLink.link}
-                onClick={(e) => (e.target as HTMLInputElement).select()}
-              />
+              <div className="mt-2">
+                {reinviteLink.emailSent ? (
+                  <div className="text-[11px] text-good mb-1">Emailed to the user.</div>
+                ) : reinviteLink.emailError ? (
+                  <div className="text-[11px] text-bad mb-1">Email failed ({reinviteLink.emailError}) — share this link manually.</div>
+                ) : null}
+                <input
+                  readOnly
+                  className="input"
+                  value={reinviteLink.link}
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                />
+              </div>
             )}
           </div>
         ))}

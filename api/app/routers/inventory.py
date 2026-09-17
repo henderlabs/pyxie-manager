@@ -4,11 +4,11 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from pyxie_core.audit import write_audit_event
 from pyxie_core.discovery import build_pve_client
@@ -21,6 +21,7 @@ from pyxie_core.credentials import (
     load_pve_credentials,
 )
 from pyxie_core.pve_client import PveClient
+from pyxie_core.pve_write_client import PveMaintenanceClient
 from pyxie_core.host_maintenance_client import (
     HostKeyMismatchError,
     HostKeyNotPinnedError,
@@ -33,6 +34,7 @@ from pyxie_core.host_maintenance_client import (
 from pyxie_core.models import (
     AppSettings,
     Cluster,
+    ClusterLogEntry,
     HostMaintenanceCredential,
     Node,
     Operation,
@@ -519,9 +521,195 @@ def list_storage(db: Session = Depends(get_db)):
     return db.query(Storage).order_by(Storage.name).all()
 
 
-@router.get("/tasks", response_model=list[schemas.PveTaskOut])
-def list_tasks(db: Session = Depends(get_db), limit: int = 50):
-    return db.query(PveTask).order_by(PveTask.started_at.desc().nullslast()).limit(limit).all()
+@router.get("/tasks")
+def list_tasks(db: Session = Depends(get_db), limit: int = 50, status: str | None = None):
+    """status="failed" filters to tasks whose exit status wasn't OK/running
+    -- the diagnostic list (Phil: historical job failures like snapshot
+    errors, surfaced separately). Also resolves each task's UPID-embedded
+    vmid to the workload's real name, not just the raw id -- previously
+    only the raw vmid was ever shown (parsed client-side from the UPID
+    string), never a name."""
+    q = db.query(PveTask)
+    if status == "failed":
+        # exit_status, not status -- same field findings.py's task.failed
+        # check uses: it's the sticky terminal value (never reverts to
+        # None/"running" once a task has finished at least once), where
+        # status can legitimately be in-flight state on a later poll.
+        q = q.filter(PveTask.exit_status.isnot(None), PveTask.exit_status != "OK")
+    tasks = q.order_by(PveTask.started_at.desc().nullslast()).limit(min(limit, 500)).all()
+
+    # UPID format: UPID:node:pid:pstart:starttime:type:id:user: -- the 7th
+    # segment ("id") is the vmid/CT id a VM-scoped task acted on, empty for
+    # a node-level task (host reboot, storage rescan, etc). Keyed by
+    # (cluster_id, vmid), NOT (node_id, vmid) -- PVE enforces vmid
+    # uniqueness cluster-wide, not per-node, and a migration task is
+    # recorded on the SOURCE node while Workload.node_id reflects wherever
+    # the VM lives NOW (the destination, once the migration succeeded) --
+    # confirmed live: keying by node_id silently failed to resolve every
+    # migrated VM's own migration tasks, the one case this table exists to
+    # cover.
+    vmid_by_task_id: dict = {}
+    lookups: set = set()
+    for t in tasks:
+        parts = t.upid.split(":")
+        vmid_str = parts[6] if len(parts) > 6 else ""
+        if vmid_str.isdigit():
+            vmid = int(vmid_str)
+            vmid_by_task_id[t.id] = vmid
+            lookups.add((t.cluster_id, vmid))
+
+    name_by_cluster_vmid: dict = {}
+    workload_id_by_cluster_vmid: dict = {}
+    if lookups:
+        cluster_ids = {cid for cid, _ in lookups}
+        rows = db.query(Workload.cluster_id, Workload.vmid, Workload.name, Workload.id).filter(Workload.cluster_id.in_(cluster_ids)).all()
+        for cluster_id, vmid, name, wid in rows:
+            name_by_cluster_vmid[(cluster_id, vmid)] = name
+            workload_id_by_cluster_vmid[(cluster_id, vmid)] = wid
+
+    # PVE only ever shows a task as run by whichever credential/token
+    # PyXie used (e.g. pyxie-maint@pve) -- Phil: "who in PyXie actually
+    # asked for this" needs the Operation behind it. NOT matched via
+    # Operation.pve_upid despite the column existing: confirmed live that
+    # every completed vm.live_migrate has pve_upid=NULL --
+    # migration_workflow.py deliberately clears it between stages (one
+    # migration can issue several distinct PVE tasks -- shutdown, migrate,
+    # startup -- tracking one UPID at a time, not accumulating history),
+    # so it's a live in-flight pointer, not a permanent record. Matched
+    # instead by object (workload/node) + time overlap: does the task's
+    # start time fall inside the operation's own [created_at, completed_at]
+    # window. Heuristic, not a hard foreign key -- but two operations
+    # concurrently targeting the exact same workload/node practically
+    # don't happen (locks.py's same-target lock prevents it), so object +
+    # time-window is reliable in practice.
+    relevant_workload_ids = set(workload_id_by_cluster_vmid.values())
+    relevant_node_ids = {t.node_id for t in tasks if t.node_id}
+    op_candidates: list = []
+    if relevant_workload_ids or relevant_node_ids:
+        conds = []
+        if relevant_workload_ids:
+            conds.append(Operation.workload_id.in_(relevant_workload_ids))
+        if relevant_node_ids:
+            conds.append(Operation.node_id.in_(relevant_node_ids))
+        op_candidates = db.query(Operation).filter(or_(*conds)).order_by(Operation.created_at.desc()).limit(500).all()
+
+    def _find_operation(task: PveTask, vmid: int | None):
+        if not task.started_at:
+            return None
+        # A VM-scoped task matches on its workload's stable id (works even
+        # for a migration, since workload_id doesn't change when the VM
+        # moves -- only the vmid->workload lookup that FINDS it has to be
+        # cluster-scoped, not node-scoped, see above). A node-level task
+        # (no vmid at all) matches on the operation's own node_id instead.
+        wid = workload_id_by_cluster_vmid.get((task.cluster_id, vmid)) if vmid else None
+        best, best_delta = None, None
+        for op in op_candidates:
+            is_candidate = (wid and op.workload_id == wid) or (not wid and task.node_id and op.node_id == task.node_id)
+            if not is_candidate:
+                continue
+            window_start = op.created_at
+            window_end = op.completed_at or datetime.now(timezone.utc)
+            buffer = timedelta(minutes=1)
+            if window_start - buffer <= task.started_at <= window_end + buffer:
+                delta = abs((task.started_at - op.created_at).total_seconds())
+                if best is None or delta < best_delta:
+                    best, best_delta = op, delta
+        return best
+
+    out = []
+    for t in tasks:
+        vmid = vmid_by_task_id.get(t.id)
+        op = _find_operation(t, vmid)
+        out.append(
+            {
+                "id": str(t.id),
+                "cluster_id": str(t.cluster_id),
+                "node_id": str(t.node_id) if t.node_id else None,
+                "upid": t.upid,
+                "task_type": t.task_type,
+                "status": t.status,
+                "exit_status": t.exit_status,
+                "user": t.user,
+                "started_at": t.started_at.isoformat() if t.started_at else None,
+                "ended_at": t.ended_at.isoformat() if t.ended_at else None,
+                "vmid": vmid,
+                "workload_name": name_by_cluster_vmid.get((t.cluster_id, vmid)) if vmid else None,
+                "operation_id": str(op.id) if op else None,
+                "operation_type_id": op.operation_type_id if op else None,
+                "initiated_by": (op.approved_by or op.created_by) if op else None,
+            }
+        )
+    return out
+
+
+@router.get("/cluster-log")
+def list_cluster_log(
+    db: Session = Depends(get_db),
+    limit: int = 100,
+    node: str | None = None,
+    max_priority: int | None = None,
+):
+    """PVE's own syslog-style cluster log (see PveClient.cluster_log()) --
+    ambient system activity, distinct from PVE Tasks (job outcomes) and
+    Audit Log (what PyXie itself did). max_priority filters to that
+    severity or worse (lower pri number = more severe, standard syslog
+    scale) -- e.g. max_priority=3 shows err/crit/alert/emerg only."""
+    q = db.query(ClusterLogEntry)
+    if node:
+        q = q.filter(ClusterLogEntry.node == node)
+    if max_priority is not None:
+        q = q.filter(ClusterLogEntry.priority.isnot(None), ClusterLogEntry.priority <= max_priority)
+    entries = q.order_by(ClusterLogEntry.logged_at.desc().nullslast()).limit(min(limit, 500)).all()
+    return [
+        {
+            "id": str(e.id),
+            "cluster_id": str(e.cluster_id),
+            "node": e.node,
+            "tag": e.tag,
+            "priority": e.priority,
+            "message": e.message,
+            "logged_at": e.logged_at.isoformat() if e.logged_at else None,
+        }
+        for e in entries
+    ]
+
+
+@router.get("/tasks/{task_id}/log")
+def get_task_log(task_id: uuid.UUID, db: Session = Depends(get_db)):
+    """On-demand fetch of PVE's own full task log -- the task list itself
+    only ever stores PVE's short summary status (e.g. "OK" or a one-line
+    error), never the full log lines a real diagnosis needs. Requires a
+    'maintenance'-tier credential for this task's target (the same slot
+    live-migration progress-polling already uses for task_log() -- see
+    migration_workflow.py); 'inventory'-only targets get a clear message
+    instead of a 403, not a raw credential error."""
+    task = db.query(PveTask).filter(PveTask.id == task_id).one_or_none()
+    if task is None:
+        raise HTTPException(404, "task not found")
+    if task.node_id is None:
+        return {"error": "This task has no associated node (already missing from inventory).", "lines": []}
+    node = db.query(Node).filter(Node.id == task.node_id).one_or_none()
+    cluster = db.query(Cluster).filter(Cluster.id == task.cluster_id).one_or_none()
+    if node is None or cluster is None:
+        return {"error": "The node or cluster this task ran on is no longer known to PyXie.", "lines": []}
+    target = db.query(PveTarget).filter(PveTarget.id == cluster.pve_target_id).one_or_none()
+    if target is None:
+        return {"error": "The PVE target this task ran on is no longer configured.", "lines": []}
+
+    try:
+        creds = load_pve_credentials(db, target, "maintenance")
+    except CredentialNotConfigured:
+        return {
+            "error": "Full task log requires a 'maintenance' credential configured for this PVE target -- see the Credentials page.",
+            "lines": [],
+        }
+
+    try:
+        with PveMaintenanceClient(creds) as client:
+            lines = client.task_log(node.name, task.upid, start=0, limit=500)
+    except Exception as e:
+        return {"error": str(e), "lines": []}
+    return {"error": None, "lines": lines}
 
 
 @router.get("/dashboard/summary")

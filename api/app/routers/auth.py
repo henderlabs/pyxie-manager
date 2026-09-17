@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from pyxie_core.audit import write_audit_event
 from pyxie_core.auth import generate_session_token, hash_password, session_expiry, verify_password
-from pyxie_core.models import Session as SessionModel, User
+from pyxie_core.mail import send_email
+from pyxie_core.models import AppSettings, Session as SessionModel, User
 
 from ..auth_deps import get_current_user, require_admin
 from ..deps import get_db
@@ -32,6 +33,16 @@ class InviteRequest(BaseModel):
     email: EmailStr
     display_name: str | None = None
     is_admin: bool = False
+    # The browser's own origin (window.location.origin) -- the backend
+    # doesn't reliably know its own public-facing URL (could be behind any
+    # domain/proxy), so the frontend supplies it the same way it already
+    # builds the copy-paste link client-side. None skips the email attempt
+    # entirely (falls back to copy-paste only).
+    invite_base_url: str | None = None
+
+
+class ReinviteRequest(BaseModel):
+    invite_base_url: str | None = None
 
 
 class AcceptInviteRequest(BaseModel):
@@ -195,6 +206,52 @@ def update_me(payload: MeUpdate, db: Session = Depends(get_db), user: User = Dep
     return {"email": user.email, "display_name": user.display_name, "is_admin": user.is_admin}
 
 
+def _send_invite_email(db: Session, user: User, base_url: str | None, *, actor: str) -> tuple[bool, str | None]:
+    """Best-effort: emails the invite link if SMTP is enabled/configured
+    and the caller supplied a base URL. Never raises -- the invite itself
+    (and its copy-paste link) already succeeded regardless of whether this
+    works, matching the settings.test-email endpoint's own
+    try/except-into-a-status-dict shape rather than failing the request."""
+    if not base_url:
+        return False, None
+    settings = db.query(AppSettings).filter(AppSettings.id == 1).one()
+    if not settings.smtp_enabled:
+        return False, None
+
+    link = f"{base_url}/accept-invite?token={user.invite_token}"
+    try:
+        send_email(
+            settings,
+            user.email,
+            subject="You've been invited to PyXie",
+            body=f"You've been invited to PyXie Manager. Set up your account:\n\n{link}\n\nThis link expires in {INVITE_TTL_DAYS} days and works once.",
+        )
+    except Exception as e:
+        write_audit_event(
+            db,
+            event_category="auth",
+            event_type="auth.invite.emailed",
+            actor=actor,
+            actor_type="user",
+            result="failure",
+            severity="warning",
+            error=str(e),
+            metadata={"invited_email": user.email},
+        )
+        return False, str(e)
+
+    write_audit_event(
+        db,
+        event_category="auth",
+        event_type="auth.invite.emailed",
+        actor=actor,
+        actor_type="user",
+        result="success",
+        metadata={"invited_email": user.email},
+    )
+    return True, None
+
+
 @router.post("/invite")
 def invite_user(payload: InviteRequest, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == payload.email).one_or_none() is not None:
@@ -220,7 +277,15 @@ def invite_user(payload: InviteRequest, admin: User = Depends(require_admin), db
     )
     db.commit()
     db.refresh(user)
-    return {"invite_token": user.invite_token, "expires_at": user.invite_token_expires_at.isoformat(), **_user_out(user)}
+    email_sent, email_error = _send_invite_email(db, user, payload.invite_base_url, actor=admin.email)
+    db.commit()
+    return {
+        "invite_token": user.invite_token,
+        "expires_at": user.invite_token_expires_at.isoformat(),
+        "email_sent": email_sent,
+        "email_error": email_error,
+        **_user_out(user),
+    }
 
 
 @router.get("/invite/{token}")
@@ -311,8 +376,38 @@ def update_user(
     return _user_out(target)
 
 
+@router.delete("/users/{user_id}")
+def delete_user(user_id: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Hard-deletes a user row -- the one deliberate exception to this
+    app's otherwise-universal "nothing hard-deleted" pattern (sites,
+    nodes, workloads, etc. all soft-delete via is_missing). Phil, on
+    building out real offboarding: deactivate first (blocks login,
+    already protected by the min-one-admin trigger/check), delete only
+    once it's already deactivated -- so this endpoint refuses outright on
+    a still-active account rather than repeating that protection itself."""
+    target = db.query(User).filter(User.id == user_id).one_or_none()
+    if target is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.is_active:
+        raise HTTPException(status_code=400, detail="Deactivate this user before deleting them")
+
+    write_audit_event(
+        db,
+        event_category="auth",
+        event_type="auth.user.deleted",
+        actor=admin.email,
+        actor_type="user",
+        metadata={"target_email": target.email, "was_admin": target.is_admin},
+    )
+    db.delete(target)
+    db.commit()
+    return {"status": "ok"}
+
+
 @router.post("/users/{user_id}/reinvite")
-def reinvite_user(user_id: str, admin: User = Depends(require_admin), db: Session = Depends(get_db)):
+def reinvite_user(
+    user_id: str, payload: ReinviteRequest = ReinviteRequest(), admin: User = Depends(require_admin), db: Session = Depends(get_db)
+):
     target = db.query(User).filter(User.id == user_id).one_or_none()
     if target is None:
         raise HTTPException(status_code=404, detail="User not found")
@@ -331,4 +426,11 @@ def reinvite_user(user_id: str, admin: User = Depends(require_admin), db: Sessio
     )
     db.commit()
     db.refresh(target)
-    return {"invite_token": target.invite_token, "expires_at": target.invite_token_expires_at.isoformat()}
+    email_sent, email_error = _send_invite_email(db, target, payload.invite_base_url, actor=admin.email)
+    db.commit()
+    return {
+        "invite_token": target.invite_token,
+        "expires_at": target.invite_token_expires_at.isoformat(),
+        "email_sent": email_sent,
+        "email_error": email_error,
+    }

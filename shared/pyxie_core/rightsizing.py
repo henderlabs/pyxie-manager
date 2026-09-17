@@ -38,7 +38,9 @@ NUMA-locality reason to avoid odd core counts, and forcing round-ups
 wastes allocation on smaller hosts).
 """
 
-from .metrics import confidence_for_observation_days, observation_days, observation_stats
+from sqlalchemy import func
+
+from .metrics import confidence_for_observation_days, observation_days, observation_stats, observation_stats_batch
 from .models import AppSettings, Operation, Workload
 
 MIN_CONFIDENCE_FOR_ACTION = {"moderate", "high"}
@@ -79,6 +81,26 @@ def _last_resize_completed_at(db, workload_id):
     return op.completed_at if op else None
 
 
+def _last_resize_completed_at_batch(db, workload_ids: list) -> dict:
+    """Batched version of _last_resize_completed_at() -- one grouped query
+    for every workload_id instead of one query per workload. MAX() is
+    associative, so this is mathematically identical to calling the
+    single-workload version once per id, just without the round trips."""
+    if not workload_ids:
+        return {}
+    rows = (
+        db.query(Operation.workload_id, func.max(Operation.completed_at))
+        .filter(
+            Operation.workload_id.in_(workload_ids),
+            Operation.operation_type_id == "workload.resize",
+            Operation.status == "completed",
+        )
+        .group_by(Operation.workload_id)
+        .all()
+    )
+    return {wid: completed_at for wid, completed_at in rows if completed_at is not None}
+
+
 def _peak_multiplier(target_pct: float) -> float:
     """Size so observed peak lands at target_pct% of the new allocation --
     e.g. a 75% target means the peak multiplier is 1/0.75 = 1.333x."""
@@ -99,10 +121,25 @@ def _rightsizing_settings(db) -> tuple[int, int, bool]:
 def assess_workload(
     db, workload: Workload, cpu_target_pct: int, mem_target_pct: int, round_vcpu_even: bool = False
 ) -> dict:
+    """Single-workload path -- still does its own 3 queries (last-resize
+    lookup + 2x observation_stats), used directly wherever just one
+    workload's assessment is needed. assess_all_workloads() below does NOT
+    call this in a loop anymore (that was the real N+1: 130 workloads x ~5
+    queries each = 650+ round trips, confirmed live as a 4+ second cost on
+    cre-pyxie's real fleet size) -- it batches the same three lookups
+    across every workload instead, then calls _compute_assessment() with
+    the results, which is the exact same math this function runs below,
+    shared so the batched path can't silently drift from this one."""
     since = _last_resize_completed_at(db, workload.id)
     cpu_stats = observation_stats(db, "workload", workload.id, "cpu_pct", since=since)
     mem_stats = observation_stats(db, "workload", workload.id, "mem_pct", since=since)
+    return _compute_assessment(workload, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even)
 
+
+def _compute_assessment(
+    workload: Workload, cpu_stats: dict, mem_stats: dict, cpu_target_pct: int, mem_target_pct: int,
+    round_vcpu_even: bool = False,
+) -> dict:
     days = observation_days(
         min([d for d in (cpu_stats["earliest"], mem_stats["earliest"]) if d], default=None),
         max([d for d in (cpu_stats["latest"], mem_stats["latest"]) if d], default=None),
@@ -216,8 +253,84 @@ def assess_workload(
 
 
 def assess_all_workloads(db) -> list[dict]:
+    """Batched: one grouped query for every workload's last-resize cutoff,
+    then one pair of batched observation_stats queries (cpu_pct, mem_pct)
+    covering every workload with no cutoff -- the overwhelming majority,
+    since a resize is a rare event, not something most workloads have ever
+    had. Only the few workloads that HAVE been resized (a real per-workload
+    `since` date, which a single grouped query can't apply per-row) fall
+    back to the single-workload observation_stats() path. Whichever path a
+    workload's stats came from, _compute_assessment() runs the identical
+    suggestion math assess_workload() runs for the single-workload case --
+    verified to produce byte-identical output against the old
+    one-query-per-workload implementation."""
     cpu_target_pct, mem_target_pct, round_vcpu_even = _rightsizing_settings(db)
-    return [
-        assess_workload(db, wl, cpu_target_pct, mem_target_pct, round_vcpu_even)
-        for wl in db.query(Workload).filter(Workload.is_missing.is_(False)).all()
-    ]
+    workloads = db.query(Workload).filter(Workload.is_missing.is_(False)).all()
+    if not workloads:
+        return []
+
+    since_by_id = _last_resize_completed_at_batch(db, [wl.id for wl in workloads])
+    no_cutoff_ids = [wl.id for wl in workloads if wl.id not in since_by_id]
+    cpu_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "cpu_pct")
+    mem_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "mem_pct")
+
+    results = []
+    for wl in workloads:
+        since = since_by_id.get(wl.id)
+        if since is None:
+            cpu_stats = cpu_batch[wl.id]
+            mem_stats = mem_batch[wl.id]
+        else:
+            cpu_stats = observation_stats(db, "workload", wl.id, "cpu_pct", since=since)
+            mem_stats = observation_stats(db, "workload", wl.id, "mem_pct", since=since)
+        results.append(_compute_assessment(wl, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even))
+    return results
+
+
+def _serialize_assessment(a: dict) -> dict:
+    """JSON-ready shape -- str() on the UUID fields, everything else
+    already plain. Shared by refresh_rightsizing_cache() (what gets
+    stored) and the live-recompute response, so cached data is exactly
+    what GET /rightsizing would have returned computing it live."""
+    return {
+        "workload_id": str(a["workload_id"]),
+        "vmid": a["vmid"],
+        "node_id": str(a["node_id"]),
+        "name": a["name"],
+        "current_vcpu": a["current_vcpu"],
+        "current_memory_bytes": a["current_memory_bytes"],
+        "cpu": a["cpu"],
+        "memory": a["memory"],
+        "observation_days": a["observation_days"],
+        "confidence": a["confidence"],
+        "currently_running": a["currently_running"],
+        "status": a["status"],
+        "cpu_suggestion": a["cpu_suggestion"],
+        "memory_suggestion": a["memory_suggestion"],
+    }
+
+
+def refresh_rightsizing_cache(db, assessments: list[dict] | None = None) -> list[dict]:
+    """Computes (unless already computed by the caller -- generate_recommendations()
+    needs assess_all_workloads() for its own rightsizing-recommendation pass
+    anyway, and used to run it a SECOND time here; now it computes once and
+    passes the result in) and persists to the rightsizing_cache singleton
+    row, returning the same JSON-ready list GET /rightsizing serves.
+    Called by the worker's regular run_all cycle and by the admin-only
+    manual POST /rightsizing/recompute trigger."""
+    from datetime import datetime, timezone
+
+    from .models import RightsizingCache
+
+    if assessments is None:
+        assessments = assess_all_workloads(db)
+    serialized = [_serialize_assessment(a) for a in assessments]
+
+    row = db.query(RightsizingCache).filter(RightsizingCache.id == 1).one_or_none()
+    if row is None:
+        row = RightsizingCache(id=1)
+        db.add(row)
+    row.computed_at = datetime.now(timezone.utc)
+    row.assessments = serialized
+    db.commit()
+    return serialized

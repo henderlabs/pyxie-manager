@@ -181,6 +181,97 @@ def observation_stats(
     }
 
 
+def observation_stats_batch(
+    db: Session, object_type: str, object_ids: list, metric: str,
+) -> dict:
+    """Batched version of observation_stats() for the common case (no
+    per-object `since`/`window_days` cutoff) -- rightsizing's real bottleneck
+    was calling observation_stats() once per workload (2 queries each, one of
+    which -- the p95 one -- pulls back every raw sample), so 130 workloads
+    meant 260+ sequential round trips (measured live: 4.4s on cre-pyxie's
+    real fleet). The obvious fix -- fetch every raw value for every workload
+    in one query, group/sort/index in Python -- was tried and measured
+    WORSE (10.7s): transferring ~300K+ raw rows through SQLAlchemy's ORM
+    (UUID/float deserialization per row) dominates regardless of how few
+    queries that takes, and Postgres sorting one huge combined multi-workload
+    result set by an unindexed column is itself expensive.
+
+    What actually works: the grouped aggregate (avg/max/count/earliest/
+    latest) in one query -- fast, ~130 tiny output rows, no raw-row
+    transfer, and avg/max/count are associative so this is mathematically
+    identical to computing them one workload at a time. For p95
+    specifically, compute each workload's target RANK from its own count
+    (the exact same 0-indexed round(0.95*(n-1)) formula the single-workload
+    path uses -- computed in Python, so there's no risk of a SQL round()
+    tie-breaking rule silently disagreeing with Python's), then ask
+    Postgres for exactly the one value at that rank per workload
+    (`ORDER BY value OFFSET rank LIMIT 1`) -- Postgres does the sort
+    server-side and only the single selected value comes back, never the
+    raw samples. Measured: 130 of these OFFSET/LIMIT queries in ~390ms,
+    vs 4.5s+ to bulk-transfer the same data.
+
+    A caller that needs a `since`/`window_days` cutoff (rightsizing after a
+    resize, capacity.py's 14-day window) still uses observation_stats()
+    per-object -- rare enough (a resized workload) or already narrow enough
+    in scope not to be the bottleneck this exists for."""
+    if not object_ids:
+        return {}
+
+    empty = {"avg": None, "p95": None, "max": None, "sample_count": 0, "earliest": None, "latest": None}
+    out = {oid: dict(empty) for oid in object_ids}
+
+    agg_rows = (
+        db.query(
+            MetricPoint.object_id,
+            func.avg(MetricPoint.value),
+            func.max(MetricPoint.value),
+            func.count(MetricPoint.value),
+            func.min(MetricPoint.sampled_at),
+            func.max(MetricPoint.sampled_at),
+        )
+        .filter(
+            MetricPoint.object_type == object_type,
+            MetricPoint.object_id.in_(object_ids),
+            MetricPoint.metric == metric,
+            MetricPoint.value.isnot(None),
+        )
+        .group_by(MetricPoint.object_id)
+        .all()
+    )
+    for object_id, avg, mx, count, earliest, latest in agg_rows:
+        out[object_id] = {
+            "avg": round(avg, 1) if avg is not None else None,
+            "p95": None,  # filled in below, one targeted OFFSET/LIMIT query at a time
+            "max": round(mx, 1) if mx is not None else None,
+            "sample_count": count or 0,
+            "earliest": earliest,
+            "latest": latest,
+        }
+
+    for object_id, stats in out.items():
+        n = stats["sample_count"]
+        if not n:
+            continue
+        rank0 = min(n - 1, int(round(0.95 * (n - 1))))
+        p95 = (
+            db.query(MetricPoint.value)
+            .filter(
+                MetricPoint.object_type == object_type,
+                MetricPoint.object_id == object_id,
+                MetricPoint.metric == metric,
+                MetricPoint.value.isnot(None),
+            )
+            .order_by(MetricPoint.value)
+            .offset(rank0)
+            .limit(1)
+            .scalar()
+        )
+        if p95 is not None:
+            stats["p95"] = round(p95, 1)
+
+    return out
+
+
 def observation_days(earliest, latest) -> float:
     if not earliest or not latest:
         return 0.0

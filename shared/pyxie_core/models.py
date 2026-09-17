@@ -216,6 +216,30 @@ class PveTask(Base):
     last_seen = Column(DateTime(timezone=True), default=now_utc, nullable=False)
 
 
+class ClusterLogEntry(Base):
+    """PVE's own syslog-style cluster log (see PveClient.cluster_log()) --
+    ambient system activity (daemon restarts, corosync/quorum events,
+    hardware issues), distinct from PveTask (a job's outcome). PVE itself
+    only keeps a small rolling buffer, so this persists what's been seen
+    to build real history, deduped on (cluster_id, pve_id) -- pve_id is
+    PVE's own stable identifier for that log line, not something PyXie
+    invents."""
+
+    __tablename__ = "cluster_log_entries"
+
+    id = uuid_pk()
+    cluster_id = Column(UUID(as_uuid=True), ForeignKey("clusters.id"), nullable=False)
+    pve_id = Column(String, nullable=False)
+    node = Column(String, nullable=True)
+    tag = Column(String, nullable=True)
+    priority = Column(Integer, nullable=True)  # syslog pri: 0=emerg .. 7=debug, lower is more severe
+    message = Column(Text, nullable=True)
+    logged_at = Column(DateTime(timezone=True), nullable=True)
+    first_seen = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+
+    __table_args__ = (UniqueConstraint("cluster_id", "pve_id", name="uq_cluster_log_cluster_pve_id"),)
+
+
 # ---------------------------------------------------------------------------
 # Provider framework: categories + capabilities are namespaced data, not enums
 # ---------------------------------------------------------------------------
@@ -462,6 +486,25 @@ class AppSettings(Base):
     @property
     def smtp_password_set(self) -> bool:
         return bool(self.smtp_encrypted_password)
+
+
+class RightsizingCache(Base):
+    """Singleton cache (same id=1 pattern as AppSettings) of
+    assess_all_workloads()'s last computed result. GET /api/rightsizing
+    used to recompute this live on every single request -- confirmed live
+    as the actual cause of multi-second Workloads/Maintenance page loads
+    even after batching the underlying queries (still ~1.1s for 130
+    workloads, not free). Populated by the worker's regular run_all cycle
+    (piggybacking on the existing ~5-minute schedule, not a new one) and
+    by the admin-only manual POST /api/rightsizing/recompute trigger --
+    both call refresh_rightsizing_cache() so there's exactly one place
+    that decides what gets cached."""
+
+    __tablename__ = "rightsizing_cache"
+
+    id = Column(Integer, primary_key=True, default=1)
+    computed_at = Column(DateTime(timezone=True), nullable=False)
+    assessments = Column(JSONB, nullable=False)
 
 
 # ---------------------------------------------------------------------------

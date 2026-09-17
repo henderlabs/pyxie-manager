@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 
 from pyxie_core.audit import write_audit_event
 from pyxie_core.capacity import compute_capacity
-from pyxie_core.models import Recommendation, Workload
+from pyxie_core.models import Recommendation, RightsizingCache, Workload
 from pyxie_core.recommendations import _placement_recommendations, generate_recommendations
-from pyxie_core.rightsizing import assess_all_workloads
+from pyxie_core.rightsizing import refresh_rightsizing_cache
 
 from ..auth_deps import get_current_user, require_admin
 from ..deps import get_db
@@ -133,28 +133,37 @@ def update_lifecycle(rec_id: uuid.UUID, payload: LifecycleUpdate, db: Session = 
 
 @router.get("/rightsizing")
 def rightsizing(db: Session = Depends(get_db)):
-    assessments = assess_all_workloads(db)
-    out = []
-    for a in assessments:
-        out.append(
-            {
-                "workload_id": str(a["workload_id"]),
-                "vmid": a["vmid"],
-                "node_id": str(a["node_id"]),
-                "name": a["name"],
-                "current_vcpu": a["current_vcpu"],
-                "current_memory_bytes": a["current_memory_bytes"],
-                "cpu": a["cpu"],
-                "memory": a["memory"],
-                "observation_days": a["observation_days"],
-                "confidence": a["confidence"],
-                "currently_running": a["currently_running"],
-                "status": a["status"],
-                "cpu_suggestion": a["cpu_suggestion"],
-                "memory_suggestion": a["memory_suggestion"],
-            }
-        )
-    return out
+    """Reads the cache instead of recomputing live -- confirmed live as a
+    multi-second cost on every page load (Workloads/Maintenance/this
+    page), even after batching the underlying queries. Populated by the
+    worker's regular run_all cycle; if that hasn't run yet (a genuinely
+    fresh install), computes and caches once here rather than serving an
+    empty result until the first cycle completes."""
+    row = db.query(RightsizingCache).filter(RightsizingCache.id == 1).one_or_none()
+    if row is None:
+        return refresh_rightsizing_cache(db)
+    return row.assessments
+
+
+@router.get("/rightsizing/status")
+def rightsizing_status(db: Session = Depends(get_db)):
+    row = db.query(RightsizingCache).filter(RightsizingCache.id == 1).one_or_none()
+    return {"computed_at": row.computed_at.isoformat() if row else None}
+
+
+@router.post("/rightsizing/recompute", dependencies=[Depends(require_admin)])
+def recompute_rightsizing(db: Session = Depends(get_db), user=Depends(get_current_user)):
+    assessments = refresh_rightsizing_cache(db)
+    write_audit_event(
+        db,
+        event_category="recommendation",
+        event_type="rightsizing.recomputed",
+        actor=user.email,
+        actor_type="user",
+        metadata={"workload_count": len(assessments)},
+    )
+    row = db.query(RightsizingCache).filter(RightsizingCache.id == 1).one()
+    return {"computed_at": row.computed_at.isoformat(), "workload_count": len(assessments)}
 
 
 @router.get("/capacity")

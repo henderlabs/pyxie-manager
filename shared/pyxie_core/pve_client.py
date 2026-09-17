@@ -111,6 +111,18 @@ class PveClient:
         params = {"type": type_} if type_ else None
         return self._get("/cluster/resources", params=params)
 
+    def cluster_log(self, max_entries: int = 500) -> list[dict]:
+        """GET /cluster/log -- PVE's own syslog-style rolling log, merged
+        across every node in the cluster (daemon restarts, corosync/quorum
+        events, hardware/storage issues logged at the OS level, etc.).
+        Distinct from /cluster/tasks (a job's outcome) and /nodes/{node}/
+        tasks (this class's tasks() method) -- this is ambient system
+        activity, not a PyXie- or user-triggered job. PVE itself only
+        keeps a small rolling buffer (its own default page size), so a
+        caller wanting real history needs to poll and persist this
+        periodically, not treat it as a queryable archive on PVE's side."""
+        return self._get("/cluster/log", params={"max": max_entries}) or []
+
     def nodes(self) -> list[dict]:
         return self._get("/nodes")
 
