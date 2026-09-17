@@ -247,6 +247,14 @@ export type AppSettings = {
   rightsizing_mem_peak_target_pct: number;
   rightsizing_round_vcpu_even: boolean;
   pve_mutations_enabled: boolean;
+  smtp_enabled: boolean;
+  smtp_host: string | null;
+  smtp_port: number;
+  smtp_username: string | null;
+  smtp_from_address: string | null;
+  smtp_use_tls: boolean;
+  smtp_password_set: boolean;
+  notification_recipient: string | null;
 };
 
 export type DashboardSummary = {

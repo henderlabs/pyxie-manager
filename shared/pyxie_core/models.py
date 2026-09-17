@@ -442,7 +442,26 @@ class AppSettings(Base):
     # judgment call should flip (different hardware, a fleet-wide
     # convention the operator wants regardless).
     rightsizing_round_vcpu_even = Column(Boolean, nullable=False, default=False)
+    # Outgoing email for notifications (e.g. the "send test email" check on
+    # the Settings page, and future real alerts). Off by default, same
+    # conservative posture as pve_mutations_enabled above. The password is
+    # never stored in plaintext -- encrypt_secret()/decrypt_secret() from
+    # crypto.py, same convention as every PVE/PBS credential in this app.
+    smtp_enabled = Column(Boolean, nullable=False, default=False)
+    smtp_host = Column(String, nullable=True)
+    smtp_port = Column(Integer, nullable=False, default=587)
+    smtp_username = Column(String, nullable=True)
+    smtp_encrypted_password = Column(Text, nullable=True)
+    smtp_from_address = Column(String, nullable=True)
+    smtp_use_tls = Column(Boolean, nullable=False, default=True)
+    # Where test emails and future real alert notifications go. A single
+    # free-text field -- comma-separate multiple addresses if needed.
+    notification_recipient = Column(String, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)
+
+    @property
+    def smtp_password_set(self) -> bool:
+        return bool(self.smtp_encrypted_password)
 
 
 # ---------------------------------------------------------------------------

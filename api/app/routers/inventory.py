@@ -599,33 +599,46 @@ def get_settings(db: Session = Depends(get_db)):
     return db.query(AppSettings).filter(AppSettings.id == 1).one()
 
 
+def _settings_snapshot(row: AppSettings) -> dict:
+    # Never include smtp_encrypted_password (or the plaintext write-only
+    # smtp_password field) here -- audit.py's own docstring is explicit
+    # that callers must redact secret material before writing an event.
+    # smtp_password_set (a bool) is the safe stand-in.
+    return {
+        "inventory_refresh_interval_seconds": row.inventory_refresh_interval_seconds,
+        "tls_verify_default": row.tls_verify_default,
+        "timezone": row.timezone,
+        "rightsizing_cpu_peak_target_pct": row.rightsizing_cpu_peak_target_pct,
+        "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
+        "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
+        "pve_mutations_enabled": row.pve_mutations_enabled,
+        "smtp_enabled": row.smtp_enabled,
+        "smtp_host": row.smtp_host,
+        "smtp_port": row.smtp_port,
+        "smtp_username": row.smtp_username,
+        "smtp_from_address": row.smtp_from_address,
+        "smtp_use_tls": row.smtp_use_tls,
+        "smtp_password_set": row.smtp_password_set,
+        "notification_recipient": row.notification_recipient,
+    }
+
+
 @router.put("/settings", response_model=schemas.AppSettingsOut, dependencies=[Depends(require_admin)])
 def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(get_db)):
     from pyxie_core.audit import write_audit_event
+    from pyxie_core.crypto import encrypt_secret
 
     row = db.query(AppSettings).filter(AppSettings.id == 1).one()
-    before = {
-        "inventory_refresh_interval_seconds": row.inventory_refresh_interval_seconds,
-        "tls_verify_default": row.tls_verify_default,
-        "timezone": row.timezone,
-        "rightsizing_cpu_peak_target_pct": row.rightsizing_cpu_peak_target_pct,
-        "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
-        "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
-        "pve_mutations_enabled": row.pve_mutations_enabled,
-    }
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    before = _settings_snapshot(row)
+    updates = payload.model_dump(exclude_unset=True)
+    smtp_password = updates.pop("smtp_password", None)
+    for field, value in updates.items():
         setattr(row, field, value)
+    if smtp_password:
+        row.smtp_encrypted_password = encrypt_secret(smtp_password)
     db.commit()
     db.refresh(row)
-    after = {
-        "inventory_refresh_interval_seconds": row.inventory_refresh_interval_seconds,
-        "tls_verify_default": row.tls_verify_default,
-        "timezone": row.timezone,
-        "rightsizing_cpu_peak_target_pct": row.rightsizing_cpu_peak_target_pct,
-        "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
-        "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
-        "pve_mutations_enabled": row.pve_mutations_enabled,
-    }
+    after = _settings_snapshot(row)
     write_audit_event(
         db,
         event_category="settings",
@@ -653,3 +666,50 @@ def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(ge
             state_after={"pve_mutations_enabled": after["pve_mutations_enabled"]},
         )
     return row
+
+
+@router.post("/settings/test-email", dependencies=[Depends(require_admin)])
+def test_email(db: Session = Depends(get_db)):
+    """Send one real test email to the saved notification recipient using
+    the saved SMTP settings, synchronously -- same shape as the PVE
+    credential test-connection endpoints (no RQ job for a sub-second SMTP
+    handshake). Always operates on what's currently saved in the
+    database, not any unsaved edits still sitting in the settings form."""
+    from pyxie_core.audit import write_audit_event
+    from pyxie_core.mail import send_email
+
+    row = db.query(AppSettings).filter(AppSettings.id == 1).one()
+    if not row.notification_recipient:
+        return {"status": "failed", "error": "set a notification recipient address first"}
+
+    try:
+        send_email(
+            row,
+            row.notification_recipient,
+            subject="PyXie test notification",
+            body="This is a test email from PyXie Manager to confirm your SMTP settings are working.",
+        )
+    except Exception as e:
+        write_audit_event(
+            db,
+            event_category="settings",
+            event_type="settings.smtp_test_email_sent",
+            actor="user",
+            actor_type="user",
+            result="failure",
+            severity="warning",
+            error=str(e),
+            metadata={"recipient": row.notification_recipient},
+        )
+        return {"status": "failed", "error": str(e)}
+
+    write_audit_event(
+        db,
+        event_category="settings",
+        event_type="settings.smtp_test_email_sent",
+        actor="user",
+        actor_type="user",
+        result="success",
+        metadata={"recipient": row.notification_recipient},
+    )
+    return {"status": "ok"}
