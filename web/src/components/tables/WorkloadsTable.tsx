@@ -219,6 +219,15 @@ export default function WorkloadsTable({
   );
   const visibleWorkloads = showRemoved ? workloads : workloads.filter((w) => !w.is_missing);
 
+  // Same match predicate as WorkloadSearchSelect.tsx (the Maintenance
+  // page's VM picker) -- case-insensitive substring on name or vmid --
+  // so a VM findable there is findable the same way here.
+  const [search, setSearch] = useState("");
+  const searchQuery = search.trim().toLowerCase();
+  const searchedWorkloads = searchQuery
+    ? visibleWorkloads.filter((w) => (w.name || "").toLowerCase().includes(searchQuery) || String(w.vmid).includes(searchQuery))
+    : visibleWorkloads;
+
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const nodesByCluster = new Map<string, Node[]>();
   for (const n of nodes) {
@@ -273,18 +282,27 @@ export default function WorkloadsTable({
 
   return (
     <div>
-      {missingWorkloads.length > 0 && (
-        <label className="flex items-center gap-2 text-xs text-muted mb-2 cursor-pointer w-fit">
-          <input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} />
-          <span>
-            Show removed ({missingWorkloads.length}){" "}
-            <span className="text-text/70">-- no longer visible to PVE, kept here for history</span>
-          </span>
-        </label>
-      )}
+      <div className="flex items-center gap-4 mb-2">
+        {missingWorkloads.length > 0 && (
+          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer w-fit shrink-0">
+            <input type="checkbox" checked={showRemoved} onChange={(e) => setShowRemoved(e.target.checked)} />
+            <span>
+              Show removed ({missingWorkloads.length}){" "}
+              <span className="text-text/70">-- no longer visible to PVE, kept here for history</span>
+            </span>
+          </label>
+        )}
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name or vmid…"
+          className="bg-surface2 border border-border rounded px-2 py-1.5 text-sm w-64 ml-auto"
+        />
+      </div>
       <Table
-      rows={visibleWorkloads}
-      emptyMessage={<NoInfrastructureHint subject="workloads" />}
+      rows={searchedWorkloads}
+      emptyMessage={searchQuery ? <span className="text-muted">No workloads match &quot;{search}&quot;.</span> : <NoInfrastructureHint subject="workloads" />}
       storageKey="infrastructure-workloads"
       rowClassName={(w) => (w.id === highlightWorkloadId ? "bg-accent/10 pyxie-jump-target" : "")}
       columns={[
