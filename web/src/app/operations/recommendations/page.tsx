@@ -28,7 +28,7 @@ export default async function RecommendationsPage() {
   return (
     <div>
       <PageHeader
-        title="Rightsizing"
+        title="Rightsizing (Historical Data)"
         subtitle="VM/CT sizing suggestions from observed usage -- explainable, evidence-backed, nothing here executes automatically"
         icon={<LightbulbIcon className="w-5 h-5" />}
       />
