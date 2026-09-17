@@ -34,6 +34,7 @@ from pyxie_core.host_maintenance_client import (
 from pyxie_core.models import (
     AppSettings,
     Cluster,
+    ClusterLogEntry,
     HostMaintenanceCredential,
     Node,
     Operation,
@@ -639,6 +640,38 @@ def list_tasks(db: Session = Depends(get_db), limit: int = 50, status: str | Non
             }
         )
     return out
+
+
+@router.get("/cluster-log")
+def list_cluster_log(
+    db: Session = Depends(get_db),
+    limit: int = 100,
+    node: str | None = None,
+    max_priority: int | None = None,
+):
+    """PVE's own syslog-style cluster log (see PveClient.cluster_log()) --
+    ambient system activity, distinct from PVE Tasks (job outcomes) and
+    Audit Log (what PyXie itself did). max_priority filters to that
+    severity or worse (lower pri number = more severe, standard syslog
+    scale) -- e.g. max_priority=3 shows err/crit/alert/emerg only."""
+    q = db.query(ClusterLogEntry)
+    if node:
+        q = q.filter(ClusterLogEntry.node == node)
+    if max_priority is not None:
+        q = q.filter(ClusterLogEntry.priority.isnot(None), ClusterLogEntry.priority <= max_priority)
+    entries = q.order_by(ClusterLogEntry.logged_at.desc().nullslast()).limit(min(limit, 500)).all()
+    return [
+        {
+            "id": str(e.id),
+            "cluster_id": str(e.cluster_id),
+            "node": e.node,
+            "tag": e.tag,
+            "priority": e.priority,
+            "message": e.message,
+            "logged_at": e.logged_at.isoformat() if e.logged_at else None,
+        }
+        for e in entries
+    ]
 
 
 @router.get("/tasks/{task_id}/log")

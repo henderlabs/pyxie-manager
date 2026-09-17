@@ -1,12 +1,13 @@
 import { apiFetch } from "@/lib/api";
-import type { AuditEvent, Cluster, InternalJobRunRow, Node, Provider, PveTask, Site, Workload } from "@/lib/api";
+import type { AuditEvent, Cluster, ClusterLogEntry, InternalJobRunRow, Node, Provider, PveTask, Site, Workload } from "@/lib/api";
 import { Card, CardTitle, PageHeader } from "@/components/Card";
 import AuditLogTable from "@/components/tables/AuditLogTable";
 import PveTasksTable from "@/components/tables/PveTasksTable";
 import InternalJobsTable from "@/components/tables/InternalJobsTable";
+import ClusterLogTable from "@/components/tables/ClusterLogTable";
 import { ScrollIcon } from "@/components/Icons";
 
-type Channel = "audit" | "tasks" | "jobs";
+type Channel = "audit" | "tasks" | "cluster_log" | "jobs";
 
 // Three genuinely different-shaped logs (structured audit envelope vs raw
 // PVE task history vs PyXie's own background job runs) kept as distinct
@@ -28,6 +29,12 @@ const CHANNELS: { id: Channel; label: string; description: string }[] = [
     label: "PVE Tasks",
     description:
       "PVE's own task history for this cluster (migrations, backups, snapshots, updates, ...) -- the same list you'd see in the Proxmox web UI under Tasks, synced here on every discovery pass.",
+  },
+  {
+    id: "cluster_log",
+    label: "PVE Cluster Log",
+    description:
+      "PVE's own syslog-style cluster log (daemon restarts, corosync/quorum events, hardware issues) -- ambient system activity, distinct from PVE Tasks (job outcomes). PVE only keeps a small rolling buffer, so this is normal to be sparse -- it's not meant to be busy the way Tasks is.",
   },
   {
     id: "jobs",
@@ -98,6 +105,7 @@ export default async function LoggingPage({
           workloads={workloads}
         />
       )}
+      {channel === "cluster_log" && <ClusterLogChannel />}
       {channel === "jobs" && <JobsChannel />}
     </div>
   );
@@ -212,6 +220,16 @@ async function TasksChannel({
         clusterNameById={clusterNameById}
         workloadIdByVmidNode={workloadIdByVmidNode}
       />
+    </Card>
+  );
+}
+
+async function ClusterLogChannel() {
+  const entries = await apiFetch<ClusterLogEntry[]>("/api/cluster-log?limit=200");
+  return (
+    <Card>
+      <CardTitle>PVE Cluster Log</CardTitle>
+      <ClusterLogTable entries={entries} />
     </Card>
   );
 }

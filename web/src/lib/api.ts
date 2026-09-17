@@ -281,6 +281,16 @@ export type DashboardSummary = {
 };
 
 
+export type ClusterLogEntry = {
+  id: string;
+  cluster_id: string;
+  node: string | null;
+  tag: string | null;
+  priority: number | null;
+  message: string | null;
+  logged_at: string | null;
+};
+
 export type PveTask = {
   id: string;
   cluster_id: string;
