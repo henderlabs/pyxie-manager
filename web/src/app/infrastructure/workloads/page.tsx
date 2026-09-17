@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import type { Finding, Node, Recommendation, RightsizingAssessment, Workload } from "@/lib/api";
+import type { Finding, Node, Recommendation, RightsizingAssessment, StorageItem, Workload } from "@/lib/api";
 import { PageHeader, StatTile } from "@/components/Card";
 import WorkloadsTable from "@/components/tables/WorkloadsTable";
 import { WorkloadIcon } from "@/components/Icons";
@@ -10,9 +10,10 @@ export default async function WorkloadsPage({
 }: {
   searchParams: { type?: string };
 }) {
-  const [workloads, nodes, findings, rightsizing, rightsizingRecs] = await Promise.all([
+  const [workloads, nodes, storage, findings, rightsizing, rightsizingRecs] = await Promise.all([
     apiFetch<Workload[]>(`/api/workloads${searchParams.type ? `?type=${searchParams.type}` : ""}`),
     apiFetch<Node[]>("/api/nodes"),
+    apiFetch<StorageItem[]>("/api/storage"),
     apiFetch<Finding[]>("/api/findings?active=true"),
     apiFetch<RightsizingAssessment[]>("/api/rightsizing"),
     apiFetch<Recommendation[]>("/api/recommendations?category=rightsizing"),
@@ -44,6 +45,7 @@ export default async function WorkloadsPage({
       <WorkloadsTable
         workloads={workloads}
         nodes={nodes}
+        storage={storage}
         findings={findings}
         rightsizing={rightsizing}
         rightsizingRecs={rightsizingRecs}

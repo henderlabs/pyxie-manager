@@ -3,13 +3,14 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { Finding, Node, Recommendation, RightsizingAssessment, Workload } from "@/lib/api";
+import type { Finding, Node, Recommendation, RightsizingAssessment, StorageItem, Workload } from "@/lib/api";
 import { Table } from "@/components/Table";
 import { NoInfrastructureHint } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import NotesCell from "@/components/NotesCell";
 import ApplyRightsizingForm from "@/components/ApplyRightsizingForm";
 import WorkloadLifecycleButtons from "@/components/WorkloadLifecycleButtons";
+import MigrateWorkloadAction from "@/components/MigrateWorkloadAction";
 import { Meter } from "@/components/Gauges";
 import { formatBytes } from "@/lib/format";
 import { CpuIcon, MemoryIcon } from "@/components/Icons";
@@ -172,12 +173,16 @@ function PreferredHostSelect({
 export default function WorkloadsTable({
   workloads,
   nodes,
+  storage = [],
   findings = [],
   rightsizing = [],
   rightsizingRecs = [],
 }: {
   workloads: Workload[];
   nodes: Node[];
+  /** Destination candidates for the per-row "Migrate" action's storage
+   * picker -- same list the Maintenance page's move form uses. */
+  storage?: StorageItem[];
   findings?: Finding[];
   /** Same evidence-backed sizing suggestions as the Rightsizing page's own
    * table -- surfaced here too since Workloads and Rightsizing show a lot
@@ -337,6 +342,25 @@ export default function WorkloadsTable({
               disabledReason={w.is_missing ? "Not currently visible to PVE" : "Guest lifecycle actions are only implemented for VMs, not containers"}
             />
           ),
+        },
+        {
+          header: "Migrate",
+          tooltip:
+            "Move this VM to another node in the same cluster -- same preview/approve Safety Contract as the Maintenance page's Move action, just without leaving this page. VM-only; not yet implemented for containers.",
+          render: (w) =>
+            w.type === "vm" && !w.is_missing ? (
+              <MigrateWorkloadAction
+                workloadId={w.id}
+                workloadName={w.name || `VMID ${w.vmid}`}
+                clusterId={w.cluster_id}
+                currentNodeId={w.node_id}
+                nodes={nodes}
+                storage={storage}
+              />
+            ) : (
+              <span className="text-muted">—</span>
+            ),
+          optional: true,
         },
         {
           header: "CPU Usage",
