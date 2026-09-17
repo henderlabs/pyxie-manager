@@ -68,6 +68,37 @@ export default function Sidebar({ version }: { version: string }) {
   const [badges, setBadges] = useState<Record<string, number>>({});
   const isPublicPage = pathname === "/login" || pathname.startsWith("/accept-invite");
 
+  // Every page's own data is server-rendered fresh on each navigation
+  // (apiFetch uses cache: "no-store"), so a route change is exactly when
+  // "last refreshed" should reset. `now` just ticks periodically so the
+  // relative-time display ("2m ago") stays roughly current without
+  // needing a click.
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (isPublicPage) return;
+    setLastRefreshed(new Date());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, []);
+
+  function relativeTime(d: Date): string {
+    const secs = Math.max(0, Math.round((now - d.getTime()) / 1000));
+    if (secs < 5) return "just now";
+    if (secs < 60) return `${secs}s ago`;
+    const mins = Math.round(secs / 60);
+    if (mins < 60) return `${mins}m ago`;
+    return `${Math.round(mins / 60)}h ago`;
+  }
+
+  function refreshNow() {
+    router.refresh();
+    setLastRefreshed(new Date());
+  }
+
   useEffect(() => {
     if (isPublicPage) return;
     fetch("/api/auth/me")
@@ -173,7 +204,18 @@ export default function Sidebar({ version }: { version: string }) {
           <span className="text-muted">Read-only</span>
         )}
       </div>
-      <div className="px-4 py-1.5 text-[10px] text-muted/50 tracking-wide">v{version}</div>
+      <div className="px-4 py-1.5 flex items-center justify-between text-xs text-muted/70 tracking-wide">
+        <span>v{version}</span>
+        {lastRefreshed && (
+          <button
+            onClick={refreshNow}
+            title={`Page data as of ${lastRefreshed.toLocaleTimeString()} — click to refresh`}
+            className="hover:text-text"
+          >
+            ↻ {relativeTime(lastRefreshed)}
+          </button>
+        )}
+      </div>
     </aside>
   );
 }
