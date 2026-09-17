@@ -297,7 +297,7 @@ export default function WorkloadsTable({
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Search by name or vmid…"
-          className="bg-surface2 border border-border rounded px-2 py-1.5 text-sm w-64 ml-auto"
+          className="bg-surface2 border border-border rounded px-2 py-1.5 text-sm w-64"
         />
       </div>
       <Table
