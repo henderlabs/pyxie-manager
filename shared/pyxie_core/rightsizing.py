@@ -285,3 +285,52 @@ def assess_all_workloads(db) -> list[dict]:
             mem_stats = observation_stats(db, "workload", wl.id, "mem_pct", since=since)
         results.append(_compute_assessment(wl, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even))
     return results
+
+
+def _serialize_assessment(a: dict) -> dict:
+    """JSON-ready shape -- str() on the UUID fields, everything else
+    already plain. Shared by refresh_rightsizing_cache() (what gets
+    stored) and the live-recompute response, so cached data is exactly
+    what GET /rightsizing would have returned computing it live."""
+    return {
+        "workload_id": str(a["workload_id"]),
+        "vmid": a["vmid"],
+        "node_id": str(a["node_id"]),
+        "name": a["name"],
+        "current_vcpu": a["current_vcpu"],
+        "current_memory_bytes": a["current_memory_bytes"],
+        "cpu": a["cpu"],
+        "memory": a["memory"],
+        "observation_days": a["observation_days"],
+        "confidence": a["confidence"],
+        "currently_running": a["currently_running"],
+        "status": a["status"],
+        "cpu_suggestion": a["cpu_suggestion"],
+        "memory_suggestion": a["memory_suggestion"],
+    }
+
+
+def refresh_rightsizing_cache(db, assessments: list[dict] | None = None) -> list[dict]:
+    """Computes (unless already computed by the caller -- generate_recommendations()
+    needs assess_all_workloads() for its own rightsizing-recommendation pass
+    anyway, and used to run it a SECOND time here; now it computes once and
+    passes the result in) and persists to the rightsizing_cache singleton
+    row, returning the same JSON-ready list GET /rightsizing serves.
+    Called by the worker's regular run_all cycle and by the admin-only
+    manual POST /rightsizing/recompute trigger."""
+    from datetime import datetime, timezone
+
+    from .models import RightsizingCache
+
+    if assessments is None:
+        assessments = assess_all_workloads(db)
+    serialized = [_serialize_assessment(a) for a in assessments]
+
+    row = db.query(RightsizingCache).filter(RightsizingCache.id == 1).one_or_none()
+    if row is None:
+        row = RightsizingCache(id=1)
+        db.add(row)
+    row.computed_at = datetime.now(timezone.utc)
+    row.assessments = serialized
+    db.commit()
+    return serialized

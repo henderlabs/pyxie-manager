@@ -3,6 +3,7 @@ import type { Node, Recommendation, RightsizingAssessment } from "@/lib/api";
 import { Card, CardTitle, PageHeader } from "@/components/Card";
 import RecommendationsList from "@/components/RecommendationsList";
 import RightsizingTable from "@/components/tables/RightsizingTable";
+import RecomputeRightsizingButton from "@/components/RecomputeRightsizingButton";
 import { LightbulbIcon } from "@/components/Icons";
 
 // Narrowed to VM/CT right-sizing only -- the cluster/
@@ -17,10 +18,11 @@ import { LightbulbIcon } from "@/components/Icons";
 // they no longer render their own Apply button for rightsizing, since
 // that would just duplicate the table's.
 export default async function RecommendationsPage() {
-  const [recommendations, rightsizing, nodes] = await Promise.all([
+  const [recommendations, rightsizing, nodes, status] = await Promise.all([
     apiFetch<Recommendation[]>("/api/recommendations?category=rightsizing"),
     apiFetch<RightsizingAssessment[]>("/api/rightsizing"),
     apiFetch<Node[]>("/api/nodes"),
+    apiFetch<{ computed_at: string | null }>("/api/rightsizing/status"),
   ]);
 
   return (
@@ -32,7 +34,10 @@ export default async function RecommendationsPage() {
       />
 
       <Card className="mb-4">
-        <CardTitle>Rightsizing -- per-workload observation status</CardTitle>
+        <div className="flex items-center justify-between mb-2">
+          <CardTitle>Rightsizing -- per-workload observation status</CardTitle>
+          <RecomputeRightsizingButton computedAt={status.computed_at} />
+        </div>
         <RightsizingTable rightsizing={rightsizing} nodes={nodes} recommendations={recommendations} />
       </Card>
 

@@ -464,6 +464,25 @@ class AppSettings(Base):
         return bool(self.smtp_encrypted_password)
 
 
+class RightsizingCache(Base):
+    """Singleton cache (same id=1 pattern as AppSettings) of
+    assess_all_workloads()'s last computed result. GET /api/rightsizing
+    used to recompute this live on every single request -- confirmed live
+    as the actual cause of multi-second Workloads/Maintenance page loads
+    even after batching the underlying queries (still ~1.1s for 130
+    workloads, not free). Populated by the worker's regular run_all cycle
+    (piggybacking on the existing ~5-minute schedule, not a new one) and
+    by the admin-only manual POST /api/rightsizing/recompute trigger --
+    both call refresh_rightsizing_cache() so there's exactly one place
+    that decides what gets cached."""
+
+    __tablename__ = "rightsizing_cache"
+
+    id = Column(Integer, primary_key=True, default=1)
+    computed_at = Column(DateTime(timezone=True), nullable=False)
+    assessments = Column(JSONB, nullable=False)
+
+
 # ---------------------------------------------------------------------------
 # Authentication
 # ---------------------------------------------------------------------------
