@@ -255,6 +255,7 @@ export type AppSettings = {
   smtp_use_tls: boolean;
   smtp_password_set: boolean;
   notification_recipient: string | null;
+  notification_hold_down_minutes: number;
 };
 
 export type DashboardSummary = {
@@ -499,4 +500,30 @@ export type UserAccount = {
   created_at: string;
   last_login_at: string | null;
   pending_invite: boolean;
+};
+
+export type NotificationRule = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  categories: string[];
+  min_severity: "warning" | "critical";
+  send_recovery: boolean;
+  recipients: string[];
+  include_admins: boolean;
+};
+
+export type NotificationCatalog = {
+  categories: { key: string; label: string; description: string }[];
+  severities: string[];
+};
+
+export type NotificationItem = {
+  id: string;
+  severity: string;
+  title: string;
+  message: string | null;
+  status: string;
+  source: string;
+  created_at: string;
 };

@@ -2,7 +2,6 @@ import { apiFetch } from "@/lib/api";
 import type { AppSettings, Organization } from "@/lib/api";
 import { Card, CardTitle, PageHeader } from "@/components/Card";
 import SettingsForm from "@/components/SettingsForm";
-import SmtpSettingsForm from "@/components/SmtpSettingsForm";
 import OrganizationForm from "@/components/OrganizationForm";
 import { GearIcon } from "@/components/Icons";
 
@@ -26,10 +25,6 @@ export default async function SettingsPage() {
           <OrganizationForm initial={organization} />
         </Card>
       )}
-      <Card className="mb-4">
-        <CardTitle>Email notifications (SMTP)</CardTitle>
-        <SmtpSettingsForm initial={settings} />
-      </Card>
       <Card>
         <SettingsForm initial={settings} />
       </Card>

@@ -6,10 +6,21 @@ import { useEffect, useState } from "react";
 import {
   DashboardIcon, HealthIcon, LightbulbIcon, WrenchIcon, LinkIcon, ShieldIcon, GaugeIcon,
   ServerIcon, WorkloadIcon, StorageIcon, NetworkIcon, PlugIcon, KeyIcon,
-  ScrollIcon, SlidersIcon, GearIcon, UsersIcon,
+  ScrollIcon, SlidersIcon, GearIcon, UsersIcon, BellIcon,
 } from "@/components/Icons";
 
-type NavItem = { label: string; href: string; icon: React.ReactNode; comingSoon?: boolean; adminOnly?: boolean };
+type NavItem = {
+  label: string;
+  href: string;
+  icon: React.ReactNode;
+  comingSoon?: boolean;
+  adminOnly?: boolean;
+  // Nested pages, shown indented under this item while any page in the
+  // group is open. `exact` keeps the parent itself from also lighting up
+  // for its children's routes (which share its URL prefix).
+  children?: NavItem[];
+  exact?: boolean;
+};
 type NavSection = { label: string; items: NavItem[] };
 
 // Any page with an actionable review queue gets a badge here, sourced from
@@ -51,12 +62,20 @@ const SECTIONS: NavSection[] = [
   {
     label: "Platform",
     items: [
-      { label: "Integrations", href: "/platform/providers", icon: <PlugIcon /> },
-      { label: "Credentials", href: "/platform/credentials", icon: <KeyIcon /> },
-      { label: "Users", href: "/platform/users", icon: <UsersIcon />, adminOnly: true },
       { label: "Logging", href: "/platform/logging", icon: <ScrollIcon /> },
-      { label: "Policies", href: "/platform/policies", icon: <SlidersIcon /> },
-      { label: "Settings", href: "/platform/settings", icon: <GearIcon /> },
+      {
+        label: "Settings",
+        href: "/platform/settings",
+        icon: <GearIcon />,
+        exact: true,
+        children: [
+          { label: "Notifications", href: "/platform/settings/notifications", icon: <BellIcon /> },
+          { label: "Integrations", href: "/platform/providers", icon: <PlugIcon /> },
+          { label: "Credentials", href: "/platform/credentials", icon: <KeyIcon /> },
+          { label: "Users", href: "/platform/users", icon: <UsersIcon />, adminOnly: true },
+          { label: "Policies", href: "/platform/policies", icon: <SlidersIcon /> },
+        ],
+      },
     ],
   },
 ];
@@ -130,6 +149,49 @@ export default function Sidebar({ version }: { version: string }) {
     router.refresh();
   }
 
+  function renderLink(item: NavItem, nested: boolean) {
+    // Sub-routes (e.g. /infrastructure/nodes/<id>, a node detail page
+    // nested under the Hosts & Clusters item) should still light up their
+    // parent nav item, not just an exact match.
+    const active = item.exact
+      ? pathname === item.href
+      : pathname === item.href || pathname.startsWith(item.href + "/");
+    if (item.comingSoon) {
+      return (
+        <div
+          key={item.href}
+          title="Not built yet -- no network topology to show in this lab"
+          className="flex items-center justify-between px-4 py-1.5 mx-2 rounded text-sm text-muted/50 cursor-default"
+        >
+          <span className="flex items-center gap-2">
+            <span className="text-muted/40">{item.icon}</span>
+            {item.label}
+          </span>
+          <span className="text-[9px] uppercase tracking-wide border border-border rounded px-1 py-0.5 text-muted/60">
+            soon
+          </span>
+        </div>
+      );
+    }
+    return (
+      <Link
+        key={item.href}
+        href={item.href}
+        className={`flex items-center justify-between py-1.5 mx-2 rounded text-sm ${nested ? "pl-9 pr-4" : "px-4"} ${
+          active ? "bg-accent/15 text-accent font-medium" : "text-text/80 hover:bg-surface2 hover:text-text"
+        }`}
+      >
+        <span className="flex items-center gap-2">
+          <span className={active ? "text-accent" : "text-muted"}>{item.icon}</span>
+          {item.label}
+        </span>
+        {(badges[item.href] || 0) > 0 && (
+          <span className="text-proxmox text-xs font-bold leading-none">{badges[item.href]}</span>
+        )}
+      </Link>
+    );
+  }
+
   return (
     <aside className="w-60 shrink-0 border-r border-border bg-surface h-screen sticky top-0 flex flex-col">
       <Link href="/" className="px-4 py-5 border-b border-border flex items-center justify-center">
@@ -144,47 +206,19 @@ export default function Sidebar({ version }: { version: string }) {
               </div>
             )}
             {section.items.filter((item) => !item.adminOnly || me?.is_admin).map((item) => {
-              // Sub-routes (e.g. /infrastructure/nodes/<id>, a node detail
-              // page nested under the Hosts & Clusters item) should still
-              // light up their parent nav item, not just an exact match.
-              const active = pathname === item.href || pathname.startsWith(item.href + "/");
-              if (item.comingSoon) {
-                return (
-                  <div
-                    key={item.href}
-                    title="Not built yet -- no network topology to show in this lab"
-                    className="flex items-center justify-between px-4 py-1.5 mx-2 rounded text-sm text-muted/50 cursor-default"
-                  >
-                    <span className="flex items-center gap-2">
-                      <span className="text-muted/40">{item.icon}</span>
-                      {item.label}
-                    </span>
-                    <span className="text-[9px] uppercase tracking-wide border border-border rounded px-1 py-0.5 text-muted/60">
-                      soon
-                    </span>
-                  </div>
-                );
-              }
+              const groupOpen =
+                !!item.children &&
+                (pathname === item.href ||
+                  pathname.startsWith(item.href + "/") ||
+                  item.children.some((c) => pathname === c.href || pathname.startsWith(c.href + "/")));
               return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`flex items-center justify-between px-4 py-1.5 mx-2 rounded text-sm ${
-                    active
-                      ? "bg-accent/15 text-accent font-medium"
-                      : "text-text/80 hover:bg-surface2 hover:text-text"
-                  }`}
-                >
-                  <span className="flex items-center gap-2">
-                    <span className={active ? "text-accent" : "text-muted"}>{item.icon}</span>
-                    {item.label}
-                  </span>
-                  {(badges[item.href] || 0) > 0 && (
-                    <span className="text-proxmox text-xs font-bold leading-none">
-                      {badges[item.href]}
-                    </span>
-                  )}
-                </Link>
+                <div key={item.href}>
+                  {renderLink(item, false)}
+                  {groupOpen &&
+                    item.children!
+                      .filter((c) => !c.adminOnly || me?.is_admin)
+                      .map((c) => renderLink(c, true))}
+                </div>
               );
             })}
           </div>

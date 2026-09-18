@@ -808,6 +808,7 @@ def _settings_snapshot(row: AppSettings) -> dict:
         "smtp_use_tls": row.smtp_use_tls,
         "smtp_password_set": row.smtp_password_set,
         "notification_recipient": row.notification_recipient,
+        "notification_hold_down_minutes": row.notification_hold_down_minutes,
     }
 
 

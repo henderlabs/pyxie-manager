@@ -16,6 +16,7 @@ from .routers import (
     maintenance,
     metrics,
     network,
+    notification_rules,
     notifications,
     operations,
     placement,
@@ -64,6 +65,7 @@ app.include_router(maintenance.router)
 app.include_router(operations.router)
 app.include_router(placement.router)
 app.include_router(notifications.router)
+app.include_router(notification_rules.router)
 app.include_router(jobs.router)
 app.include_router(network.router)
 
