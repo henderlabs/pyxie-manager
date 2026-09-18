@@ -1,7 +1,7 @@
 import { apiFetch } from "@/lib/api";
 import type { AppSettings, NotificationCatalog, NotificationRule, NotificationItem } from "@/lib/api";
 import { Card, CardTitle, EmptyState, PageHeader } from "@/components/Card";
-import SmtpSettingsForm from "@/components/SmtpSettingsForm";
+import Link from "next/link";
 import NotificationRules from "@/components/NotificationRules";
 import HoldDownSetting from "@/components/HoldDownSetting";
 import StatusBadge from "@/components/StatusBadge";
@@ -28,15 +28,11 @@ export default async function NotificationsSettingsPage() {
           Each rule picks a set of events, a minimum severity, and who to email. An event that matches several rules
           still emails each address once. Every warning or critical event is also recorded below regardless of rules.
           {!settings.smtp_enabled && (
-            <span className="text-warn"> Email is currently turned off — enable it in the email server settings below or no rule will send anything.</span>
+            <span className="text-warn"> Email is currently turned off — enable it under <Link href="/platform/settings/email" className="underline">Settings → Email (SMTP)</Link> or no rule will send anything.</span>
           )}
         </div>
         <HoldDownSetting initial={settings.notification_hold_down_minutes} />
         <NotificationRules initial={rules} catalog={catalog} />
-      </Card>
-      <Card className="mb-4">
-        <CardTitle>Email server (SMTP)</CardTitle>
-        <SmtpSettingsForm initial={settings} />
       </Card>
       <Card>
         <CardTitle>Recent notifications</CardTitle>

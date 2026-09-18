@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import {
   DashboardIcon, HealthIcon, LightbulbIcon, WrenchIcon, LinkIcon, ShieldIcon, GaugeIcon,
   ServerIcon, WorkloadIcon, StorageIcon, NetworkIcon, PlugIcon, KeyIcon,
-  ScrollIcon, SlidersIcon, GearIcon, UsersIcon, BellIcon,
+  ScrollIcon, SlidersIcon, GearIcon, UsersIcon, BellIcon, MailIcon,
 } from "@/components/Icons";
 
 type NavItem = {
@@ -70,6 +70,7 @@ const SECTIONS: NavSection[] = [
         exact: true,
         children: [
           { label: "Notifications", href: "/platform/settings/notifications", icon: <BellIcon /> },
+          { label: "Email (SMTP)", href: "/platform/settings/email", icon: <MailIcon /> },
           { label: "Integrations", href: "/platform/providers", icon: <PlugIcon /> },
           { label: "Credentials", href: "/platform/credentials", icon: <KeyIcon /> },
           { label: "Users", href: "/platform/users", icon: <UsersIcon />, adminOnly: true },

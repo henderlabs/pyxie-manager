@@ -323,3 +323,12 @@ export function BellIcon({ className = "w-4 h-4" }: IconProps) {
     </svg>
   );
 }
+
+export function MailIcon({ className = "w-4 h-4" }: IconProps) {
+  return (
+    <svg {...common} className={className}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3 7 9 6 9-6" />
+    </svg>
+  );
+}

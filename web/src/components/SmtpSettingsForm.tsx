@@ -151,7 +151,7 @@ export default function SmtpSettingsForm({ initial }: { initial: AppSettings }) 
         />
       </Field>
       <p className="text-[11px] text-muted normal-case -mt-2">
-        Where the "Send test email" button sends. Who receives real alerts is set per rule under Notification rules above.
+        Where the "Send test email" button sends. Who receives real alerts is set per rule under Settings → Notifications.
       </p>
       {error && <div className="text-xs text-bad">{error}</div>}
       {saved && !error && <div className="text-xs text-good">Saved.</div>}
