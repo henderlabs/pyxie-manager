@@ -85,7 +85,7 @@ export default function SmtpSettingsForm({ initial }: { initial: AppSettings }) 
       </label>
       <p className="text-[11px] text-muted normal-case -mt-2">
         Configure an outgoing SMTP server so PyXie can email alerts and notifications. Nothing is sent unless
-        this is checked and a notification recipient is set below.
+        this is checked and at least one notification rule matches.
       </p>
       <Field label="SMTP host">
         <input
@@ -141,7 +141,7 @@ export default function SmtpSettingsForm({ initial }: { initial: AppSettings }) 
           placeholder="pyxie@example.com"
         />
       </Field>
-      <Field label="Notification recipient">
+      <Field label="Test email recipient">
         <input
           className="input"
           disabled={!isAdmin}
@@ -151,7 +151,7 @@ export default function SmtpSettingsForm({ initial }: { initial: AppSettings }) 
         />
       </Field>
       <p className="text-[11px] text-muted normal-case -mt-2">
-        Where test emails and future alert notifications are sent. Comma-separate multiple addresses.
+        Where the "Send test email" button sends. Who receives real alerts is set per rule under Settings → Notifications.
       </p>
       {error && <div className="text-xs text-bad">{error}</div>}
       {saved && !error && <div className="text-xs text-good">Saved.</div>}

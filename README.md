@@ -65,16 +65,35 @@ undecryptable. Back it up alongside any database dump, outside of git.
 
 ## Email notifications
 
-SMTP settings (host/port/username/password/TLS/from-address/recipient)
-live on the `AppSettings` singleton, configured under Platform ->
-Settings -- a "send test email" action verifies the configuration
-end-to-end without waiting for a real event to trigger it. The stored
-password is never returned in plaintext once set (`smtp_password_set` is
-a boolean flag, not the value itself, same pattern as PVE credentials).
-`shared/pyxie_core/mail.py` sends via stdlib `smtplib`, no external
-dependency. Currently used for the user-invite flow (below); adding more
-triggers (e.g. failed-task alerts) is a matter of calling `send_email()`
-from the relevant workflow, not new plumbing.
+**Where:** Platform -> Settings -> Notifications. The email server (SMTP)
+settings live on the `AppSettings` singleton and are configured on that
+page; the stored password is never returned in plaintext (`smtp_password_set`
+is a boolean, same pattern as PVE credentials). `shared/pyxie_core/mail.py`
+sends via stdlib `smtplib`, no external dependency. The invite-user flow
+also uses it.
+
+**Rules decide what gets emailed and to whom.** Each `notification_rules`
+row picks a set of event categories (cluster quorum, node health/unknown,
+pending updates, version drift, storage, capacity, failed tasks, backup
+protection, placement -- empty means all), a minimum severity (critical
+only, or warning and above), whether to also send recovery notices, and
+recipients (explicit addresses and/or every active admin user). An event
+matching several rules still emails each address once. Rules can be turned
+off, edited, deleted, and test-sent without waiting for a real event; every
+change is audited (`settings.notification_rule_*`). With email disabled or no
+matching rule, nothing is emailed -- the in-app notification is still
+recorded, and shown under Recent notifications on the same page.
+
+**Flap hold-down.** A finding appearing or clearing is announced only once
+that state has lasted `notification_hold_down_minutes` (default 5, 0 =
+immediately). A host that keeps dropping in and out of quorum therefore
+sends one alert when it settles instead of an alert and a recovery per
+flip; flaps shorter than the hold-down are never announced. Each finding
+records `state_since` and `notified_active` to drive this. It is applied per
+state change, so a recovery is also held for the same period.
+
+Email is sent after the findings transaction commits and never raises, so a
+slow or broken mail server cannot affect findings.
 
 ## Safety Contract for every PVE write
 

@@ -481,6 +481,11 @@ class AppSettings(Base):
     # Where test emails and future real alert notifications go. A single
     # free-text field -- comma-separate multiple addresses if needed.
     notification_recipient = Column(String, nullable=True)
+    # A finding appearing/clearing is announced only after that state has held
+    # this long, so a flapping host (e.g. a node repeatedly dropping out of
+    # quorum) produces one alert when it settles, not one per flip. 0 = notify
+    # immediately. See findings._settle_notifications.
+    notification_hold_down_minutes = Column(Integer, nullable=False, default=5)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)
 
     @property
@@ -584,6 +589,11 @@ class Finding(Base):
     source = Column(String, nullable=False, default="system")
     confidence = Column(String, nullable=True)  # high|moderate|preliminary|insufficient_data
     finding_metadata = Column(JSONB, nullable=True)
+    # When the current active/inactive state began, and whether the operator
+    # was last told this finding is active -- together they drive the flap
+    # hold-down for notifications (findings._settle_notifications).
+    state_since = Column(DateTime(timezone=True), nullable=True)
+    notified_active = Column(Boolean, nullable=True)
 
     __table_args__ = (UniqueConstraint("dedupe_key", name="uq_finding_dedupe_key"),)
 
@@ -907,6 +917,26 @@ class Notification(Base):
     status = Column(String, nullable=False, default="unread")  # unread|read|dismissed
     source = Column(String, nullable=False, default="system")
     created_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+
+
+class NotificationRule(Base):
+    """One row of Settings > Notifications: which findings get emailed, and
+    to whom. In-app Notification rows are always written for warning/critical
+    findings regardless of rules -- rules only govern email."""
+
+    __tablename__ = "notification_rules"
+
+    id = uuid_pk()
+    name = Column(String, nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    # Finding.category values this rule covers; empty list means every category.
+    categories = Column(JSONB, nullable=False, default=list)
+    min_severity = Column(String, nullable=False, default="critical")  # warning|critical
+    send_recovery = Column(Boolean, nullable=False, default=True)
+    recipients = Column(JSONB, nullable=False, default=list)  # explicit email addresses
+    include_admins = Column(Boolean, nullable=False, default=False)  # also every active admin user
+    created_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)
 
 
 # ---------------------------------------------------------------------------

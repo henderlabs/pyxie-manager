@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OrmModel(BaseModel):
@@ -254,6 +254,7 @@ class AppSettingsOut(OrmModel):
     # decrypted value.
     smtp_password_set: bool
     notification_recipient: Optional[str] = None
+    notification_hold_down_minutes: int = 5
 
 
 class AppSettingsUpdate(BaseModel):
@@ -276,3 +277,4 @@ class AppSettingsUpdate(BaseModel):
     smtp_from_address: Optional[str] = None
     smtp_use_tls: Optional[bool] = None
     notification_recipient: Optional[str] = None
+    notification_hold_down_minutes: Optional[int] = Field(default=None, ge=0, le=1440)

@@ -314,3 +314,21 @@ export function UsersIcon({ className = "w-4 h-4" }: IconProps) {
     </svg>
   );
 }
+
+export function BellIcon({ className = "w-4 h-4" }: IconProps) {
+  return (
+    <svg {...common} className={className}>
+      <path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
+      <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+    </svg>
+  );
+}
+
+export function MailIcon({ className = "w-4 h-4" }: IconProps) {
+  return (
+    <svg {...common} className={className}>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m3 7 9 6 9-6" />
+    </svg>
+  );
+}

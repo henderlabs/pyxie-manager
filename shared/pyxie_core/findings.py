@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from .models import Cluster, Finding, Node, Notification, PlacementAffinityRule, Policy, PveTask, Storage, Workload
+from .models import AppSettings, Cluster, Finding, Node, Notification, PlacementAffinityRule, Policy, PveTask, Storage, Workload
+from .notifications import dispatch_event
 
 TASK_LOOKBACK_DAYS = 7
 DEFAULT_STORAGE_WARNING_PCT = 85
@@ -28,9 +29,59 @@ def _storage_warning_threshold(db: Session) -> float:
     return DEFAULT_STORAGE_WARNING_PCT
 
 
-def _reconcile(db: Session, current: list[dict]) -> dict:
-    now = datetime.now(timezone.utc)
+def _notify(db: Session, events: list, f: Finding, *, recovered: bool = False) -> None:
+    """Record an in-app Notification now (same transaction as the finding)
+    and queue the event for email dispatch after the commit. Who actually
+    gets emailed is decided by the notification rules, not here."""
+    db.add(
+        Notification(
+            severity="informational" if recovered else f.severity,
+            title=f"Recovered: {f.title}" if recovered else f.title,
+            message=f"category: {f.category}",
+            object_type=f.object_type,
+            object_id=f.object_id,
+            status="unread",
+            source="findings",
+        )
+    )
+    events.append({"severity": f.severity, "category": f.category, "title": f.title, "recovered": recovered})
+
+
+def _hold_down(db: Session) -> timedelta:
+    minutes = db.query(AppSettings.notification_hold_down_minutes).filter(AppSettings.id == 1).scalar()
+    return timedelta(minutes=5 if minutes is None else minutes)
+
+
+def _settle_notifications(db: Session, now: datetime, events: list) -> None:
+    """Announce a finding's state change (started / cleared) only once that
+    state has held for the hold-down period, so a flapping condition -- a
+    node dropping in and out of quorum every minute -- yields one alert
+    when it settles, not an alert and a recovery per flip. Flaps shorter
+    than the hold-down are never announced at all."""
+    hold = _hold_down(db)
+    candidates = (
+        db.query(Finding)
+        .filter(Finding.severity.in_(("warning", "critical")))
+        .filter(
+            (Finding.active.is_(True) & (Finding.notified_active.isnot(True)))
+            | (Finding.active.is_(False) & (Finding.notified_active.is_(True)))
+        )
+        .all()
+    )
+    for f in candidates:
+        since = f.state_since
+        if since is not None and since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        if since is not None and now - since < hold:
+            continue
+        _notify(db, events, f, recovered=not f.active)
+        f.notified_active = f.active
+
+
+def _reconcile(db: Session, current: list[dict], now: datetime | None = None) -> dict:
+    now = now or datetime.now(timezone.utc)
     seen_keys = set()
+    events: list[dict] = []
 
     for f in current:
         seen_keys.add(f["dedupe_key"])
@@ -50,24 +101,13 @@ def _reconcile(db: Session, current: list[dict]) -> dict:
                     active=True,
                     source=f.get("source", "system"),
                     confidence=f.get("confidence"),
+                    state_since=now,
+                    notified_active=None,
                 )
             )
-            # A notification is only ever created here, on FIRST sighting of
-            # a dedupe_key -- re-observing an already-active finding on the
-            # next pass never re-notifies, so this doesn't spam every cycle.
-            if f["severity"] in ("warning", "critical"):
-                db.add(
-                    Notification(
-                        severity="critical" if f["severity"] == "critical" else "warning",
-                        title=f["title"],
-                        message=f"category: {f['category']}",
-                        object_type=f.get("object_type"),
-                        object_id=f.get("object_id"),
-                        status="unread",
-                        source="findings",
-                    )
-                )
         else:
+            if not existing.active:
+                existing.state_since = now  # a new occurrence begins
             existing.last_observed = now
             existing.active = True
             existing.resolved_at = None
@@ -82,8 +122,19 @@ def _reconcile(db: Session, current: list[dict]) -> dict:
     for r in resolved:
         r.active = False
         r.resolved_at = now
+        r.state_since = now
 
+    db.flush()
+    # A notification is created when a state change has SETTLED, never on
+    # every observation -- see _settle_notifications.
+    _settle_notifications(db, now, events)
     db.commit()
+
+    # After commit, so a slow/broken mail server can't affect the findings
+    # write. dispatch_event never raises.
+    for e in events:
+        dispatch_event(db, observed_at=now, **e)
+
     return {"observed": len(current), "resolved": len(resolved)}
 
 
