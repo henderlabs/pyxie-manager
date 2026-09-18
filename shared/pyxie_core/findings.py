@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from .models import Cluster, Finding, Node, Notification, PlacementAffinityRule, Policy, PveTask, Storage, Workload
+from .notifications import send_alert_email
 
 TASK_LOOKBACK_DAYS = 7
 DEFAULT_STORAGE_WARNING_PCT = 85
@@ -28,9 +29,32 @@ def _storage_warning_threshold(db: Session) -> float:
     return DEFAULT_STORAGE_WARNING_PCT
 
 
+def _notify(db: Session, events: list, severity: str, title: str, category: str, f: dict | Finding, email: bool) -> None:
+    """Record an in-app Notification now (same transaction as the finding)
+    and queue a matching email for after the commit. Only critical findings
+    -- and their recoveries -- are emailed; warnings stay in-app so routine
+    noise like pending updates doesn't fill an inbox."""
+    object_type = f.get("object_type") if isinstance(f, dict) else f.object_type
+    object_id = f.get("object_id") if isinstance(f, dict) else f.object_id
+    db.add(
+        Notification(
+            severity=severity,
+            title=title,
+            message=f"category: {category}",
+            object_type=object_type,
+            object_id=object_id,
+            status="unread",
+            source="findings",
+        )
+    )
+    if email:
+        events.append((severity, title, category))
+
+
 def _reconcile(db: Session, current: list[dict]) -> dict:
     now = datetime.now(timezone.utc)
     seen_keys = set()
+    email_events: list = []
 
     for f in current:
         seen_keys.add(f["dedupe_key"])
@@ -52,28 +76,25 @@ def _reconcile(db: Session, current: list[dict]) -> dict:
                     confidence=f.get("confidence"),
                 )
             )
-            # A notification is only ever created here, on FIRST sighting of
-            # a dedupe_key -- re-observing an already-active finding on the
+            # A notification is only created when a condition BEGINS -- first
+            # sighting of a dedupe_key here, or a previously-resolved one
+            # recurring below. Re-observing an already-active finding on the
             # next pass never re-notifies, so this doesn't spam every cycle.
             if f["severity"] in ("warning", "critical"):
-                db.add(
-                    Notification(
-                        severity="critical" if f["severity"] == "critical" else "warning",
-                        title=f["title"],
-                        message=f"category: {f['category']}",
-                        object_type=f.get("object_type"),
-                        object_id=f.get("object_id"),
-                        status="unread",
-                        source="findings",
-                    )
-                )
+                _notify(db, email_events, f["severity"], f["title"], f["category"], f, f["severity"] == "critical")
         else:
+            was_active = existing.active
             existing.last_observed = now
             existing.active = True
             existing.resolved_at = None
             existing.severity = f["severity"]
             existing.title = f["title"]
             existing.evidence = f.get("evidence")
+            # Same dedupe_key coming back after being resolved is a NEW
+            # occurrence (e.g. a node that dropped out of quorum a second
+            # time) and must notify again.
+            if not was_active and f["severity"] in ("warning", "critical"):
+                _notify(db, email_events, f["severity"], f["title"], f["category"], f, f["severity"] == "critical")
 
     active_query = db.query(Finding).filter(Finding.active.is_(True))
     if seen_keys:
@@ -82,8 +103,19 @@ def _reconcile(db: Session, current: list[dict]) -> dict:
     for r in resolved:
         r.active = False
         r.resolved_at = now
+        # Tell the operator when a warning/critical condition clears, so an
+        # alert is never left dangling with no "it's back" follow-up.
+        if r.severity in ("warning", "critical"):
+            _notify(db, email_events, "informational", f"Recovered: {r.title}", r.category, r, r.severity == "critical")
 
     db.commit()
+
+    # After commit, so a slow/broken mail server can't affect the findings
+    # write. send_alert_email never raises.
+    for severity, title, category in email_events:
+        label = "RECOVERED" if severity == "informational" else "CRITICAL"
+        send_alert_email(db, f"[PyXie] {label}: {title.removeprefix('Recovered: ')}", f"{title}\n\ncategory: {category}\nobserved: {now.isoformat()}\n")
+
     return {"observed": len(current), "resolved": len(resolved)}
 
 
