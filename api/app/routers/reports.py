@@ -95,7 +95,7 @@ def _resolve(keys: list[str]):
 
 @router.get("/export")
 def export(
-    reports: str = Query(..., description="comma-separated report keys, e.g. vInfo,vHost"),
+    reports: str = Query(..., description="comma-separated report keys, e.g. pInfo,pHost"),
     format: str = Query("xlsx", pattern="^(xlsx|csv)$"),
     cluster_id: str | None = None,
     node_id: str | None = None,

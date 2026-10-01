@@ -70,7 +70,7 @@ export default function ReportingWorkspace({
   initialStatus: Status | null;
 }) {
   const me = useMe();
-  const [active, setActive] = useState(catalog[0]?.key ?? "vInfo");
+  const [active, setActive] = useState(catalog[0]?.key ?? "pInfo");
   const [clusters, setClusters] = useState<Set<string>>(new Set());
   const [nodes, setNodes] = useState<Set<string>>(new Set());
   const [vms, setVms] = useState<Set<string>>(new Set());

@@ -157,7 +157,7 @@ def _wl_ident(ctx, w) -> dict:
     }
 
 
-# -- vInfo -------------------------------------------------------------------
+# -- pInfo -------------------------------------------------------------------
 
 VINFO = [
     Col("vm", "VM"),
@@ -249,7 +249,7 @@ def build_vinfo(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vHost -------------------------------------------------------------------
+# -- pHost -------------------------------------------------------------------
 
 VHOST = [
     Col("cluster", "Cluster"),
@@ -321,7 +321,7 @@ def build_vhost(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vStorage ----------------------------------------------------------------
+# -- pStorage ----------------------------------------------------------------
 
 VSTORAGE = [
     Col("cluster", "Cluster"),
@@ -392,7 +392,7 @@ def build_vstorage(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vDisk -------------------------------------------------------------------
+# -- pDisk -------------------------------------------------------------------
 
 VDISK = [
     Col("vm", "VM"),
@@ -442,7 +442,7 @@ def build_vdisk(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vNetwork ----------------------------------------------------------------
+# -- pNetwork ----------------------------------------------------------------
 
 VNETWORK = [
     Col("vm", "VM"),
@@ -489,7 +489,7 @@ def build_vnetwork(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vSnapshot ---------------------------------------------------------------
+# -- pSnapshot ---------------------------------------------------------------
 
 VSNAPSHOT = [
     Col("vm", "VM"),
@@ -528,7 +528,7 @@ def build_vsnapshot(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vHealth -----------------------------------------------------------------
+# -- pHealth -----------------------------------------------------------------
 # RVTools' vHealth equivalent: things that deserve a look. Combines hygiene
 # checks computed here from the reporting inventory with PyXie's own active
 # findings, so there is one place to look. Findings already cover quorum,
@@ -652,13 +652,13 @@ class Report:
 REPORTS: dict[str, Report] = {
     r.key: r
     for r in [
-        Report("vInfo", "vInfo", "VMs & containers — one row per guest", VINFO, build_vinfo),
-        Report("vHost", "vHost", "Hosts (PVE nodes)", VHOST, build_vhost),
-        Report("vStorage", "vStorage", "Storage — capacity, usage, and what sits on it", VSTORAGE, build_vstorage),
-        Report("vDisk", "vDisk", "Virtual disks — one row per disk", VDISK, build_vdisk),
-        Report("vNetwork", "vNetwork", "Virtual NICs — one row per adapter", VNETWORK, build_vnetwork),
-        Report("vSnapshot", "vSnapshot", "Snapshots — one row per snapshot", VSNAPSHOT, build_vsnapshot),
-        Report("vHealth", "vHealth", "Things that deserve a look — hygiene checks plus PyXie's active findings", VHEALTH, build_vhealth),
+        Report("pInfo", "pInfo", "VMs & containers — one row per guest", VINFO, build_vinfo),
+        Report("pHost", "pHost", "Hosts (PVE nodes)", VHOST, build_vhost),
+        Report("pStorage", "pStorage", "Storage — capacity, usage, and what sits on it", VSTORAGE, build_vstorage),
+        Report("pDisk", "pDisk", "Virtual disks — one row per disk", VDISK, build_vdisk),
+        Report("pNetwork", "pNetwork", "Virtual NICs — one row per adapter", VNETWORK, build_vnetwork),
+        Report("pSnapshot", "pSnapshot", "Snapshots — one row per snapshot", VSNAPSHOT, build_vsnapshot),
+        Report("pHealth", "pHealth", "Things that deserve a look — hygiene checks plus PyXie's active findings", VHEALTH, build_vhealth),
     ]
 }
 
