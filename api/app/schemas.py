@@ -157,13 +157,33 @@ class PveTargetOut(OrmModel):
 
 
 class PveEndpointOut(BaseModel):
-    order: int
+    order: Optional[int] = None  # None = excluded from failover
     host: str
-    node: Optional[str] = None
-    ip: Optional[str] = None
+    node: str
+    node_id: uuid.UUID
+    ip: str
     node_status: Optional[str] = None
-    addressing: str  # dns | ip | configured
-    state: str  # active | standby | unreachable
+    addressing: str  # dns | ip
+    state: str  # active | standby | unreachable | excluded
+    enabled: bool = True
+    preferred: bool = False
+
+
+class PveManualEndpointOut(BaseModel):
+    host: str
+    port: int
+    matches_node: Optional[str] = None
+
+
+class PveEndpointsOut(BaseModel):
+    manual: PveManualEndpointOut
+    members: list[PveEndpointOut]
+    preferred_node_id: Optional[uuid.UUID] = None
+
+
+class PveFailoverUpdate(BaseModel):
+    preferred_node_id: Optional[uuid.UUID] = None  # null = automatic
+    disabled_node_ids: list[uuid.UUID] = []
 
 
 class PveTargetCreate(BaseModel):

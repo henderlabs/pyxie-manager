@@ -89,6 +89,9 @@ class Node(Base):
     name = Column(String, nullable=False)
     status = Column(String, nullable=False, default="unknown")  # online/offline/unknown
     management_ip = Column(String, nullable=True)
+    # Whether PyXie may use this member as a PVE API endpoint (failover
+    # selection, set on Settings > Integrations). Discovery never changes it.
+    failover_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
     # Pinned SSH host key for Stage W4 (host-maintenance SSH), deliberately
     # separate from anything PVE-API-related -- set only via an explicit
     # operator-confirmed pin action (see credentials.py /
@@ -334,6 +337,8 @@ class PveTarget(Base):
     tls_fingerprint = Column(String, nullable=True)
     # Written by every discovery run: {active, preferred, unhealthy[], error, checked_at}
     endpoint_status = Column(JSONB, nullable=True)
+    # Operator-chosen member to try first; NULL = automatic (the configured entry point).
+    preferred_node_id = Column(UUID(as_uuid=True), ForeignKey("nodes.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)
 

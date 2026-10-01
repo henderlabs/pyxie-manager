@@ -2,11 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { PveTarget, PveEndpoint } from "@/lib/api";
+import type { PveTarget, PveEndpoints } from "@/lib/api";
 import ActionButton from "@/components/ActionButton";
+import PveFailoverPanel from "@/components/PveFailoverPanel";
 import { useMe } from "@/lib/useMe";
 
-export default function PveTargetRow({ target, endpoints = [] }: { target: PveTarget; endpoints?: PveEndpoint[] }) {
+export default function PveTargetRow({ target, endpoints = null }: { target: PveTarget; endpoints?: PveEndpoints | null }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -148,47 +149,7 @@ export default function PveTargetRow({ target, endpoints = [] }: { target: PveTa
         <ActionButton href={`/api/pve-targets/${target.id}/discover`} label="Sync Now" variant="primary" />
       </div>
     </div>
-    {endpoints.length > 0 && (
-      <details className="mt-3 text-xs">
-        <summary className="cursor-pointer select-none text-muted">
-          Cluster members and failover order ({endpoints.length})
-        </summary>
-        <p className="text-muted mt-2 normal-case">
-          Discovered automatically from the cluster. PyXie connects to the first reachable member and moves down this
-          list when one cannot be connected to; it returns to the top once that member recovers.
-        </p>
-        <table className="mt-2 w-full text-left">
-          <thead className="text-muted">
-            <tr>
-              <th className="font-normal pr-3 py-1">#</th>
-              <th className="font-normal pr-3 py-1">Node</th>
-              <th className="font-normal pr-3 py-1">Address</th>
-              <th className="font-normal pr-3 py-1">Node status</th>
-              <th className="font-normal py-1">Failover</th>
-            </tr>
-          </thead>
-          <tbody>
-            {endpoints.map((e) => (
-              <tr key={e.host} className="border-t border-border">
-                <td className="pr-3 py-1 text-muted">{e.order}</td>
-                <td className="pr-3 py-1 text-text">{e.node ?? "configured hostname (last resort)"}</td>
-                <td className="pr-3 py-1 font-mono">
-                  {e.host}
-                  {e.addressing === "dns" && e.ip && <span className="text-muted"> ({e.ip})</span>}
-                  {e.addressing === "ip" && <span className="text-muted"> (IP)</span>}
-                </td>
-                <td className="pr-3 py-1">{e.node_status ?? "—"}</td>
-                <td className="py-1">
-                  {e.state === "active" && <span className="text-good">Active</span>}
-                  {e.state === "unreachable" && <span className="text-bad">Unreachable</span>}
-                  {e.state === "standby" && <span className="text-muted">Standby</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </details>
-    )}
+    {endpoints && endpoints.members.length > 0 && <PveFailoverPanel targetId={target.id} data={endpoints} />}
     </div>
   );
 }
