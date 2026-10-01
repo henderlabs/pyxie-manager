@@ -298,11 +298,14 @@ export default function TaskPanel({
   setOpen,
   pinned,
   setPinned,
+  locked = false,
 }: {
   open: boolean;
   setOpen: (v: boolean) => void;
   pinned: boolean;
   setPinned: (v: boolean) => void;
+  /** Permanently docked open: no pin or close controls (see AppChrome). */
+  locked?: boolean;
 }) {
   const pathname = usePathname();
   const [operations, setOperations] = useState<Operation[]>([]);
@@ -390,6 +393,7 @@ export default function TaskPanel({
             <ChecklistIcon className="w-4 h-4" />
             Tasks
           </div>
+          {!locked && (
           <div className="flex items-center gap-3">
             <button
               onClick={() => setPinned(!pinned)}
@@ -403,6 +407,7 @@ export default function TaskPanel({
               close
             </button>
           </div>
+          )}
         </div>
         {/* In Progress/Awaiting Approval stay pinned to the top; Recent
             (now capped at 5) is pushed to the bottom of the panel via
