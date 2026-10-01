@@ -35,7 +35,8 @@ function fmt(c: ColMeta, v: unknown): React.ReactNode {
   if (c.kind === "bool") return v ? "Yes" : "No";
   if (c.kind === "datetime") return new Date(String(v)).toLocaleString();
   if (c.kind === "num") return Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
-  if (c.kind === "int") return Number(v).toLocaleString();
+  // identifiers read as plain digits -- "1,085" is not a VMID
+  if (c.kind === "int") return c.key === "vmid" || c.key === "vlan_tag" ? String(v) : Number(v).toLocaleString();
   return String(v);
 }
 
@@ -303,7 +304,8 @@ export default function ReportingWorkspace({
       </div>
 
       {error && <div className="text-sm text-bad mb-2">{error}</div>}
-      {data && (
+      {/* only once the data is for THIS tab -- mounting the table with the previous tab's columns loses the default-hidden set */}
+      {data && data.key === active && (
         <Table
           key={active}
           rows={rows}
