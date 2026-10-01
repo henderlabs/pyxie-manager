@@ -50,7 +50,7 @@ export default function PveFailoverPanel({ targetId, data }: { targetId: string;
   const usable = members.filter((m) => m.enabled);
 
   return (
-    <details className="mt-3 text-xs">
+    <details open className="mt-3 text-xs">
       <summary className="cursor-pointer select-none text-muted">
         Failover: 1 manually added entry, {members.length} auto-discovered member{members.length === 1 ? "" : "s"}
       </summary>
