@@ -79,6 +79,31 @@ ops/docker/backup.sh                  # pg_dump + .env copy to ~/pyxie-backups
 
 Container logs rotate (10 MB x 5 per container).
 
+## Scheduled backups with failure alerts
+
+`ops/docker/backup-monitored.sh` wraps `backup.sh` for cron and runs on the
+host, so it still works when the stack is down:
+
+```cron
+15 2 * * * cd <repo> && flock -n /tmp/pyxie-backup.lock ops/docker/backup-monitored.sh run   >> ~/pyxie-backups/backup.log 2>&1
+30 8 * * * cd <repo> && ops/docker/backup-monitored.sh check >> ~/pyxie-backups/backup.log 2>&1
+```
+
+- `run` takes the backup, validates it (size and `pg_restore -l`), and emails on
+  failure; a partial dump it created is removed so it cannot pass for a good one.
+- `check` emails if the newest backup is older than 26 h (override with
+  `BACKUP_MAX_AGE_HOURS`) or missing, which catches cron itself not firing.
+- `test` sends a labeled test alert: `ops/docker/backup-monitored.sh test`.
+
+Recipients and relay are managed in the app: every **enabled rule under
+Settings > Notifications** (a backup alert is not a finding category, so rule
+category/severity filters are not applied) and **Settings > Email (SMTP)**.
+`BACKUP_ALERT_TO`, `BACKUP_ALERT_SMTP_HOST`, `BACKUP_ALERT_SMTP_PORT`,
+`BACKUP_ALERT_SMTP_TLS` and `BACKUP_ALERT_FROM` in `.env` override them and are
+the fallback if the database is unreachable. SMTP authentication is not
+supported (internal relay assumed). A host that is completely down cannot alert
+about itself; monitor it externally too.
+
 ## Notes
 
 - The login cookie is `Secure` automatically when the request arrived over
