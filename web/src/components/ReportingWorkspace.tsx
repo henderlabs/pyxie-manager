@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Table } from "@/components/Table";
 import type { Column } from "@/components/Table";
 import ReportMultiSelect from "@/components/ReportMultiSelect";
+import StatusBadge from "@/components/StatusBadge";
 import { useMe } from "@/lib/useMe";
 
 type ColMeta = { key: string; label: string; kind: string; hidden: boolean };
@@ -33,6 +34,7 @@ type Row = { id: string; [k: string]: unknown };
 function fmt(c: ColMeta, v: unknown): React.ReactNode {
   if (v === null || v === undefined || v === "") return <span className="text-muted">—</span>;
   if (c.kind === "bool") return v ? "Yes" : "No";
+  if (c.kind === "severity") return <StatusBadge status={String(v)} />;
   if (c.kind === "datetime") return new Date(String(v)).toLocaleString();
   if (c.kind === "num") return Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
   // identifiers read as plain digits -- "1,085" is not a VMID
@@ -43,6 +45,7 @@ function fmt(c: ColMeta, v: unknown): React.ReactNode {
 function sortVal(c: ColMeta, v: unknown): string | number | null {
   if (v === null || v === undefined || v === "") return null;
   if (c.kind === "bool") return v ? 1 : 0;
+  if (c.kind === "severity") return ({ critical: 0, warning: 1, info: 2 } as Record<string, number>)[String(v)] ?? 3;
   if (c.kind === "datetime") return Date.parse(String(v));
   if (c.kind === "num" || c.kind === "int") return Number(v);
   return String(v).toLowerCase();
