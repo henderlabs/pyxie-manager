@@ -129,6 +129,11 @@ See [`docs/adding-a-host.md`](adding-a-host.md) -- the UI-driven walkthrough
 for onboarding a site, PVE target, and credentials, and running the first
 discovery.
 
+If you will use PyXie to apply updates (not just view them), also complete
+**step 7 of that walkthrough** -- connecting each host through the
+host-maintenance wrapper. It is a manual, per-node step and is part of
+initial setup.
+
 ## Troubleshooting notes from real installs
 
 - **`alembic upgrade head` fails with a `ForeignKeyViolation` on

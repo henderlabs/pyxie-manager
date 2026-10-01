@@ -5,6 +5,12 @@ an 8-node/~130-VM cluster) -- every step below is what actually happened,
 not a speculative writeup. Where something needed a follow-up fix, that's
 noted with what changed.
 
+> **Plan for step 7 up front.** PyXie can migrate, evacuate, and power-manage
+> with just the API tokens in steps 1-6, but it **cannot apply package
+> updates** without a small wrapper installed on *every* PVE node (step 7).
+> That install is manual, per node, and part of initial setup -- not an
+> optional extra if you intend to use Apply Updates or Full Maintenance.
+
 ## Prerequisites
 
 - A PVE cluster (or standalone host) reachable on port 8006 from the
@@ -114,6 +120,62 @@ package updates -- a real PVE API quirk), but PyXie's own
 "Allow PyXie to write to Proxmox VE") is a separate, independent gate.
 Both the credential *and* that switch have to allow it before any
 actual write reaches PVE, no matter what gets approved in between.
+
+## 7. Connect each host for patching **[manual, once per node -- required to apply updates]**
+
+**Why this exists.** PVE's REST API can *list* pending updates and refresh the
+package index, but it has no endpoint to *apply* them (PVE's own web UI does
+that through a shell on the host). So PyXie applies updates through a small
+wrapper installed on each node and reached over SSH. This is a completely
+separate trust model from the PVE API tokens above: it has its own SSH
+identity, and nothing in steps 1-6 grants it.
+
+**What works without it:** discovery, migration, evacuation, enter/exit
+maintenance mode, power actions, and *checking* for updates.
+**What needs it:** Apply Updates, and the patch step of Full Maintenance.
+
+**What is once, and what is per node**
+
+| Once per PVE target (cluster) | Once per node (every node, including ones added later) |
+|---|---|
+| Generate the keypair in PyXie | Run the provisioning kit's `install.sh` on the node (root, on the host) |
+| Download the provisioning kit | Probe, verify, and pin that node's SSH host key in PyXie |
+
+PyXie never installs the wrapper for you: it runs as root on your hosts, so
+it stays a deliberate manual step (or part of your own configuration
+management). Budget for it: a 16-node cluster means 16 installs and 16 host
+key pins.
+
+**Steps**
+
+1. **Generate the keypair.** Platform -> Credentials -> *Host maintenance --
+   connect a host* -> **Generate Keypair** (admin only). The private key is
+   stored encrypted and is never displayed again.
+2. **Download the kit.** Click **Download Provisioning Kit**.
+3. **Install on each node.** Copy the kit to the node, unpack it, and run
+   `sudo ./install.sh` there. With many nodes, run it through whatever you
+   already use for host configuration (Ansible, etc.) rather than by hand.
+4. **Pin each node's host key.** Back in PyXie, in that node's row: probe the
+   host key, then compare the fingerprint shown with the one on the node
+   (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`). Only when they match,
+   click **Confirms match -- Pin**. Do not skip the comparison: it is what
+   stops PyXie trusting the wrong machine.
+5. **Check it took.** The node's row should show the key pinned and the node
+   reachable. A node showing "Key not pinned" or "not reachable" has not been
+   connected yet (usually `install.sh` has not been run on it).
+
+**Things to know**
+
+- **Regenerating the keypair breaks every node already installed** -- each
+  one holds the old public key, so the new kit must be installed on all of
+  them again. Only regenerate on purpose.
+- **Removing a node:** run `sudo ./uninstall.sh` on it (the page offers an
+  uninstall script download), then click **Disconnect** in PyXie.
+- **New nodes join later** (a cluster growing from 8 to 16, say): add
+  "run `install.sh`, then pin the host key" to your node build checklist.
+  PyXie lists the new node as "Key not pinned" until you do.
+- Nodes you have not connected simply cannot be patched through PyXie; they
+  still work for everything else.
 
 ## Known gotchas, found live
 
