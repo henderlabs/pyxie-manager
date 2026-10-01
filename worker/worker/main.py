@@ -26,6 +26,7 @@ ANALYSIS_QUEUE = "analysis"
 OPERATIONS_QUEUE = "operations"
 
 polling_q = Queue(POLLING_QUEUE, connection=conn)
+analysis_q = Queue(ANALYSIS_QUEUE, connection=conn)
 
 
 def _wait_for_db():
@@ -50,6 +51,7 @@ def _get_interval_seconds() -> int:
 
 
 PRUNE_EVERY_N_CYCLES = 288  # once a day at the default 5-minute interval
+REPORT_COLLECT_EVERY_N_CYCLES = 6  # reporting inventory: every 30 min at the default interval (first pass on startup)
 
 
 def scheduler_loop():
@@ -63,6 +65,8 @@ def scheduler_loop():
             interval = 300
         log.info("enqueuing run_all (discovery -> protection -> findings -> recommendations), next run in %ss", interval)
         polling_q.enqueue("worker.jobs.run_all", job_timeout=300)
+        if cycle % REPORT_COLLECT_EVERY_N_CYCLES == 0:
+            analysis_q.enqueue("worker.jobs.collect_reporting_job", job_timeout=1800)
         cycle += 1
         if cycle % PRUNE_EVERY_N_CYCLES == 0:
             polling_q.enqueue("worker.jobs.prune_metrics_job", job_timeout=120)

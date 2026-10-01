@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import {
   DashboardIcon, HealthIcon, LightbulbIcon, WrenchIcon, LinkIcon, ShieldIcon, GaugeIcon,
   ServerIcon, WorkloadIcon, StorageIcon, NetworkIcon, PlugIcon, KeyIcon,
-  ScrollIcon, SlidersIcon, GearIcon, UsersIcon, BellIcon, MailIcon,
+  ScrollIcon, ReportIcon, SlidersIcon, GearIcon, UsersIcon, BellIcon, MailIcon,
 } from "@/components/Icons";
 
 type NavItem = {
@@ -63,6 +63,7 @@ const SECTIONS: NavSection[] = [
     label: "Platform",
     items: [
       { label: "Logging", href: "/platform/logging", icon: <ScrollIcon /> },
+      { label: "Reporting", href: "/platform/reporting", icon: <ReportIcon /> },
       {
         label: "Settings",
         href: "/platform/settings",

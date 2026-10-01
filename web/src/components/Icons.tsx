@@ -214,6 +214,16 @@ export function ScrollIcon({ className = "w-4 h-4" }: IconProps) {
   );
 }
 
+export function ReportIcon({ className = "w-4 h-4" }: IconProps) {
+  return (
+    <svg {...common} className={className}>
+      <path d="M5 3h10l4 4v14H5z" />
+      <path d="M14 3v5h5" />
+      <path d="M8 17v-3M12 17v-6M16 17v-4" />
+    </svg>
+  );
+}
+
 export function SlidersIcon({ className = "w-4 h-4" }: IconProps) {
   return (
     <svg {...common} className={className}>

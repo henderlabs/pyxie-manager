@@ -12,6 +12,10 @@ export type Column<T> = {
    * output, so it can compare on whatever fields it needs. */
   compare?: (a: T, b: T) => number;
   optional?: boolean;
+  /** Start hidden (still toggleable from the Columns picker) until the
+   * viewer has saved their own column prefs -- for wide report-style tables
+   * where most columns are available but only the key ones lead. */
+  defaultHidden?: boolean;
   className?: string;
   /** Shown as a hover tooltip on a small (i) next to the header -- for
    * columns whose meaning isn't obvious to a new user (e.g. what
@@ -112,7 +116,9 @@ export function Table<T extends { id: string }>({
   onSortChange?: (next: SortState) => void;
 }) {
   const [order, setOrder] = useState<string[]>(columns.map((c) => c.header));
-  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [hidden, setHidden] = useState<Set<string>>(
+    () => new Set(columns.filter((c) => c.defaultHidden).map((c) => c.header))
+  );
   const [internalSort, setInternalSort] = useState<SortState>(null);
   const sort = onSortChange ? controlledSort ?? null : internalSort;
   const [widths, setWidths] = useState<Record<string, number>>({});

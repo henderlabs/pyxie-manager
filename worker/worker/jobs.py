@@ -99,6 +99,15 @@ def generate_recommendations_job():
     return _run_logged("recommendation_generation", lambda db: generate_recommendations(db))
 
 
+def collect_reporting_job(actor: str = "schedule"):
+    """Reporting-page inventory (disks/NICs/snapshots/guest IPs). Runs on the
+    low-priority 'analysis' queue so a long pass can never delay discovery
+    or an operation; also enqueued on demand by the Refresh button."""
+    from pyxie_core.report_collection import collect_reporting_data
+
+    return _run_logged("report_collection", lambda db: collect_reporting_data(db, actor=actor))
+
+
 def prune_metrics_job():
     return _run_logged("metrics_pruning", lambda db: {"deleted": prune_old_metrics(db)})
 

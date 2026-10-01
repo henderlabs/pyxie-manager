@@ -940,6 +940,107 @@ class NotificationRule(Base):
 
 
 # ---------------------------------------------------------------------------
+# Reporting inventory (RVTools-style). Per-workload detail PVE only exposes
+# through per-VM config/snapshot/agent calls, collected on its own schedule
+# by pyxie_core.report_collection (not inside discovery, which has to stay
+# fast) and read back by the Reporting page. Every row carries the time it
+# was collected so the UI can say how fresh it is.
+# ---------------------------------------------------------------------------
+
+
+class WorkloadConfig(Base):
+    __tablename__ = "workload_configs"
+
+    workload_id = Column(UUID(as_uuid=True), ForeignKey("workloads.id", ondelete="CASCADE"), primary_key=True)
+    collected_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+    sockets = Column(Integer, nullable=True)
+    cores_per_socket = Column(Integer, nullable=True)
+    cpu_type = Column(String, nullable=True)
+    memory_mb = Column(Integer, nullable=True)
+    balloon_mb = Column(Integer, nullable=True)
+    machine = Column(String, nullable=True)
+    bios = Column(String, nullable=True)
+    onboot = Column(Boolean, nullable=True)
+    protection = Column(Boolean, nullable=True)
+    agent_enabled = Column(Boolean, nullable=True)
+    description = Column(Text, nullable=True)
+    hostname = Column(String, nullable=True)  # lxc hostname
+    guest_ips = Column(JSONB, nullable=True)  # list of addresses (guest agent / lxc interfaces)
+    guest_ips_source = Column(String, nullable=True)  # agent | lxc | config | unavailable
+
+
+class WorkloadDisk(Base):
+    __tablename__ = "workload_disks"
+
+    id = uuid_pk()
+    workload_id = Column(UUID(as_uuid=True), ForeignKey("workloads.id", ondelete="CASCADE"), nullable=False)
+    slot = Column(String, nullable=False)  # scsi0, virtio1, rootfs, mp0, efidisk0, ...
+    bus = Column(String, nullable=True)
+    storage = Column(String, nullable=True)
+    volume = Column(String, nullable=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    is_cdrom = Column(Boolean, nullable=False, default=False)
+    cache = Column(String, nullable=True)
+    discard = Column(String, nullable=True)
+    ssd = Column(Boolean, nullable=True)
+    iothread = Column(Boolean, nullable=True)
+    backup = Column(Boolean, nullable=True)  # false = excluded from backup (PVE backup=0)
+    collected_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+
+    __table_args__ = (UniqueConstraint("workload_id", "slot", name="uq_workload_disk_slot"),)
+
+
+class WorkloadNic(Base):
+    __tablename__ = "workload_nics_report"
+
+    id = uuid_pk()
+    workload_id = Column(UUID(as_uuid=True), ForeignKey("workloads.id", ondelete="CASCADE"), nullable=False)
+    slot = Column(String, nullable=False)  # net0, net1, ...
+    model = Column(String, nullable=True)  # virtio, e1000, veth, ...
+    mac = Column(String, nullable=True)
+    bridge = Column(String, nullable=True)
+    vlan_tag = Column(Integer, nullable=True)
+    firewall = Column(Boolean, nullable=True)
+    rate_mbps = Column(Float, nullable=True)
+    link_down = Column(Boolean, nullable=True)
+    ip_config = Column(String, nullable=True)  # lxc static/dhcp setting from config
+    ips = Column(JSONB, nullable=True)  # addresses seen on this interface (agent/lxc)
+    collected_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+
+    __table_args__ = (UniqueConstraint("workload_id", "slot", name="uq_workload_nic_report_slot"),)
+
+
+class WorkloadSnapshot(Base):
+    __tablename__ = "workload_snapshots"
+
+    id = uuid_pk()
+    workload_id = Column(UUID(as_uuid=True), ForeignKey("workloads.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    parent = Column(String, nullable=True)
+    snapshot_time = Column(DateTime(timezone=True), nullable=True)
+    includes_ram = Column(Boolean, nullable=True)
+    collected_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+
+    __table_args__ = (UniqueConstraint("workload_id", "name", name="uq_workload_snapshot_name"),)
+
+
+class ReportCollectionRun(Base):
+    __tablename__ = "report_collection_runs"
+
+    id = uuid_pk()
+    started_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String, nullable=False, default="running")  # running | success | partial | failed
+    triggered_by = Column(String, nullable=False, default="schedule")  # schedule | email of the user who hit Refresh
+    workloads_total = Column(Integer, nullable=False, default=0)
+    workloads_collected = Column(Integer, nullable=False, default=0)
+    workloads_failed = Column(Integer, nullable=False, default=0)
+    summary = Column(JSONB, nullable=True)
+    error = Column(Text, nullable=True)
+
+
+# ---------------------------------------------------------------------------
 # Internal job run log -- distinguishes PyXie's own background jobs from PVE
 # tasks on the Tasks page.
 # ---------------------------------------------------------------------------
