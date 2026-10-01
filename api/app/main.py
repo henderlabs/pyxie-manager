@@ -24,6 +24,7 @@ from .routers import (
     protection,
     providers,
     recommendations,
+    reports,
 )
 from .seed import seed_defaults
 
@@ -58,6 +59,7 @@ app.include_router(providers.router)
 app.include_router(audit.router)
 app.include_router(findings.router)
 app.include_router(recommendations.router)
+app.include_router(reports.router)
 app.include_router(metrics.router)
 app.include_router(policies.router)
 app.include_router(protection.router)

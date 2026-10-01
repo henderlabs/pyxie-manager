@@ -10,3 +10,4 @@ bcrypt==4.2.1
 redis==5.2.1
 rq==2.1.0
 paramiko==3.5.0
+openpyxl==3.1.5

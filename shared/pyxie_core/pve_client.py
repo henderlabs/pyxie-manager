@@ -66,7 +66,7 @@ class PveClient:
     def __exit__(self, *exc):
         self.close()
 
-    def _get(self, path: str, params: Optional[dict] = None, *, retries: int = 1) -> Any:
+    def _get(self, path: str, params: Optional[dict] = None, *, retries: int = 1, timeout: Optional[float] = None) -> Any:
         """retries=1 means one extra attempt after the first timeout, not one
         attempt total -- found live against a real node whose /qemu listing
         times out intermittently (roughly half the time) but responds in
@@ -78,7 +78,7 @@ class PveClient:
         attempt = 0
         while True:
             try:
-                resp = self._client.get(path, params=params)
+                resp = self._client.get(path, params=params, **({"timeout": timeout} if timeout else {}))
             except httpx.ConnectError as exc:
                 if "certificate" in str(exc).lower() or "SSL" in str(exc):
                     raise PveTlsError(str(exc)) from exc
@@ -153,6 +153,22 @@ class PveClient:
 
     def qemu_config(self, node: str, vmid: int) -> dict:
         return self._get(f"/nodes/{node}/qemu/{vmid}/config")
+
+    def qemu_snapshots(self, node: str, vmid: int) -> list[dict]:
+        return self._get(f"/nodes/{node}/qemu/{vmid}/snapshot") or []
+
+    def lxc_snapshots(self, node: str, vmid: int) -> list[dict]:
+        return self._get(f"/nodes/{node}/lxc/{vmid}/snapshot") or []
+
+    def qemu_agent_interfaces(self, node: str, vmid: int) -> list[dict]:
+        """Guest-agent network interfaces -- only answers when the agent is
+        running inside the guest, so it gets a short timeout and no retry:
+        a guest without a responsive agent must not stall the whole pass."""
+        data = self._get(f"/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces", retries=0, timeout=6.0)
+        return (data or {}).get("result") or []
+
+    def lxc_interfaces(self, node: str, vmid: int) -> list[dict]:
+        return self._get(f"/nodes/{node}/lxc/{vmid}/interfaces", retries=0, timeout=6.0) or []
 
     def lxc_list(self, node: str) -> list[dict]:
         return self._get(f"/nodes/{node}/lxc")
