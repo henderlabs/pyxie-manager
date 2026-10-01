@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from .models import (
     Cluster,
+    Finding,
     Node,
     ReportCollectionRun,
     Site,
@@ -38,7 +39,7 @@ MIB = 1 << 20
 class Col:
     key: str
     label: str
-    kind: str = "text"  # text | int | num | bool | datetime
+    kind: str = "text"  # text | int | num | bool | datetime | severity
     hidden: bool = False  # hidden by default in the UI's column picker (always in exports)
 
 
@@ -156,7 +157,7 @@ def _wl_ident(ctx, w) -> dict:
     }
 
 
-# -- vInfo -------------------------------------------------------------------
+# -- pInfo -------------------------------------------------------------------
 
 VINFO = [
     Col("vm", "VM"),
@@ -248,7 +249,7 @@ def build_vinfo(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vHost -------------------------------------------------------------------
+# -- pHost -------------------------------------------------------------------
 
 VHOST = [
     Col("cluster", "Cluster"),
@@ -320,7 +321,7 @@ def build_vhost(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vStorage ----------------------------------------------------------------
+# -- pStorage ----------------------------------------------------------------
 
 VSTORAGE = [
     Col("cluster", "Cluster"),
@@ -391,7 +392,7 @@ def build_vstorage(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vDisk -------------------------------------------------------------------
+# -- pDisk -------------------------------------------------------------------
 
 VDISK = [
     Col("vm", "VM"),
@@ -441,7 +442,7 @@ def build_vdisk(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vNetwork ----------------------------------------------------------------
+# -- pNetwork ----------------------------------------------------------------
 
 VNETWORK = [
     Col("vm", "VM"),
@@ -488,7 +489,7 @@ def build_vnetwork(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
-# -- vSnapshot ---------------------------------------------------------------
+# -- pSnapshot ---------------------------------------------------------------
 
 VSNAPSHOT = [
     Col("vm", "VM"),
@@ -527,6 +528,118 @@ def build_vsnapshot(db: Session, scope: Scope) -> list[dict]:
     return rows
 
 
+# -- pHealth -----------------------------------------------------------------
+# RVTools' vHealth equivalent: things that deserve a look. Combines hygiene
+# checks computed here from the reporting inventory with PyXie's own active
+# findings, so there is one place to look. Findings already cover quorum,
+# offline hosts, pending updates, storage thresholds, task failures and
+# protection -- those are included as-is, not re-implemented.
+
+SNAPSHOT_WARN_DAYS = 7
+SNAPSHOT_CRIT_DAYS = 30
+HOST_MEM_ALLOC_WARN_PCT = 90  # same threshold the Hosts & Clusters page warns at
+DETAIL_STALE_HOURS = 24
+SEVERITY_RANK = {"critical": 0, "warning": 1, "info": 2}
+
+VHEALTH = [
+    Col("severity", "Severity", "severity"),
+    Col("check", "Check"),
+    Col("object_type", "Object type"),
+    Col("object", "Object"),
+    Col("cluster", "Cluster"),
+    Col("node", "Host"),
+    Col("detail", "Detail"),
+    Col("source", "Source", hidden=True),
+    Col("since", "Since (UTC)", "datetime", hidden=True),
+]
+
+
+def build_vhealth(db: Session, scope: Scope) -> list[dict]:
+    ctx = _ctx(db, scope)
+    rows: list[dict] = []
+    now = ctx["now"]
+
+    def add(severity, check, object_type, obj, cluster, node, detail, source="Check", since=None):
+        rows.append(
+            {"severity": severity, "check": check, "object_type": object_type, "object": obj,
+             "cluster": cluster, "node": node, "detail": detail, "source": source, "since": since}
+        )
+
+    for w in ctx["workloads"]:
+        ident = _wl_ident(ctx, w)
+        who = dict(object_type=ident["type"], obj=ident["vm"], cluster=ident["cluster"], node=ident["node"])
+        cfg = ctx["configs"].get(w.id)
+        for s in ctx["snaps"].get(w.id, []):
+            if not s.snapshot_time:
+                continue
+            age = (now - s.snapshot_time).days
+            if age >= SNAPSHOT_WARN_DAYS:
+                add("critical" if age >= SNAPSHOT_CRIT_DAYS else "warning", "Snapshot age", detail=f"Snapshot '{s.name}' is {age} days old", since=s.snapshot_time, **who)
+        for d in ctx["disks"].get(w.id, []):
+            if d.is_cdrom:
+                if d.volume and d.volume != "none":
+                    add("info", "ISO attached", detail=f"{d.slot}: {d.volume}", **who)
+            elif d.backup is False:
+                size = f"{_gib(d.size_bytes):g} GiB " if d.size_bytes else ""
+                add("warning", "Disk excluded from backup", detail=f"{d.slot} ({size}on {d.storage or 'unknown storage'}) has backup disabled", **who)
+        if w.status == "running" and w.type == "vm" and cfg is not None:
+            if cfg.agent_enabled and cfg.guest_ips_source == "unavailable":
+                add("warning", "Guest agent not responding", detail="Agent is enabled but did not answer (agent not running in the guest, or guest not ready)", **who)
+            elif cfg.agent_enabled is False:
+                add("info", "Guest agent not enabled", detail="No guest agent: IPs unavailable and graceful shutdown relies on ACPI", **who)
+        if cfg is not None and (now - cfg.collected_at).total_seconds() > DETAIL_STALE_HOURS * 3600:
+            add("warning", "Details out of date", detail=f"Config/disk/NIC details last collected {cfg.collected_at:%Y-%m-%d %H:%M} UTC", since=cfg.collected_at, **who)
+
+    alloc: dict = {}
+    for w in db.query(Workload).filter(Workload.is_missing.is_(False)).all():
+        alloc[w.node_id] = alloc.get(w.node_id, 0) + (w.memory_bytes or 0)
+    for nid in ctx["node_ids"]:
+        n = ctx["nodes"][nid]
+        who = dict(object_type="Host", obj=n.name, cluster=_cluster_name(ctx, n.cluster_id), node=n.name)
+        if n.mem_total_bytes and alloc.get(nid):
+            pct = alloc[nid] / n.mem_total_bytes * 100
+            if pct >= HOST_MEM_ALLOC_WARN_PCT:
+                add("warning", "Host memory overcommitted", detail=f"{pct:.0f}% of host memory is allocated to guests (warns at {HOST_MEM_ALLOC_WARN_PCT}%)", **who)
+        if n.maintenance_mode:
+            add("info", "Host in maintenance", detail=n.maintenance_reason or "Maintenance mode is on", since=n.maintenance_mode_since, **who)
+
+    # Active findings, resolved to names and narrowed to the same scope
+    narrowed = bool(scope.cluster_ids or scope.node_ids or scope.workload_ids)
+    wl_by_id = {w.id: w for w in ctx["workloads"]}
+    eff_clusters = {ctx["nodes"][i].cluster_id for i in ctx["node_ids"]}
+    for f in db.query(Finding).filter(Finding.active.is_(True)).all():
+        otype, obj, cluster, node, keep = "", None, None, None, not narrowed
+        if f.object_type == "node" and f.object_id in ctx["nodes"]:
+            n = ctx["nodes"][f.object_id]
+            otype, obj, node, cluster, keep = "Host", n.name, n.name, _cluster_name(ctx, n.cluster_id), f.object_id in ctx["node_ids"]
+        elif f.object_type == "workload":
+            w = wl_by_id.get(f.object_id)
+            if w is not None:
+                ident = _wl_ident(ctx, w)
+                otype, obj, node, cluster, keep = ident["type"], ident["vm"], ident["node"], ident["cluster"], True
+            else:
+                keep = not narrowed
+        elif f.object_type == "cluster":
+            c = ctx["clusters"].get(f.object_id)
+            otype, obj, cluster = "Cluster", c.name if c else None, c.name if c else None
+            keep = f.object_id in eff_clusters if narrowed else True
+        elif f.object_type == "storage":
+            st = db.get(Storage, f.object_id)
+            if st is not None:
+                nd = ctx["nodes"].get(st.node_id)
+                cl = st.cluster_id or (nd.cluster_id if nd else None)
+                otype, obj, cluster, node = "Storage", st.name, _cluster_name(ctx, cl), nd.name if nd else None
+                keep = (st.node_id in ctx["node_ids"]) if st.node_id else (cl in eff_clusters if narrowed else True)
+        elif f.object_type:
+            otype = f.object_type.capitalize()
+        if keep:
+            sev = f.severity if f.severity in SEVERITY_RANK else "info"
+            add(sev, f"Finding: {f.category}", otype, obj, cluster, node, f.title, source="PyXie finding", since=f.first_observed)
+
+    rows.sort(key=lambda r: (SEVERITY_RANK.get(r["severity"], 3), r["cluster"] or "", r["node"] or "", (r["object"] or "").lower(), r["check"]))
+    return rows
+
+
 @dataclass
 class Report:
     key: str
@@ -539,12 +652,13 @@ class Report:
 REPORTS: dict[str, Report] = {
     r.key: r
     for r in [
-        Report("vInfo", "vInfo", "VMs & containers — one row per guest", VINFO, build_vinfo),
-        Report("vHost", "vHost", "Hosts (PVE nodes)", VHOST, build_vhost),
-        Report("vStorage", "vStorage", "Storage — capacity, usage, and what sits on it", VSTORAGE, build_vstorage),
-        Report("vDisk", "vDisk", "Virtual disks — one row per disk", VDISK, build_vdisk),
-        Report("vNetwork", "vNetwork", "Virtual NICs — one row per adapter", VNETWORK, build_vnetwork),
-        Report("vSnapshot", "vSnapshot", "Snapshots — one row per snapshot", VSNAPSHOT, build_vsnapshot),
+        Report("pInfo", "pInfo", "VMs & containers — one row per guest", VINFO, build_vinfo),
+        Report("pHost", "pHost", "Hosts (PVE nodes)", VHOST, build_vhost),
+        Report("pStorage", "pStorage", "Storage — capacity, usage, and what sits on it", VSTORAGE, build_vstorage),
+        Report("pDisk", "pDisk", "Virtual disks — one row per disk", VDISK, build_vdisk),
+        Report("pNetwork", "pNetwork", "Virtual NICs — one row per adapter", VNETWORK, build_vnetwork),
+        Report("pSnapshot", "pSnapshot", "Snapshots — one row per snapshot", VSNAPSHOT, build_vsnapshot),
+        Report("pHealth", "pHealth", "Things that deserve a look — hygiene checks plus PyXie's active findings", VHEALTH, build_vhealth),
     ]
 }
 
