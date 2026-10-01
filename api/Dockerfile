@@ -14,13 +14,20 @@ COPY api/migrations ./migrations
 COPY api/entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
+# Single source of truth for the app version. app/config.py resolves it as
+# <app dir>/../../VERSION, which in this layout (/app/app/config.py) is /VERSION.
+COPY VERSION /VERSION
+
 # Static Stage W4 provisioning templates (wrapper/dispatch/sudoers/installer)
 # -- bundled into the downloadable "Connect a Host" kit. Deliberately NOT
 # the generated keypair (that's per-target, minted and stored via the API,
 # never baked into an image).
 COPY api/host_maintenance_kit ./host_maintenance_kit
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=5 \
+RUN useradd --system --uid 10001 --no-create-home pyxie
+USER pyxie
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=3)" || exit 1
 
 EXPOSE 8000

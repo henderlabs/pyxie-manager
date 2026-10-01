@@ -1,20 +1,38 @@
 name: pyxie-manager
 
+# Only Caddy publishes ports (80/443). Everything else lives on the private
+# `internal` network -- Postgres, Redis and the API are never reachable from
+# the LAN. See docs/docker-caddy.md.
+
 networks:
-  edge:
-    external: true
   internal:
     driver: bridge
 
 volumes:
   pyxie_manager_db_data:
   pyxie_manager_redis_data:
+  caddy_data:
+  caddy_config:
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+# DB/Redis locations are derived here, so one .env serves both the native
+# install (localhost URLs in .env) and this stack: `environment:` wins over
+# `env_file:`. POSTGRES_PASSWORD must be URL-safe (letters/digits/._~-).
+x-app-env: &app-env
+  DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pyxie-manager-db:5432/${POSTGRES_DB}
+  REDIS_URL: redis://pyxie-manager-redis:6379/0
 
 services:
   pyxie-manager-db:
     image: postgres:16-alpine
     container_name: pyxie-manager-db
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -33,6 +51,7 @@ services:
     image: redis:7-alpine
     container_name: pyxie-manager-redis
     restart: unless-stopped
+    logging: *default-logging
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - pyxie_manager_redis_data:/data
@@ -50,8 +69,10 @@ services:
       dockerfile: api/Dockerfile
     container_name: pyxie-manager-api
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env
+    environment: *app-env
     networks:
       - internal
     depends_on:
@@ -66,8 +87,10 @@ services:
       dockerfile: worker/Dockerfile
     container_name: pyxie-manager-worker
     restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env
+    environment: *app-env
     networks:
       - internal
     depends_on:
@@ -78,22 +101,47 @@ services:
 
   pyxie-manager-web:
     build:
-      context: ./web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: web/Dockerfile
     container_name: pyxie-manager-web
     restart: unless-stopped
+    logging: *default-logging
     environment:
       API_INTERNAL_URL: http://pyxie-manager-api:8000
       NODE_ENV: production
-      # Next's standalone server.js binds to $HOSTNAME if set. Docker auto-sets
-      # HOSTNAME to the container id on every container; on a multi-network
-      # container (this one joins both `internal` and `edge`) that resolves to
-      # only one of its several IPs, making the other network unreachable and
-      # even 127.0.0.1 healthchecks fail. Force it to bind all interfaces.
+      # Next's standalone server.js binds to $HOSTNAME if set, and Docker
+      # sets HOSTNAME to the container id. Force all interfaces so the
+      # proxy (and the healthcheck) can reach it.
       HOSTNAME: "0.0.0.0"
     networks:
       - internal
-      - edge
     depends_on:
       pyxie-manager-api:
+        condition: service_healthy
+
+  pyxie-manager-caddy:
+    image: caddy:2-alpine
+    container_name: pyxie-manager-caddy
+    restart: unless-stopped
+    logging: *default-logging
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      PYXIE_HOSTNAME: ${PYXIE_HOSTNAME:?set PYXIE_HOSTNAME in .env}
+      PYXIE_TLS_MODE: ${PYXIE_TLS_MODE:-internal}
+      ACME_CA: ${ACME_CA:-}
+    volumes:
+      # Directory mounts, not single files: single-file bind mounts go stale
+      # when the file is replaced (new inode), and reloads silently keep
+      # serving the old config.
+      - ./ops/caddy:/etc/caddy:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - internal
+    depends_on:
+      pyxie-manager-web:
         condition: service_healthy

@@ -1,0 +1,11 @@
+# PLACEHOLDER -- not yet usable. Fill in once the internal certificate
+# manager's connection details are known (ACME directory URL, and whether it
+# needs External Account Binding). If it is ACME-compatible, this is the
+# whole change; Caddy then renews automatically.
+tls {
+	issuer acme {
+		dir {$ACME_CA}
+		# eab <key_id> <mac_key>   # if the CA requires external account binding
+		# trusted_roots /certs/internal-ca-root.pem   # if the CA's root is private
+	}
+}
