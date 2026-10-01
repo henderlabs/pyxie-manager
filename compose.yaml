@@ -72,7 +72,12 @@ services:
     logging: *default-logging
     env_file:
       - .env
-    environment: *app-env
+    environment:
+      <<: *app-env
+      # The API has no published port; only web and worker can reach it, so
+      # trusting X-Forwarded-For from the private network is safe. This is what
+      # makes request.client (sessions, audit client_ip) the real browser IP.
+      FORWARDED_ALLOW_IPS: "*"
     networks:
       - internal
     depends_on:

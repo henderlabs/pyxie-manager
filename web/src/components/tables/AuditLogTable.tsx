@@ -41,6 +41,12 @@ export default function AuditLogTable({
           sortValue: (e) => e.actor,
           optional: true,
         },
+        {
+          header: "Client IP",
+          render: (e) => (typeof e.event_metadata?.client_ip === "string" ? e.event_metadata.client_ip : "—"),
+          sortValue: (e) => (typeof e.event_metadata?.client_ip === "string" ? e.event_metadata.client_ip : ""),
+          optional: true,
+        },
         { header: "Result", render: (e) => <StatusBadge status={e.result} />, sortValue: (e) => e.result },
         { header: "Severity", render: (e) => <StatusBadge status={e.severity} />, sortValue: (e) => e.severity, optional: true },
         {
@@ -54,13 +60,14 @@ export default function AuditLogTable({
         },
       ]}
       renderDetail={(e) => {
-        const { summary, operation_id, ...restMetadata } = e.event_metadata || {};
+        const { summary, operation_id, client_ip, ...restMetadata } = e.event_metadata || {};
         const metadataJson = prettyJson(restMetadata);
         return (
           <div>
             <LogDetailGrid
               fields={[
                 ["Event ID", e.id],
+                ["Client IP", typeof client_ip === "string" ? client_ip : null],
                 ["Operation", e.operation],
                 ["Node", (e.node_id && nodeNameById[e.node_id]) || e.node_id],
                 ["Workload", (e.workload_id && workloadNameById[e.workload_id]) || e.workload_id],
