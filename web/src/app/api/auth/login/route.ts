@@ -19,9 +19,10 @@ export async function POST(req: NextRequest) {
   const res = NextResponse.json({ user: data.user });
   res.cookies.set(SESSION_COOKIE, data.token, {
     httpOnly: true,
-    // This app is deliberately plain HTTP, LAN-only (see README) -- Secure
-    // would make the browser silently refuse to send the cookie at all.
-    secure: false,
+    // Secure only when the browser reached us over HTTPS (Caddy sets
+    // X-Forwarded-Proto). Plain-HTTP deployments (lab) must stay non-Secure or
+    // the browser silently refuses to send the cookie back.
+    secure: (req.headers.get("x-forwarded-proto") ?? req.nextUrl.protocol.replace(":", "")) === "https",
     sameSite: "lax",
     path: "/",
     expires: new Date(data.expires_at),
