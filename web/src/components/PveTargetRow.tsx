@@ -121,6 +121,18 @@ export default function PveTargetRow({ target }: { target: PveTarget }) {
         <div className="text-xs text-muted">
           {target.hostname}:{target.api_port} · TLS {target.tls_verify ? "verified" : "not verified"}
         </div>
+        {target.endpoint_status && (
+          <div className="text-xs text-muted">
+            {target.endpoint_status.active ? (
+              <>Connected via <span className="font-mono">{target.endpoint_status.active}</span></>
+            ) : (
+              <span className="text-bad">No cluster member reachable</span>
+            )}
+            {target.endpoint_status.unhealthy && target.endpoint_status.unhealthy.length > 0 && (
+              <span className="text-warn"> · unreachable: {target.endpoint_status.unhealthy.join(", ")}</span>
+            )}
+          </div>
+        )}
       </div>
       <div className="flex gap-2">
         {isAdmin && (

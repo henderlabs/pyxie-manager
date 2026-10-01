@@ -13,6 +13,13 @@ cluster member other than the node under maintenance, learned from Node
 rows populated by discovery.run_discovery() (see Node.management_ip).
 """
 
+import ipaddress
+import socket
+import threading
+import time
+from dataclasses import dataclass
+from typing import Callable, Optional
+
 from sqlalchemy.orm import Session
 
 from .crypto import decrypt_secret
@@ -31,51 +38,126 @@ class HostNotAddressable(Exception):
     node directly, unlike the PVE API's cluster-aware failover."""
 
 
-def resolve_pve_endpoint(db: Session, target: PveTarget, *, avoid_node_id=None) -> tuple[str, int]:
-    """Cluster-aware endpoint resolution. Prefers a healthy, online cluster
-    member other than avoid_node_id (typically the node currently under
-    maintenance/reboot) over the single configured target.hostname, so PyXie
-    keeps talking to the cluster even while that one node is offline.
+@dataclass
+class EndpointCandidate:
+    node_id: object
+    name: str
+    ip: str
+    online: bool
 
-    Falls back to target.hostname/target.api_port (the old, single-endpoint
-    behavior) whenever nothing better is known yet -- e.g. before the very
-    first discovery run has populated any Node.management_ip, or if no
-    cluster is on record for this target at all. Never refuses to return an
-    endpoint outright; a stale-but-present fallback beats hard failure.
-    """
+
+_DNS_TTL = 300.0
+_dns_cache: dict = {}
+_dns_lock = threading.Lock()
+
+
+def _dns_resolves_to(fqdn: str, ip: str) -> bool:
+    """True when `fqdn` currently resolves to the node's known management IP.
+    Cached for a few minutes -- clients are built constantly."""
+    key = (fqdn.lower(), ip)
+    now_ = time.monotonic()
+    with _dns_lock:
+        hit = _dns_cache.get(key)
+        if hit and hit[0] > now_:
+            return hit[1]
+    try:
+        ok = ip in {info[4][0] for info in socket.getaddrinfo(fqdn, None, proto=socket.IPPROTO_TCP)}
+    except OSError:
+        ok = False
+    with _dns_lock:
+        _dns_cache[key] = (now_ + _DNS_TTL, ok)
+    return ok
+
+
+def _domain_of(hostname: Optional[str]) -> Optional[str]:
+    """The DNS suffix of the configured hostname (pve-slc-m401.slc.crengland.com
+    -> slc.crengland.com), or None for an IP / a bare short name."""
+    if not hostname or "." not in hostname:
+        return None
+    try:
+        ipaddress.ip_address(hostname)
+        return None
+    except ValueError:
+        return hostname.split(".", 1)[1]
+
+
+def order_endpoint_hosts(
+    candidates: list,
+    *,
+    target_hostname: Optional[str],
+    avoid_node_id=None,
+    domain: Optional[str] = None,
+    dns_ok: Callable[[str, str], bool] = lambda fqdn, ip: False,
+) -> list:
+    """The ordered list of API endpoints to try (pure function, unit-tested).
+
+    Order: online members first (the configured primary leading, then by
+    name), then members last seen not-online (their recorded status can be
+    stale -- exactly when failover matters), then the node being avoided
+    (e.g. under maintenance), then the configured hostname if it is not itself
+    a known node. A member is addressed by DNS name when that name currently
+    resolves to its known IP, otherwise by IP."""
+    th = (target_hostname or "").lower()
+
+    def host_for(c: EndpointCandidate) -> str:
+        if domain:
+            fqdn = f"{c.name}.{domain}"
+            if dns_ok(fqdn, c.ip):
+                return fqdn
+        return c.ip
+
+    def is_primary(c: EndpointCandidate) -> bool:
+        names = {c.ip.lower(), c.name.lower()}
+        if domain:
+            names.add(f"{c.name}.{domain}".lower())
+        return th in names
+
+    ordered = sorted(candidates, key=lambda c: c.name)
+    avoid = [c for c in ordered if avoid_node_id is not None and str(c.node_id) == str(avoid_node_id)]
+    rest = [c for c in ordered if c not in avoid]
+    online = sorted((c for c in rest if c.online), key=lambda c: 0 if is_primary(c) else 1)
+    offline = [c for c in rest if not c.online]
+
+    hosts: list = []
+    for c in online + offline + avoid:
+        h = host_for(c)
+        if h not in hosts:
+            hosts.append(h)
+    known = {c.ip.lower() for c in candidates} | {h.lower() for h in hosts}
+    if target_hostname and th not in known:
+        hosts.append(target_hostname)
+    return hosts
+
+
+def resolve_pve_endpoints(db: Session, target: PveTarget, *, avoid_node_id=None) -> tuple:
+    """Cluster-aware endpoint list (see order_endpoint_hosts), plus the API
+    port. Always returns at least one host; with no cluster known yet (before
+    the first discovery) it is just the configured target.hostname. The
+    clients try these in order and fail over on connection errors."""
     cluster = db.query(Cluster).filter(Cluster.pve_target_id == target.id).one_or_none()
     if cluster is None:
-        return target.hostname, target.api_port
+        return [target.hostname], target.api_port
 
-    candidates = (
+    nodes = (
         db.query(Node)
-        .filter(
-            Node.cluster_id == cluster.id,
-            Node.is_missing.is_(False),
-            Node.status == "online",
-            Node.management_ip.isnot(None),
-        )
-        .order_by(Node.name)
+        .filter(Node.cluster_id == cluster.id, Node.is_missing.is_(False), Node.management_ip.isnot(None))
         .all()
     )
+    candidates = [EndpointCandidate(n.id, n.name, n.management_ip, n.status == "online") for n in nodes]
+    hosts = order_endpoint_hosts(
+        candidates,
+        target_hostname=target.hostname,
+        avoid_node_id=avoid_node_id,
+        domain=_domain_of(target.hostname),
+        dns_ok=_dns_resolves_to,
+    )
+    return (hosts or [target.hostname]), target.api_port
 
-    if avoid_node_id is not None:
-        narrowed = [n for n in candidates if str(n.id) != str(avoid_node_id)]
-        # If avoiding empties the candidate list (e.g. only one online node
-        # is known), fall through to the unnarrowed list rather than refuse
-        # to connect at all -- some connectivity beats none.
-        if narrowed:
-            candidates = narrowed
 
-    if not candidates:
-        return target.hostname, target.api_port
-
-    # Prefer whichever candidate is the currently-configured endpoint, to
-    # keep behavior stable and unsurprising when nothing is actually wrong;
-    # otherwise take the first candidate (deterministic, sorted by name).
-    preferred = next((n for n in candidates if n.management_ip == target.hostname), None)
-    chosen = preferred or candidates[0]
-    return chosen.management_ip, target.api_port
+def resolve_pve_endpoint(db: Session, target: PveTarget, *, avoid_node_id=None) -> tuple:
+    """First choice only -- kept for callers that want a single endpoint."""
+    hosts, port = resolve_pve_endpoints(db, target, avoid_node_id=avoid_node_id)
+    return hosts[0], port
 
 
 def load_pve_credentials(db: Session, target: PveTarget, slot_name: str, *, avoid_node_id=None) -> PveCredentials:
@@ -89,9 +171,10 @@ def load_pve_credentials(db: Session, target: PveTarget, slot_name: str, *, avoi
             f"no {slot_name!r} credential slot configured for PVE target {target.name!r}"
         )
     secret = decrypt_secret(cred.encrypted_secret)
-    hostname, api_port = resolve_pve_endpoint(db, target, avoid_node_id=avoid_node_id)
+    hosts, api_port = resolve_pve_endpoints(db, target, avoid_node_id=avoid_node_id)
     return PveCredentials(
-        hostname=hostname,
+        hostname=hosts[0],
+        fallback_hostnames=hosts[1:],
         api_port=api_port,
         token_user=cred.token_user,
         token_id=cred.token_id,

@@ -225,6 +225,13 @@ export type PveTarget = {
   hostname: string;
   api_port: number;
   tls_verify: boolean;
+  endpoint_status?: {
+    active: string | null;
+    preferred?: string;
+    unhealthy?: string[];
+    error?: string | null;
+    checked_at?: string;
+  } | null;
 };
 
 export type Credential = {
