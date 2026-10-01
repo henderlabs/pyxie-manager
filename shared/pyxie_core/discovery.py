@@ -13,7 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from .audit import write_audit_event
-from .credentials import load_pve_credentials, resolve_pve_endpoint
+from .credentials import load_pve_credentials, resolve_pve_endpoints
 from .crypto import decrypt_secret
 from .metrics import collect_metrics_for_cluster
 from .models import (
@@ -54,9 +54,10 @@ def build_pve_client(db: Session, target: PveTarget, *, avoid_node_id=None) -> P
     if cred is None:
         raise DiscoveryError("unavailable", "no 'inventory' credential slot configured")
     secret = decrypt_secret(cred.encrypted_secret)
-    hostname, api_port = resolve_pve_endpoint(db, target, avoid_node_id=avoid_node_id)
+    hosts, api_port = resolve_pve_endpoints(db, target, avoid_node_id=avoid_node_id)
     creds = PveCredentials(
-        hostname=hostname,
+        hostname=hosts[0],
+        fallback_hostnames=hosts[1:],
         api_port=api_port,
         token_user=cred.token_user,
         token_id=cred.token_id,
@@ -495,6 +496,7 @@ def _run_discovery_inner(db: Session, target: PveTarget, actor: str = "system") 
         else:
             provider.connection_health = "connected"
             provider.last_error = None
+        target.endpoint_status = _endpoint_status(client)
         provider.last_success_at = now()
         cred.status = "valid"
         cred.last_validated_at = now()
@@ -516,17 +518,32 @@ def _run_discovery_inner(db: Session, target: PveTarget, actor: str = "system") 
         return {"status": "ok", **summary, **({"degraded": degraded_reasons} if degraded_reasons else {})}
 
     except PveTlsError as e:
-        return _fail(db, provider, cred, target, correlation_id, actor, "tls_error", str(e))
+        return _fail(db, provider, cred, target, correlation_id, actor, "tls_error", str(e), client=client)
     except PveAuthError as e:
-        return _fail(db, provider, cred, target, correlation_id, actor, "authentication_failed", str(e))
+        return _fail(db, provider, cred, target, correlation_id, actor, "authentication_failed", str(e), client=client)
     except PveConnectionError as e:
-        return _fail(db, provider, cred, target, correlation_id, actor, "unavailable", str(e))
+        return _fail(db, provider, cred, target, correlation_id, actor, "unavailable", str(e), client=client)
     except Exception as e:  # noqa: BLE001 - surface unexpected provider errors, don't swallow
-        return _fail(db, provider, cred, target, correlation_id, actor, "unavailable", str(e))
+        return _fail(db, provider, cred, target, correlation_id, actor, "unavailable", str(e), client=client)
 
 
-def _fail(db, provider, cred, target, correlation_id, actor, health, message):
+def _endpoint_status(client, error=None) -> dict:
+    """Which API endpoint a discovery run actually used, and which configured
+    cluster members could not be connected to. Read by the Integrations page
+    and by findings.py (backup-endpoint / unreachable findings)."""
+    return {
+        "active": None if error else client.active_host,
+        "preferred": client.preferred_host,
+        "unhealthy": client.unhealthy_endpoints,
+        "error": error[:300] if error else None,
+        "checked_at": now().isoformat(),
+    }
+
+
+def _fail(db, provider, cred, target, correlation_id, actor, health, message, client=None):
     db.rollback()
+    if client is not None:
+        target.endpoint_status = _endpoint_status(client, error=message)
     provider.connection_health = health
     provider.last_error = message
     cred.status = "invalid" if health == "authentication_failed" else cred.status

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from .models import AppSettings, Cluster, Finding, Node, Notification, PlacementAffinityRule, Policy, PveTask, Storage, Workload
+from .models import AppSettings, Cluster, Finding, Node, Notification, PlacementAffinityRule, Policy, Provider, PveTarget, PveTask, Storage, Workload
 from .notifications import dispatch_event
 
 TASK_LOOKBACK_DAYS = 7
@@ -154,6 +154,36 @@ def evaluate_findings(db: Session) -> dict:
                     "severity": "critical",
                     "title": f"Cluster '{c.name}' is not quorate",
                     "evidence": {"cluster": c.name},
+                }
+            )
+
+    for t in db.query(PveTarget).all():
+        provider = db.query(Provider).filter(Provider.id == t.provider_id).one_or_none()
+        health = provider.connection_health if provider else "unknown"
+        status = t.endpoint_status or {}
+        unhealthy = status.get("unhealthy") or []
+        if health in ("unavailable", "tls_error", "authentication_failed", "connection_failed"):
+            current.append(
+                {
+                    "dedupe_key": f"pve.target_unreachable:{t.id}",
+                    "object_type": "pve_target",
+                    "object_id": t.id,
+                    "category": "connectivity",
+                    "severity": "critical",
+                    "title": f"PyXie cannot connect to Proxmox target '{t.name}' ({health.replace('_', ' ')})",
+                    "evidence": {"target": t.name, "health": health, "error": provider.last_error, "unhealthy": unhealthy},
+                }
+            )
+        elif unhealthy and status.get("active"):
+            current.append(
+                {
+                    "dedupe_key": f"pve.endpoint_failover:{t.id}",
+                    "object_type": "pve_target",
+                    "object_id": t.id,
+                    "category": "connectivity",
+                    "severity": "warning",
+                    "title": f"Proxmox target '{t.name}': {len(unhealthy)} cluster member(s) unreachable, PyXie is connected via {status['active']}",
+                    "evidence": {"target": t.name, "active": status["active"], "unhealthy": unhealthy},
                 }
             )
 

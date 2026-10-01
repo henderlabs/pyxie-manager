@@ -153,6 +153,7 @@ class PveTargetOut(OrmModel):
     hostname: str
     api_port: int
     tls_verify: bool
+    endpoint_status: Optional[dict[str, Any]] = None
 
 
 class PveTargetCreate(BaseModel):

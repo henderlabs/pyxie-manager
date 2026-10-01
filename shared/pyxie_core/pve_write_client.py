@@ -31,7 +31,7 @@ import httpx
 
 from .db import SessionLocal
 from .models import AppSettings
-from .pve_client import PveAuthError, PveConnectionError, PveCredentials, PveTlsError
+from .pve_client import PveAuthError, PveConnectionError, PveCredentials, PveTlsError, _EndpointPool
 
 
 class MutationsDisabledError(Exception):
@@ -192,23 +192,16 @@ class TaskResult:
 
 
 class PveMaintenanceClient:
-    def __init__(self, creds: PveCredentials, timeout: float = 15.0):
+    def __init__(self, creds: PveCredentials, timeout: float = 15.0, *, transport=None):
         self._creds = creds
-        base_url = f"https://{creds.hostname}:{creds.api_port}/api2/json"
-        self._client = httpx.Client(
-            base_url=base_url,
-            verify=creds.tls_verify,
-            timeout=timeout,
-            headers={
-                "Authorization": (
-                    f"PVEAPIToken={creds.token_user}!{creds.token_id}="
-                    f"{creds.token_secret}"
-                )
-            },
-        )
+        self._pool = _EndpointPool(creds, timeout, transport)
+
+    @property
+    def _client(self) -> httpx.Client:
+        return self._pool.client
 
     def close(self):
-        self._client.close()
+        self._pool.close()
 
     def __enter__(self):
         return self
@@ -218,7 +211,7 @@ class PveMaintenanceClient:
 
     def _request(self, method: str, path: str, **kwargs) -> dict:
         try:
-            resp = self._client.request(method, path, **kwargs)
+            resp = self._pool.request(method, path, **kwargs)
         except httpx.ConnectError as exc:
             if "certificate" in str(exc).lower() or "SSL" in str(exc):
                 raise PveTlsError(str(exc)) from exc

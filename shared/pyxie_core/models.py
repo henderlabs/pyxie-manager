@@ -332,6 +332,8 @@ class PveTarget(Base):
     api_port = Column(Integer, nullable=False, default=8006)
     tls_verify = Column(Boolean, nullable=False, default=True)
     tls_fingerprint = Column(String, nullable=True)
+    # Written by every discovery run: {active, preferred, unhealthy[], error, checked_at}
+    endpoint_status = Column(JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)
 

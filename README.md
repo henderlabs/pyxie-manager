@@ -191,6 +191,26 @@ says the same thing.
   `web`; nothing else is published. The session cookie is marked `Secure`
   automatically when the request arrived over HTTPS.
 
+### PVE API endpoint failover
+
+Any member of a Proxmox cluster serves the whole cluster API, so PyXie does not
+depend on one node. Discovery learns every member's management IP, and each
+client gets an ordered list of endpoints: online members first (the configured
+target hostname leading), then members last seen offline, then the node under
+maintenance, then the configured hostname as a last resort. A member is
+addressed by DNS name when that name (its node name plus the target hostname's
+domain) currently resolves to its known IP, otherwise by IP.
+
+On a connection failure (refused, DNS failure, connect timeout) the client moves
+to the next member and repeats the request; auth errors, TLS errors, read
+timeouts and HTTP errors do not fail over. A failed member is skipped for 60
+seconds per process and is tried first again afterwards, so a recovered primary
+is picked up automatically. Every discovery run records the endpoint it used on
+the target (`pve_targets.endpoint_status`, shown on Platform > Settings >
+Integrations), raises a **warning** finding while any member is unreachable, and
+a **critical** finding when none is (notification category *Proxmox
+connectivity*).
+
 Shared code (models, PVE read/write clients, discovery, placement, every
 workflow module) lives in `shared/pyxie_core/` and is imported by both
 `api` and `worker` via a symlink at `api/pyxie_core` / `worker/pyxie_core`

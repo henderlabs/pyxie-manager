@@ -6,8 +6,9 @@ client having no executable path to mutate PVE, not merely by hiding buttons
 in the UI. Do not add write methods here without an explicit Phase 1 approval.
 """
 
+import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import httpx
@@ -33,6 +34,136 @@ class PveCredentials:
     token_id: str  # e.g. inventory
     token_secret: str
     tls_verify: bool = True
+    # Other cluster members to try, in order, when the primary hostname cannot
+    # be connected to at all (see _EndpointPool). Any member serves the whole
+    # cluster API, so these are interchangeable with `hostname`.
+    fallback_hostnames: list = field(default_factory=list)
+
+
+# Failover tuning. A node that refuses/blackholes connections is remembered as
+# "bad" for BAD_ENDPOINT_TTL seconds (per process) so that the next clients do
+# not each re-pay a connect timeout against it; after the TTL it is tried first
+# again, so a recovered primary is picked up automatically.
+CONNECT_TIMEOUT = 5.0
+BAD_ENDPOINT_TTL = 60.0
+_bad_endpoints: dict = {}
+_bad_lock = threading.Lock()
+
+
+def mark_endpoint_bad(host: str) -> None:
+    with _bad_lock:
+        _bad_endpoints[host] = time.monotonic() + BAD_ENDPOINT_TTL
+
+
+def is_endpoint_bad(host: str) -> bool:
+    with _bad_lock:
+        expiry = _bad_endpoints.get(host)
+        if expiry is None:
+            return False
+        if expiry <= time.monotonic():
+            del _bad_endpoints[host]
+            return False
+        return True
+
+
+def clear_bad_endpoints() -> None:
+    with _bad_lock:
+        _bad_endpoints.clear()
+
+
+class _EndpointPool:
+    """One httpx client at a time, moving to the next cluster member when the
+    current one cannot be CONNECTED to (refused, DNS failure, connect timeout).
+
+    Deliberately NOT failed over: auth errors (401/403 -- every node would say
+    the same), TLS certificate errors (a misconfiguration, not an outage),
+    read timeouts (the node is up but slow -- the callers retry those), and
+    HTTP error statuses. A connect failure means the request never reached the
+    server, so repeating it on another node is safe even for writes."""
+
+    def __init__(self, creds: "PveCredentials", timeout: float, transport=None):
+        seen: list = []
+        for h in [creds.hostname, *(creds.fallback_hostnames or [])]:
+            if h and h not in seen:
+                seen.append(h)
+        self.preferred_host = seen[0]
+        self.skipped_bad = [h for h in seen if is_endpoint_bad(h)]
+        self.hosts = [h for h in seen if h not in self.skipped_bad] + self.skipped_bad
+        self.failed: list = []
+        self._creds = creds
+        self._timeout = timeout
+        self._transport = transport
+        self._lock = threading.Lock()
+        self._retired: list = []
+        self._idx = 0
+        self.client = self._make_client(self.hosts[0])
+
+    def _make_client(self, host: str) -> httpx.Client:
+        creds = self._creds
+        return httpx.Client(
+            base_url=f"https://{host}:{creds.api_port}/api2/json",
+            verify=creds.tls_verify,
+            timeout=httpx.Timeout(self._timeout, connect=min(self._timeout, CONNECT_TIMEOUT)),
+            transport=self._transport,
+            headers={
+                "Authorization": (
+                    f"PVEAPIToken={creds.token_user}!{creds.token_id}="
+                    f"{creds.token_secret}"
+                )
+            },
+        )
+
+    @property
+    def active_host(self) -> str:
+        return self.hosts[self._idx]
+
+    @property
+    def unhealthy(self) -> list:
+        """Endpoints that failed during this client's life, plus those it
+        started out avoiding because they had failed moments earlier."""
+        out: list = []
+        for h in [f["host"] for f in self.failed] + self.skipped_bad:
+            if h not in out:
+                out.append(h)
+        return out
+
+    def _failover(self, failed_host: str, exc: Exception) -> bool:
+        with self._lock:
+            if self.active_host != failed_host:
+                return True  # another thread already moved on; just retry
+            self.failed.append({"host": failed_host, "error": str(exc)[:200]})
+            mark_endpoint_bad(failed_host)
+            if self._idx + 1 >= len(self.hosts):
+                return False
+            self._idx += 1
+            self._retired.append(self.client)  # closed in close(); other threads may still hold it
+            self.client = self._make_client(self.active_host)
+            return True
+
+    def request(self, method: str, path: str, **kwargs):
+        while True:
+            with self._lock:
+                client, host = self.client, self.active_host
+            try:
+                return client.request(method, path, **kwargs)
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                if isinstance(exc, httpx.ConnectError) and ("certificate" in str(exc).lower() or "SSL" in str(exc)):
+                    raise PveTlsError(str(exc)) from exc
+                if self._failover(host, exc):
+                    continue
+                if len(self.hosts) == 1:
+                    if isinstance(exc, httpx.ConnectTimeout):
+                        raise  # single endpoint: the caller's own timeout retry applies
+                    raise PveConnectionError(str(exc)) from exc
+                detail = "; ".join(f"{f['host']}: {f['error']}" for f in self.failed)
+                raise PveConnectionError(f"all {len(self.hosts)} PVE endpoints unreachable -- {detail}") from exc
+
+    def close(self) -> None:
+        for c in [*self._retired, self.client]:
+            try:
+                c.close()
+            except Exception:  # noqa: BLE001
+                pass
 
 
 class PveClient:
@@ -42,23 +173,28 @@ class PveClient:
     # requests. That's real, reproducible latency from a large response on a
     # loaded host, not a hang -- a timeout retry can't fix a call that's
     # reliably slower than the timeout itself, only a longer timeout can.
-    def __init__(self, creds: PveCredentials, timeout: float = 25.0):
+    def __init__(self, creds: PveCredentials, timeout: float = 25.0, *, transport=None):
         self._creds = creds
-        base_url = f"https://{creds.hostname}:{creds.api_port}/api2/json"
-        self._client = httpx.Client(
-            base_url=base_url,
-            verify=creds.tls_verify,
-            timeout=timeout,
-            headers={
-                "Authorization": (
-                    f"PVEAPIToken={creds.token_user}!{creds.token_id}="
-                    f"{creds.token_secret}"
-                )
-            },
-        )
+        self._pool = _EndpointPool(creds, timeout, transport)
+
+    @property
+    def _client(self) -> httpx.Client:
+        return self._pool.client
+
+    @property
+    def active_host(self) -> str:
+        return self._pool.active_host
+
+    @property
+    def preferred_host(self) -> str:
+        return self._pool.preferred_host
+
+    @property
+    def unhealthy_endpoints(self) -> list:
+        return self._pool.unhealthy
 
     def close(self):
-        self._client.close()
+        self._pool.close()
 
     def __enter__(self):
         return self
@@ -78,7 +214,7 @@ class PveClient:
         attempt = 0
         while True:
             try:
-                resp = self._client.get(path, params=params, **({"timeout": timeout} if timeout else {}))
+                resp = self._pool.request("GET", path, params=params, **({"timeout": timeout} if timeout else {}))
             except httpx.ConnectError as exc:
                 if "certificate" in str(exc).lower() or "SSL" in str(exc):
                     raise PveTlsError(str(exc)) from exc
