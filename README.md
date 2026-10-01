@@ -336,6 +336,13 @@ are set to match each operation type's own real maximum runtime (its RQ
 job timeout) plus a margin, not a flat default -- a migration/evacuation/
 maintenance run needs to hold its lock for its actual multi-hour duration.
 
+**Applying package updates is the one write that needs host-level setup.**
+PVE's API can list updates but not apply them, so applying goes through a
+wrapper installed on each node (a separate SSH trust model, one keypair per
+PVE target, but installed and host-key-pinned per node). Everything else in
+this section works from the PVE API tokens alone. See step 7 of
+[`docs/adding-a-host.md`](docs/adding-a-host.md).
+
 The Workloads page has a paginated, searchable table (matching the same
 search logic as the Maintenance page's VM picker) and a quick single-VM
 **Migrate** action inline per row -- the same staged Safety Contract as
