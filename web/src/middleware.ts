@@ -37,7 +37,10 @@ export function middleware(req: NextRequest) {
     const proto = req.headers.get("x-forwarded-proto");
     const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
     if (proto) url.protocol = proto;
-    if (host) url.host = host;
+    if (host) {
+      url.port = ""; // drop the container-internal port; host may carry its own
+      url.host = host;
+    }
     return NextResponse.redirect(url);
   }
   return NextResponse.next();
