@@ -156,6 +156,16 @@ class PveTargetOut(OrmModel):
     endpoint_status: Optional[dict[str, Any]] = None
 
 
+class PveEndpointOut(BaseModel):
+    order: int
+    host: str
+    node: Optional[str] = None
+    ip: Optional[str] = None
+    node_status: Optional[str] = None
+    addressing: str  # dns | ip | configured
+    state: str  # active | standby | unreachable
+
+
 class PveTargetCreate(BaseModel):
     site_id: uuid.UUID
     name: str

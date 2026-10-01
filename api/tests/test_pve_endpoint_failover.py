@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 
 from pyxie_core import pve_client as pc
-from pyxie_core.credentials import EndpointCandidate, order_endpoint_hosts
+from pyxie_core.credentials import EndpointCandidate, annotate_endpoints, order_endpoint_hosts
 from pyxie_core.pve_client import PveAuthError, PveClient, PveConnectionError, PveCredentials
 from pyxie_core.pve_write_client import PveMaintenanceClient
 
@@ -171,3 +171,16 @@ def test_order_primary_matched_by_name_and_configured_host_kept_as_last_resort()
 
 def test_order_with_no_known_nodes_is_just_the_configured_host():
     assert order_endpoint_hosts([], target_hostname="10.0.0.9") == ["10.0.0.9"]
+
+
+# ------------------------------------------------------------ display annotation
+
+def test_annotate_marks_active_unreachable_standby_and_addressing():
+    nodes = [EndpointCandidate(1, "m401", "10.0.0.1", True, "online"), EndpointCandidate(2, "m402", "10.0.0.2", False, "unknown")]
+    hosts = ["m401.lab.example", "10.0.0.2", "cluster-vip.lab.example"]
+    rows = annotate_endpoints(hosts, nodes, domain="lab.example", active="m401.lab.example", unhealthy=["10.0.0.2"])
+    assert [r["order"] for r in rows] == [1, 2, 3]
+    assert rows[0] == {"order": 1, "host": "m401.lab.example", "node": "m401", "ip": "10.0.0.1",
+                       "node_status": "online", "addressing": "dns", "state": "active"}
+    assert rows[1]["addressing"] == "ip" and rows[1]["state"] == "unreachable" and rows[1]["node_status"] == "unknown"
+    assert rows[2]["node"] is None and rows[2]["addressing"] == "configured" and rows[2]["state"] == "standby"

@@ -234,6 +234,16 @@ export type PveTarget = {
   } | null;
 };
 
+export type PveEndpoint = {
+  order: number;
+  host: string;
+  node: string | null;
+  ip: string | null;
+  node_status: string | null;
+  addressing: "dns" | "ip" | "configured";
+  state: "active" | "standby" | "unreachable";
+};
+
 export type Credential = {
   id: string;
   pve_target_id: string;

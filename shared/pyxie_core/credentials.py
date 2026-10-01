@@ -44,6 +44,7 @@ class EndpointCandidate:
     name: str
     ip: str
     online: bool
+    status: str = ""
 
 
 _DNS_TTL = 300.0
@@ -143,7 +144,7 @@ def resolve_pve_endpoints(db: Session, target: PveTarget, *, avoid_node_id=None)
         .filter(Node.cluster_id == cluster.id, Node.is_missing.is_(False), Node.management_ip.isnot(None))
         .all()
     )
-    candidates = [EndpointCandidate(n.id, n.name, n.management_ip, n.status == "online") for n in nodes]
+    candidates = [EndpointCandidate(n.id, n.name, n.management_ip, n.status == "online", n.status or "") for n in nodes]
     hosts = order_endpoint_hosts(
         candidates,
         target_hostname=target.hostname,
@@ -152,6 +153,50 @@ def resolve_pve_endpoints(db: Session, target: PveTarget, *, avoid_node_id=None)
         dns_ok=_dns_resolves_to,
     )
     return (hosts or [target.hostname]), target.api_port
+
+
+def annotate_endpoints(hosts: list, candidates: list, *, domain: Optional[str], active: Optional[str], unhealthy) -> list:
+    """Describe an ordered endpoint list for display (pure function, tested):
+    which node each entry is, how it is addressed, and its failover state."""
+    by_host: dict = {}
+    for c in candidates:
+        by_host[c.ip] = c
+        if domain:
+            by_host[f"{c.name}.{domain}"] = c
+    bad = set(unhealthy or [])
+    out = []
+    for i, h in enumerate(hosts, 1):
+        c = by_host.get(h)
+        out.append(
+            {
+                "order": i,
+                "host": h,
+                "node": c.name if c else None,
+                "ip": c.ip if c else None,
+                "node_status": (c.status or ("online" if c.online else "unknown")) if c else None,
+                "addressing": ("ip" if h == c.ip else "dns") if c else "configured",
+                "state": "active" if h == active else "unreachable" if h in bad else "standby",
+            }
+        )
+    return out
+
+
+def describe_pve_endpoints(db: Session, target: PveTarget) -> list:
+    """The failover order PyXie uses for this target, for the Integrations page.
+    Empty until discovery has found the cluster's members."""
+    cluster = db.query(Cluster).filter(Cluster.pve_target_id == target.id).one_or_none()
+    if cluster is None:
+        return []
+    nodes = (
+        db.query(Node)
+        .filter(Node.cluster_id == cluster.id, Node.is_missing.is_(False), Node.management_ip.isnot(None))
+        .all()
+    )
+    candidates = [EndpointCandidate(n.id, n.name, n.management_ip, n.status == "online", n.status or "") for n in nodes]
+    domain = _domain_of(target.hostname)
+    hosts = order_endpoint_hosts(candidates, target_hostname=target.hostname, domain=domain, dns_ok=_dns_resolves_to)
+    status = target.endpoint_status or {}
+    return annotate_endpoints(hosts, candidates, domain=domain, active=status.get("active"), unhealthy=status.get("unhealthy"))
 
 
 def resolve_pve_endpoint(db: Session, target: PveTarget, *, avoid_node_id=None) -> tuple:

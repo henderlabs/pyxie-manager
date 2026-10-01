@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import type { Organization, Provider, PveTarget, Site } from "@/lib/api";
+import type { Organization, Provider, PveEndpoint, PveTarget, Site } from "@/lib/api";
 import { Card, CardTitle, PageHeader } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import PveTargetForm from "@/components/PveTargetForm";
@@ -17,6 +17,11 @@ export default async function ProvidersPage() {
     apiFetch<Site[]>("/api/sites"),
     apiFetch<Organization[]>("/api/organizations"),
   ]);
+  const endpointsByTarget: Record<string, PveEndpoint[]> = Object.fromEntries(
+    await Promise.all(
+      targets.map(async (t) => [t.id, await apiFetch<PveEndpoint[]>(`/api/pve-targets/${t.id}/endpoints`).catch(() => [])] as const),
+    ),
+  );
   const organization = organizations[0];
   const pveProviders = providers.filter((p) => p.category_id === "pve");
 
@@ -61,7 +66,7 @@ export default async function ProvidersPage() {
 
         <div className="mt-3 space-y-3">
           {targets.map((t) => (
-            <PveTargetRow key={t.id} target={t} />
+            <PveTargetRow key={t.id} target={t} endpoints={endpointsByTarget[t.id] || []} />
           ))}
         </div>
 

@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from pyxie_core.audit import write_audit_event
-from pyxie_core.credentials import CredentialNotConfigured, load_pve_credentials
+from pyxie_core.credentials import CredentialNotConfigured, describe_pve_endpoints, load_pve_credentials
 from pyxie_core.crypto import decrypt_secret, encrypt_secret, mask_secret
 from pyxie_core.discovery import run_discovery
 from pyxie_core.host_maintenance_client import derive_public_key_line
@@ -62,6 +62,14 @@ def list_providers(db: Session = Depends(get_db)):
 @router.get("/pve-targets", response_model=list[schemas.PveTargetOut])
 def list_pve_targets(db: Session = Depends(get_db)):
     return db.query(PveTarget).order_by(PveTarget.name).all()
+
+
+@router.get("/pve-targets/{target_id}/endpoints", response_model=list[schemas.PveEndpointOut])
+def pve_target_endpoints(target_id: uuid.UUID, db: Session = Depends(get_db)):
+    target = db.query(PveTarget).filter(PveTarget.id == target_id).one_or_none()
+    if target is None:
+        raise HTTPException(status_code=404, detail="PVE target not found")
+    return describe_pve_endpoints(db, target)
 
 
 @router.post("/pve-targets", response_model=schemas.PveTargetOut, dependencies=[Depends(require_admin)])
