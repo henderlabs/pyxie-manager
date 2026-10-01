@@ -43,7 +43,14 @@ export function middleware(req: NextRequest) {
     }
     return NextResponse.redirect(url);
   }
-  return NextResponse.next();
+  // Tag page renders (not /api/* Route Handlers) so apiFetch can tell a
+  // server-rendered page from a client-side JSON call when the API answers
+  // 401 (cookie present but session no longer valid server-side). Always
+  // overwritten here, so a client-supplied value is never trusted.
+  const fwd = new Headers(req.headers);
+  if (pathname.startsWith("/api")) fwd.delete("x-pyxie-page");
+  else fwd.set("x-pyxie-page", "1");
+  return NextResponse.next({ request: { headers: fwd } });
 }
 
 export const config = {
