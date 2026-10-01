@@ -2,11 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { PveTarget } from "@/lib/api";
+import type { PveTarget, PveEndpoints } from "@/lib/api";
 import ActionButton from "@/components/ActionButton";
+import PveFailoverPanel from "@/components/PveFailoverPanel";
 import { useMe } from "@/lib/useMe";
 
-export default function PveTargetRow({ target }: { target: PveTarget }) {
+export default function PveTargetRow({ target, endpoints = null }: { target: PveTarget; endpoints?: PveEndpoints | null }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
@@ -115,7 +116,8 @@ export default function PveTargetRow({ target }: { target: PveTarget }) {
   }
 
   return (
-    <div className="flex items-center justify-between bg-surface2 rounded p-3">
+    <div className="bg-surface2 rounded p-3">
+    <div className="flex items-center justify-between">
       <div>
         <div className="text-sm text-text">{target.name}</div>
         <div className="text-xs text-muted">
@@ -146,6 +148,8 @@ export default function PveTargetRow({ target }: { target: PveTarget }) {
         <ActionButton href={`/api/pve-targets/${target.id}/test-connection`} label="Test Connection" />
         <ActionButton href={`/api/pve-targets/${target.id}/discover`} label="Sync Now" variant="primary" />
       </div>
+    </div>
+    {endpoints && endpoints.members.length > 0 && <PveFailoverPanel targetId={target.id} data={endpoints} />}
     </div>
   );
 }

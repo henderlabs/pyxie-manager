@@ -44,6 +44,8 @@ class EndpointCandidate:
     name: str
     ip: str
     online: bool
+    status: str = ""
+    enabled: bool = True
 
 
 _DNS_TTL = 300.0
@@ -81,6 +83,15 @@ def _domain_of(hostname: Optional[str]) -> Optional[str]:
         return hostname.split(".", 1)[1]
 
 
+def _member_host(c: "EndpointCandidate", domain: Optional[str], dns_ok: Callable[[str, str], bool]) -> str:
+    """DNS name when it currently resolves to the member's known IP, else the IP."""
+    if domain:
+        fqdn = f"{c.name}.{domain}"
+        if dns_ok(fqdn, c.ip):
+            return fqdn
+    return c.ip
+
+
 def order_endpoint_hosts(
     candidates: list,
     *,
@@ -88,25 +99,26 @@ def order_endpoint_hosts(
     avoid_node_id=None,
     domain: Optional[str] = None,
     dns_ok: Callable[[str, str], bool] = lambda fqdn, ip: False,
+    preferred_node_id=None,
 ) -> list:
     """The ordered list of API endpoints to try (pure function, unit-tested).
 
-    Order: online members first (the configured primary leading, then by
-    name), then members last seen not-online (their recorded status can be
-    stale -- exactly when failover matters), then the node being avoided
-    (e.g. under maintenance), then the configured hostname if it is not itself
-    a known node. A member is addressed by DNS name when that name currently
+    Members the operator excluded from failover (enabled=False) are left out.
+    Order: online members first (the preferred member -- or, when none is
+    chosen, the one matching the configured hostname -- leading, then by name),
+    then members last seen not-online (their recorded status can be stale,
+    exactly when failover matters), then the node being avoided (e.g. under
+    maintenance), then the configured hostname if it is not itself a listed
+    member. A member is addressed by DNS name when that name currently
     resolves to its known IP, otherwise by IP."""
     th = (target_hostname or "").lower()
-
-    def host_for(c: EndpointCandidate) -> str:
-        if domain:
-            fqdn = f"{c.name}.{domain}"
-            if dns_ok(fqdn, c.ip):
-                return fqdn
-        return c.ip
+    all_candidates = candidates
+    candidates = [c for c in candidates if c.enabled]
+    has_pref = preferred_node_id is not None and any(str(c.node_id) == str(preferred_node_id) for c in candidates)
 
     def is_primary(c: EndpointCandidate) -> bool:
+        if has_pref:
+            return str(c.node_id) == str(preferred_node_id)
         names = {c.ip.lower(), c.name.lower()}
         if domain:
             names.add(f"{c.name}.{domain}".lower())
@@ -120,13 +132,28 @@ def order_endpoint_hosts(
 
     hosts: list = []
     for c in online + offline + avoid:
-        h = host_for(c)
+        h = _member_host(c, domain, dns_ok)
         if h not in hosts:
             hosts.append(h)
-    known = {c.ip.lower() for c in candidates} | {h.lower() for h in hosts}
+    known = {c.ip.lower() for c in all_candidates if c.enabled} | {h.lower() for h in hosts}
     if target_hostname and th not in known:
         hosts.append(target_hostname)
     return hosts
+
+
+def _load_candidates(db: Session, target: PveTarget):
+    cluster = db.query(Cluster).filter(Cluster.pve_target_id == target.id).one_or_none()
+    if cluster is None:
+        return []
+    nodes = (
+        db.query(Node)
+        .filter(Node.cluster_id == cluster.id, Node.is_missing.is_(False), Node.management_ip.isnot(None))
+        .all()
+    )
+    return [
+        EndpointCandidate(n.id, n.name, n.management_ip, n.status == "online", n.status or "", n.failover_enabled is not False)
+        for n in nodes
+    ]
 
 
 def resolve_pve_endpoints(db: Session, target: PveTarget, *, avoid_node_id=None) -> tuple:
@@ -134,24 +161,104 @@ def resolve_pve_endpoints(db: Session, target: PveTarget, *, avoid_node_id=None)
     port. Always returns at least one host; with no cluster known yet (before
     the first discovery) it is just the configured target.hostname. The
     clients try these in order and fail over on connection errors."""
-    cluster = db.query(Cluster).filter(Cluster.pve_target_id == target.id).one_or_none()
-    if cluster is None:
+    candidates = _load_candidates(db, target)
+    if not candidates:
         return [target.hostname], target.api_port
-
-    nodes = (
-        db.query(Node)
-        .filter(Node.cluster_id == cluster.id, Node.is_missing.is_(False), Node.management_ip.isnot(None))
-        .all()
-    )
-    candidates = [EndpointCandidate(n.id, n.name, n.management_ip, n.status == "online") for n in nodes]
     hosts = order_endpoint_hosts(
         candidates,
         target_hostname=target.hostname,
         avoid_node_id=avoid_node_id,
         domain=_domain_of(target.hostname),
         dns_ok=_dns_resolves_to,
+        preferred_node_id=target.preferred_node_id,
     )
     return (hosts or [target.hostname]), target.api_port
+
+
+def annotate_endpoints(
+    hosts: list,
+    candidates: list,
+    *,
+    domain: Optional[str],
+    active: Optional[str],
+    unhealthy,
+    preferred_node_id=None,
+    dns_ok: Callable[[str, str], bool] = lambda fqdn, ip: False,
+) -> list:
+    """Describe the failover list for display (pure function, tested): the
+    members in the order they are tried, then the excluded ones, each with how
+    it is addressed and its state from the last discovery."""
+    by_host: dict = {}
+    for c in candidates:
+        by_host[c.ip] = c
+        if domain:
+            by_host[f"{c.name}.{domain}"] = c
+    bad = set(unhealthy or [])
+
+    def row(order, host, c, state):
+        return {
+            "order": order,
+            "host": host,
+            "node": c.name,
+            "node_id": str(c.node_id),
+            "ip": c.ip,
+            "node_status": c.status or ("online" if c.online else "unknown"),
+            "addressing": "ip" if host == c.ip else "dns",
+            "state": state,
+            "enabled": c.enabled,
+            "preferred": preferred_node_id is not None and str(c.node_id) == str(preferred_node_id),
+        }
+
+    out = []
+    seen = set()
+    for h in hosts:
+        c = by_host.get(h)
+        if c is None or not c.enabled:
+            continue  # the configured hostname when it is not a member: shown separately
+        seen.add(c.node_id)
+        out.append(row(len(out) + 1, h, c, "active" if h == active else "unreachable" if h in bad else "standby"))
+    for c in sorted(candidates, key=lambda x: x.name):
+        if not c.enabled and c.node_id not in seen:
+            out.append(row(None, _member_host(c, domain, dns_ok), c, "excluded"))
+    return out
+
+
+def describe_pve_endpoints(db: Session, target: PveTarget) -> dict:
+    """What the Integrations page shows for a target: the manually added entry
+    point, the auto-discovered members in failover order, and the preferred
+    member. Members are empty until discovery has found the cluster."""
+    candidates = _load_candidates(db, target)
+    domain = _domain_of(target.hostname)
+    hosts = order_endpoint_hosts(
+        candidates,
+        target_hostname=target.hostname,
+        domain=domain,
+        dns_ok=_dns_resolves_to,
+        preferred_node_id=target.preferred_node_id,
+    )
+    status = target.endpoint_status or {}
+    th = (target.hostname or "").lower()
+    matches = next(
+        (
+            c.name
+            for c in candidates
+            if th in {c.ip.lower(), c.name.lower(), f"{c.name}.{domain}".lower() if domain else ""}
+        ),
+        None,
+    )
+    return {
+        "manual": {"host": target.hostname, "port": target.api_port, "matches_node": matches},
+        "members": annotate_endpoints(
+            hosts,
+            candidates,
+            domain=domain,
+            active=status.get("active"),
+            unhealthy=status.get("unhealthy"),
+            preferred_node_id=target.preferred_node_id,
+            dns_ok=_dns_resolves_to,
+        ),
+        "preferred_node_id": str(target.preferred_node_id) if target.preferred_node_id else None,
+    }
 
 
 def resolve_pve_endpoint(db: Session, target: PveTarget, *, avoid_node_id=None) -> tuple:

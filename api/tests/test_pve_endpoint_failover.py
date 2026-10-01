@@ -11,7 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 
 from pyxie_core import pve_client as pc
-from pyxie_core.credentials import EndpointCandidate, order_endpoint_hosts
+from pyxie_core.credentials import EndpointCandidate, annotate_endpoints, order_endpoint_hosts
 from pyxie_core.pve_client import PveAuthError, PveClient, PveConnectionError, PveCredentials
 from pyxie_core.pve_write_client import PveMaintenanceClient
 
@@ -171,3 +171,47 @@ def test_order_primary_matched_by_name_and_configured_host_kept_as_last_resort()
 
 def test_order_with_no_known_nodes_is_just_the_configured_host():
     assert order_endpoint_hosts([], target_hostname="10.0.0.9") == ["10.0.0.9"]
+
+
+# ------------------------------------------------------------ failover selection + display
+
+def _enabled(c, enabled):
+    c.enabled = enabled
+    return c
+
+
+def test_excluded_member_is_left_out_of_the_order():
+    nodes = [EndpointCandidate(1, "m401", "10.0.0.1", True), _enabled(EndpointCandidate(2, "m402", "10.0.0.2", True), False),
+             EndpointCandidate(3, "m403", "10.0.0.3", True)]
+    assert order_endpoint_hosts(nodes, target_hostname="10.0.0.1") == ["10.0.0.1", "10.0.0.3"]
+
+
+def test_preferred_member_leads_among_online_members():
+    nodes = [EndpointCandidate(1, "m401", "10.0.0.1", True), EndpointCandidate(2, "m402", "10.0.0.2", True),
+             EndpointCandidate(3, "m403", "10.0.0.3", True)]
+    hosts = order_endpoint_hosts(nodes, target_hostname="10.0.0.1", preferred_node_id=3)
+    assert hosts == ["10.0.0.3", "10.0.0.1", "10.0.0.2"]
+
+
+def test_preferred_that_is_excluded_or_unknown_falls_back_to_automatic():
+    nodes = [EndpointCandidate(1, "m401", "10.0.0.1", True), _enabled(EndpointCandidate(2, "m402", "10.0.0.2", True), False)]
+    assert order_endpoint_hosts(nodes, target_hostname="10.0.0.1", preferred_node_id=2) == ["10.0.0.1"]
+    assert order_endpoint_hosts(nodes, target_hostname="10.0.0.1", preferred_node_id=99) == ["10.0.0.1"]
+
+
+def test_every_member_excluded_leaves_only_the_configured_hostname():
+    nodes = [_enabled(EndpointCandidate(1, "m401", "10.0.0.1", True), False)]
+    assert order_endpoint_hosts(nodes, target_hostname="10.0.0.9") == ["10.0.0.9"]
+
+
+def test_annotate_marks_state_addressing_preferred_and_excluded():
+    nodes = [EndpointCandidate(1, "m401", "10.0.0.1", True, "online"),
+             EndpointCandidate(2, "m402", "10.0.0.2", False, "unknown"),
+             _enabled(EndpointCandidate(3, "m403", "10.0.0.3", True, "online"), False)]
+    hosts = ["m401.lab.example", "10.0.0.2", "cluster-vip.lab.example"]
+    rows = annotate_endpoints(hosts, nodes, domain="lab.example", active="m401.lab.example",
+                              unhealthy=["10.0.0.2"], preferred_node_id=1)
+    assert [r["node"] for r in rows] == ["m401", "m402", "m403"]  # the manual hostname is not a member row
+    assert rows[0]["order"] == 1 and rows[0]["addressing"] == "dns" and rows[0]["state"] == "active" and rows[0]["preferred"]
+    assert rows[1]["order"] == 2 and rows[1]["addressing"] == "ip" and rows[1]["state"] == "unreachable"
+    assert rows[2]["order"] is None and rows[2]["state"] == "excluded" and rows[2]["enabled"] is False

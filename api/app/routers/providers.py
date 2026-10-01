@@ -12,7 +12,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from pyxie_core.audit import write_audit_event
-from pyxie_core.credentials import CredentialNotConfigured, load_pve_credentials
+from pyxie_core.credentials import CredentialNotConfigured, describe_pve_endpoints, load_pve_credentials
 from pyxie_core.crypto import decrypt_secret, encrypt_secret, mask_secret
 from pyxie_core.discovery import run_discovery
 from pyxie_core.host_maintenance_client import derive_public_key_line
@@ -27,6 +27,7 @@ from pyxie_core.models import (
     PveCredential,
     PveTarget,
 )
+from pyxie_core.models import Cluster, Node
 from pyxie_core.pve_client import PveClient
 
 # Resolves to <api>/host_maintenance_kit regardless of where <api> actually
@@ -62,6 +63,66 @@ def list_providers(db: Session = Depends(get_db)):
 @router.get("/pve-targets", response_model=list[schemas.PveTargetOut])
 def list_pve_targets(db: Session = Depends(get_db)):
     return db.query(PveTarget).order_by(PveTarget.name).all()
+
+
+@router.get("/pve-targets/{target_id}/endpoints", response_model=schemas.PveEndpointsOut)
+def pve_target_endpoints(target_id: uuid.UUID, db: Session = Depends(get_db)):
+    target = db.query(PveTarget).filter(PveTarget.id == target_id).one_or_none()
+    if target is None:
+        raise HTTPException(status_code=404, detail="PVE target not found")
+    return describe_pve_endpoints(db, target)
+
+
+@router.patch(
+    "/pve-targets/{target_id}/endpoints",
+    response_model=schemas.PveEndpointsOut,
+    dependencies=[Depends(require_admin)],
+)
+def update_pve_target_failover(
+    target_id: uuid.UUID, payload: schemas.PveFailoverUpdate,
+    user=Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Failover selection: which discovered cluster members PyXie may use as
+    its API endpoint, and which one it prefers. Takes effect for the next
+    connection PyXie builds (no restart)."""
+    target = db.query(PveTarget).filter(PveTarget.id == target_id).one_or_none()
+    if target is None:
+        raise HTTPException(404, "PVE target not found")
+    cluster = db.query(Cluster).filter(Cluster.pve_target_id == target.id).one_or_none()
+    if cluster is None:
+        raise HTTPException(409, "No cluster members discovered yet -- run Sync Now first")
+    nodes = db.query(Node).filter(Node.cluster_id == cluster.id).all()
+    by_id = {n.id: n for n in nodes}
+    referenced = list(payload.disabled_node_ids) + ([payload.preferred_node_id] if payload.preferred_node_id else [])
+    if any(i not in by_id for i in referenced):
+        raise HTTPException(400, "Unknown cluster member")
+    if payload.preferred_node_id and payload.preferred_node_id in payload.disabled_node_ids:
+        raise HTTPException(400, "A member excluded from failover cannot be the preferred member")
+
+    def snapshot():
+        pref = by_id.get(target.preferred_node_id)
+        return {
+            "preferred": pref.name if pref else None,
+            "excluded_from_failover": sorted(n.name for n in nodes if n.failover_enabled is False),
+        }
+
+    before = snapshot()
+    disabled = set(payload.disabled_node_ids)
+    for n in nodes:
+        n.failover_enabled = n.id not in disabled
+    target.preferred_node_id = payload.preferred_node_id
+    write_audit_event(
+        db,
+        event_category="provider",
+        event_type="pve_target.failover_updated",
+        actor=user.email, actor_type="user",
+        site_id=target.site_id,
+        provider_id=target.provider_id,
+        state_before=before,
+        state_after=snapshot(),
+    )
+    db.refresh(target)
+    return describe_pve_endpoints(db, target)
 
 
 @router.post("/pve-targets", response_model=schemas.PveTargetOut, dependencies=[Depends(require_admin)])

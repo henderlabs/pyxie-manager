@@ -234,6 +234,25 @@ export type PveTarget = {
   } | null;
 };
 
+export type PveEndpoint = {
+  order: number | null;
+  host: string;
+  node: string;
+  node_id: string;
+  ip: string;
+  node_status: string | null;
+  addressing: "dns" | "ip";
+  state: "active" | "standby" | "unreachable" | "excluded";
+  enabled: boolean;
+  preferred: boolean;
+};
+
+export type PveEndpoints = {
+  manual: { host: string; port: number; matches_node: string | null };
+  members: PveEndpoint[];
+  preferred_node_id: string | null;
+};
+
 export type Credential = {
   id: string;
   pve_target_id: string;

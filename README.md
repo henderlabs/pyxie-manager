@@ -201,6 +201,14 @@ maintenance, then the configured hostname as a last resort. A member is
 addressed by DNS name when that name (its node name plus the target hostname's
 domain) currently resolves to its known IP, otherwise by IP.
 
+Platform > Settings > Integrations shows the manually added entry point and the
+auto-discovered members separately, in failover order, with each member's state
+(Active / Standby / Unreachable / Excluded). An admin can choose a **preferred
+member** to try first and untick **Use for failover** for any member PyXie should
+never use as its API endpoint (migration 0034: `nodes.failover_enabled`,
+`pve_targets.preferred_node_id`; audited as `pve_target.failover_updated`). The
+manually added hostname stays the last resort.
+
 On a connection failure (refused, DNS failure, connect timeout) the client moves
 to the next member and repeats the request; auth errors, TLS errors, read
 timeouts and HTTP errors do not fail over. A failed member is skipped for 60
