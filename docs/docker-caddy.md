@@ -109,5 +109,9 @@ about itself; monitor it externally too.
 - The login cookie is `Secure` automatically when the request arrived over
   HTTPS (via Caddy's `X-Forwarded-Proto`), and stays non-`Secure` for plain
   HTTP deployments such as the lab.
+- Client IPs: Caddy sets `X-Forwarded-For` (replacing any client-supplied value), the
+  web tier passes the first address to the API, and the API honours it only from the
+  private Docker network (`FORWARDED_ALLOW_IPS`). Sessions and audit events
+  (`event_metadata.client_ip`, shown in Platform > Logging) record the real address.
 - HSTS is intentionally off until a real certificate is in place.
 - The API container runs migrations (`alembic upgrade head`) on every start.

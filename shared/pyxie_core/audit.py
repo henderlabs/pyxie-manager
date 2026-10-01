@@ -4,6 +4,7 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from .models import AuditEvent
+from .request_context import current_client_ip
 
 
 def write_audit_event(
@@ -37,6 +38,13 @@ def write_audit_event(
     Never pass secret values in state_before/state_after/metadata -- callers
     are responsible for redacting credential material before calling this.
     """
+    # Record where the request came from (set per API request; absent for
+    # worker/system events). Never overrides a caller-supplied value.
+    meta = dict(metadata) if metadata else {}
+    client_ip = current_client_ip.get()
+    if client_ip and "client_ip" not in meta:
+        meta["client_ip"] = client_ip
+
     event = AuditEvent(
         event_category=event_category,
         event_type=event_type,
@@ -58,7 +66,7 @@ def write_audit_event(
         error=error,
         rollback_classification=rollback_classification,
         justification=justification,
-        event_metadata=metadata,
+        event_metadata=meta or None,
     )
     db.add(event)
     if commit:

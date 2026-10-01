@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from pyxie_core.audit import write_audit_event
 from pyxie_core.db import SessionLocal
+from pyxie_core.request_context import current_client_ip
 from pyxie_core.models import AppSettings
 
 from . import config  # noqa: F401 -- import asserts the Phase 0 safety gate at startup
@@ -52,6 +53,29 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PyXie Manager API", version=config.settings.APP_VERSION, lifespan=lifespan)
+
+
+class ClientIpMiddleware:
+    """Pure ASGI middleware: publish the request's client address (already
+    rewritten from X-Forwarded-For by uvicorn when the peer is trusted, see
+    FORWARDED_ALLOW_IPS in compose.yaml) so write_audit_event can record it."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        client = scope.get("client")
+        token = current_client_ip.set(client[0] if client else None)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            current_client_ip.reset(token)
+
+
+app.add_middleware(ClientIpMiddleware)
 
 app.include_router(auth.router)
 app.include_router(inventory.router)

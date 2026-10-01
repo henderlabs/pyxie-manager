@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { forwardedForHeader } from "./clientIp";
 import { getSessionToken } from "./session";
 
 const BASE_URL = process.env.API_INTERNAL_URL || "http://pyxie-manager-api:8000";
@@ -35,6 +36,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     headers: {
       "Content-Type": "application/json",
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...forwardedForHeader(),
       ...(init?.headers || {}),
     },
   });
