@@ -8,7 +8,7 @@ rightsizing cold-start experience described in the spec.
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -311,17 +311,24 @@ def latest_workload_metrics(db: Session) -> dict[str, dict]:
     from PVE) gets no entry at all -- that's the one case where "unknown"
     is the honest answer.
     """
-    rows = (
-        db.query(MetricPoint.object_id, MetricPoint.metric, MetricPoint.value)
-        .join(Workload, Workload.id == MetricPoint.object_id)
-        .distinct(MetricPoint.object_id, MetricPoint.metric)
-        .filter(
-            MetricPoint.object_type == "workload", MetricPoint.metric.in_(["cpu_pct", "mem_pct"]),
-            Workload.status == "running", Workload.is_missing.is_(False),
+    # One index probe per (running workload, metric) via LATERAL -- the old
+    # SELECT DISTINCT ON over metric_points scanned the whole table (8M+ rows,
+    # ~20s alone, 90s under concurrent polling) and starved the API's DB pool.
+    rows = db.execute(
+        text(
+            """
+            SELECT w.id, m.metric, mp.value
+            FROM workloads w
+            CROSS JOIN (VALUES ('cpu_pct'), ('mem_pct')) AS m(metric)
+            JOIN LATERAL (
+                SELECT value FROM metric_points
+                WHERE object_type = 'workload' AND object_id = w.id AND metric = m.metric
+                ORDER BY sampled_at DESC LIMIT 1
+            ) mp ON true
+            WHERE w.status = 'running' AND NOT w.is_missing
+            """
         )
-        .order_by(MetricPoint.object_id, MetricPoint.metric, MetricPoint.sampled_at.desc())
-        .all()
-    )
+    ).all()
     out: dict[str, dict] = {}
     for object_id, metric, value in rows:
         out.setdefault(str(object_id), {})[metric] = value
