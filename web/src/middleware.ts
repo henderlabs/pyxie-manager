@@ -32,9 +32,25 @@ export function middleware(req: NextRequest) {
   if (!hasSession) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
+    // Behind a reverse proxy, rebuild the origin from the forwarded headers so
+    // the redirect never points at the container-internal host/port.
+    const proto = req.headers.get("x-forwarded-proto");
+    const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host");
+    if (proto) url.protocol = proto;
+    if (host) {
+      url.port = ""; // drop the container-internal port; host may carry its own
+      url.host = host;
+    }
     return NextResponse.redirect(url);
   }
-  return NextResponse.next();
+  // Tag page renders (not /api/* Route Handlers) so apiFetch can tell a
+  // server-rendered page from a client-side JSON call when the API answers
+  // 401 (cookie present but session no longer valid server-side). Always
+  // overwritten here, so a client-supplied value is never trusted.
+  const fwd = new Headers(req.headers);
+  if (pathname.startsWith("/api")) fwd.delete("x-pyxie-page");
+  else fwd.set("x-pyxie-page", "1");
+  return NextResponse.next({ request: { headers: fwd } });
 }
 
 export const config = {

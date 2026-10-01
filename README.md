@@ -19,6 +19,11 @@ See [`docs/INSTALL.md`](docs/INSTALL.md) for a from-scratch install on a
 fresh Ubuntu 24.04 VM, and [`docs/adding-a-host.md`](docs/adding-a-host.md)
 for onboarding a PVE cluster once the app is running.
 
+To run the whole stack in Docker behind Caddy with HTTPS (self-signed to start,
+swappable for a real or ACME-issued certificate), see
+[`docs/docker-caddy.md`](docs/docker-caddy.md). The native systemd install
+remains supported; pick one per host.
+
 ## Screenshots
 
 **Dashboard** -- cluster resource usage, environment health, and what needs attention right now:
@@ -182,6 +187,9 @@ says the same thing.
   Operation, resumable across a worker restart via
   `resume_inflight_operations()` at startup.
 - **PostgreSQL 16**, **Redis 7** (RQ queue backend).
+- **Caddy** (Docker deployment only) terminates TLS on 80/443 and proxies to
+  `web`; nothing else is published. The session cookie is marked `Secure`
+  automatically when the request arrived over HTTPS.
 
 Shared code (models, PVE read/write clients, discovery, placement, every
 workflow module) lives in `shared/pyxie_core/` and is imported by both

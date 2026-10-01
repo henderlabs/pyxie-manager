@@ -28,3 +28,7 @@ build/
 *.bak
 *.dump
 *.sql.gz
+
+# TLS material for PYXIE_TLS_MODE=file
+certs/*
+!certs/.gitkeep

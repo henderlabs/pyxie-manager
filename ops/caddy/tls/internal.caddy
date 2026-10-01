@@ -1,0 +1,3 @@
+# Caddy's own local CA signs the cert (self-signed from a browser's view).
+# Export the root to trust it: see docs/docker-caddy.md.
+tls internal

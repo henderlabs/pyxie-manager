@@ -1,3 +1,5 @@
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { getSessionToken } from "./session";
 
 const BASE_URL = process.env.API_INTERNAL_URL || "http://pyxie-manager-api:8000";
@@ -15,6 +17,16 @@ export class ApiError extends Error {
 // token lives in an HttpOnly cookie set by the /api/auth/* route handlers;
 // this reads it via next/headers and forwards it as a Bearer token so
 // every existing page's apiFetch call authenticates automatically.
+// True when this call is part of a server-rendered PAGE (tagged by
+// middleware), as opposed to a Route Handler serving a client-side fetch.
+function inPageRender(): boolean {
+  try {
+    return headers().get("x-pyxie-page") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getSessionToken();
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -26,6 +38,11 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
       ...(init?.headers || {}),
     },
   });
+  // A cookie the server no longer recognises (expired/revoked session, DB
+  // restored, user deactivated): send the browser to sign in again instead of
+  // showing the generic "Something went wrong" page. redirect() must stay
+  // outside any try/catch -- it works by throwing.
+  if (res.status === 401 && inPageRender()) redirect("/login");
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new ApiError(res.status, text || res.statusText);

@@ -1,0 +1,20 @@
+# PyXie Manager edge proxy.
+#
+#   PYXIE_HOSTNAME  FQDN to serve (e.g. cre-pyxie.slc.crengland.com)
+#   PYXIE_TLS_MODE  internal | file | acme   -> imports tls/<mode>.caddy
+#
+# Switching certificate source is one .env change plus `docker compose up -d
+# pyxie-manager-caddy`; nothing in this file changes. HTTP (80) redirects to
+# HTTPS automatically for the named host.
+
+{$PYXIE_HOSTNAME} {
+	import tls/{$PYXIE_TLS_MODE}.caddy
+
+	encode zstd gzip
+
+	# Caddy sets X-Forwarded-For/Proto/Host on the upstream request.
+	reverse_proxy pyxie-manager-web:3000
+
+	# HSTS is deliberately NOT enabled yet: with a self-signed cert it would
+	# lock browsers out of click-through. Enable once the real cert is live.
+}

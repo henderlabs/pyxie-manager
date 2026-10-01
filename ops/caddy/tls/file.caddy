@@ -1,0 +1,5 @@
+# A certificate + key issued elsewhere, dropped into ./certs/ on the host
+# (gitignored). Full chain in the .crt. Caddy does NOT renew these; replace
+# the files and `docker compose exec pyxie-manager-caddy caddy reload
+# --config /etc/caddy/Caddyfile` before they expire.
+tls /certs/pyxie.crt /certs/pyxie.key
