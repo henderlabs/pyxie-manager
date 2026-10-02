@@ -88,9 +88,12 @@ export default function RightsizingTable({
           header: "Memory (P95)",
           render: (a) =>
             a.currently_running ? (
-              <div className="flex items-center gap-2">
-                <Meter value={a.memory.p95} width={56} />
-                <span className="text-muted text-xs whitespace-nowrap">avg {a.memory.avg ?? "—"}% · max {a.memory.max ?? "—"}%</span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Meter value={a.memory.p95} width={56} />
+                  <span className="text-muted text-xs whitespace-nowrap">avg {a.memory.avg ?? "—"}% · max {a.memory.max ?? "—"}%</span>
+                </div>
+                {a.memory_note && <div className="text-[11px] text-muted mt-0.5">{a.memory_note}</div>}
               </div>
             ) : (
               <StaleHistorical stats={a.memory} status={a.status} />

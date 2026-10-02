@@ -459,5 +459,8 @@ def latest_workload_metrics(db: Session) -> dict[str, dict]:
 def prune_old_metrics(db: Session, retention_days: int = 400) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
     deleted = db.query(MetricPoint).filter(MetricPoint.sampled_at < cutoff).delete()
+    from .mem_pressure import prune_memory_pressure
+
+    deleted += prune_memory_pressure(db)
     db.commit()
     return deleted

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from .audit import write_audit_event
 from .credentials import load_pve_credentials, resolve_pve_endpoints
 from .crypto import decrypt_secret
+from .mem_pressure import collect_memory_pressure
 from .metrics import collect_metrics_for_cluster
 from .models import (
     Cluster,
@@ -502,6 +503,14 @@ def _run_discovery_inner(db: Session, target: PveTarget, actor: str = "system") 
                     # upserts already staged above in this same transaction.
                     metrics_summary = collect_metrics_for_cluster(db, client, cluster.id)
                 summary["metric_points"] = metrics_summary["points"]
+            except Exception:
+                pass
+
+            # Guest swap/page-fault counters for Rightsizing's memory-pressure check
+            # (throttled to ~5 min inside; read-only; never allowed to fail discovery).
+            try:
+                with db.begin_nested():
+                    collect_memory_pressure(db, client, cluster.id)
             except Exception:
                 pass
 
