@@ -370,6 +370,20 @@ class PveMaintenanceClient:
             return
         self._request("PUT", f"/nodes/{node}/qemu/{vmid}/config", data=params)
 
+    def set_vm_balloon(self, node: str, vmid: int, *, balloon_mb: int) -> None:
+        """PUT /nodes/{node}/qemu/{vmid}/config with `balloon`, the guest's MINIMUM
+        memory in MiB (the VM `memory` setting stays its maximum). Any non-zero value
+        keeps the balloon device present so PVE can read the guest's real memory use
+        (balloon: 0 removes the device and PVE falls back to the host-side process
+        size, ~100%). The device cannot be hot-added: PVE records this as a pending
+        change that applies at the VM's next start/PVE-initiated reboot, so a running
+        guest is not touched. Respects the PVE writes switch like every write here."""
+        if not _mutations_enabled():
+            raise MutationsDisabledError(_disabled_message("reconfigure"))
+        if balloon_mb <= 0:
+            raise ValueError("balloon_mb must be a positive number of MiB (0 would remove the balloon device)")
+        self._request("PUT", f"/nodes/{node}/qemu/{vmid}/config", data={"balloon": int(balloon_mb)})
+
     def set_vm_network_vlan(
         self, node: str, vmid: int, *, guest_type: str, net_id: str, current_net: str, tag: Optional[int],
     ) -> None:
