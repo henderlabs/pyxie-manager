@@ -2,10 +2,10 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Node, StorageItem, Workload } from "@/lib/api";
+import type { Node, Operation, StorageItem, Workload } from "@/lib/api";
 import OperationCard from "@/components/OperationCard";
 import WorkloadSearchSelect from "@/components/WorkloadSearchSelect";
-import { Table } from "@/components/Table";
+import { Table, type Column } from "@/components/Table";
 import { Meter } from "@/components/Gauges";
 import { useOperationPolling } from "@/lib/useOperationPolling";
 import { notifyOperationsChanged, onOperationsChanged } from "@/lib/operationsBus";
@@ -115,6 +115,69 @@ export default function WorkloadLifecycleForm({
   const me = useMe();
   const isAdmin = me === undefined || me?.is_admin === true;
 
+  // ---- Bulk Migrate ------------------------------------------------------
+  // Tick VMs in the table, optionally pick one destination for all of them
+  // (blank = best fit per VM), Preview -> one editable line per VM in the
+  // same plan card Balance Load uses, approved once. It IS a cluster.rebalance
+  // operation underneath, so execution/cancel/resume are the existing ones.
+  const [bulkIds, setBulkIds] = useState<Set<string>>(new Set());
+  const [bulkDestId, setBulkDestId] = useState("");
+  const [bulkOp, setBulkOp] = useOperationPolling(null);
+  const [bulkPending, setBulkPending] = useState(false);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+
+  function toggleBulk(id: string) {
+    setBulkIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function runBulkPreview() {
+    setBulkPending(true);
+    setBulkError(null);
+    setBulkOp(null);
+    try {
+      const res = await fetch("/api/operations/cluster-rebalance/dry-run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workload_ids: Array.from(bulkIds), destination_node_id: bulkDestId || null }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBulkError(data.error || "Bulk Migrate preview failed");
+        return;
+      }
+      setBulkOp(data as Operation);
+      notifyOperationsChanged();
+    } catch (e) {
+      setBulkError((e as Error).message);
+    } finally {
+      setBulkPending(false);
+    }
+  }
+
+  async function approveBulk() {
+    if (!bulkOp) return;
+    setBulkPending(true);
+    setBulkError(null);
+    try {
+      const res = await fetch(`/api/operations/${bulkOp.id}/approve`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) {
+        setBulkError(data.error || "Approve failed");
+        return;
+      }
+      setBulkOp(data as Operation);
+      setBulkIds(new Set());
+      notifyOperationsChanged();
+    } finally {
+      setBulkPending(false);
+    }
+  }
+
   const nodeNameById = useMemo(() => Object.fromEntries(nodes.map((n) => [n.id, n.name])), [nodes]);
 
   // is_missing excluded here -- this feeds the "Select a VM..." action
@@ -129,6 +192,28 @@ export default function WorkloadLifecycleForm({
     () => (filterByNode && selectedNodeIds.length > 0 ? vms.filter((w) => selectedNodeIds.includes(w.node_id)) : vms),
     [vms, filterByNode, selectedNodeIds]
   );
+
+  const bulkDestNodes = useMemo(() => {
+    const clusterIds = new Set(vms.filter((w) => bulkIds.has(w.id)).map((w) => w.cluster_id));
+    return nodes.filter((n) => clusterIds.has(n.cluster_id));
+  }, [vms, bulkIds, nodes]);
+
+  const bulkColumns: Column<Workload>[] = isAdmin
+    ? [
+        {
+          header: "Pick",
+          render: (w) => (
+            <input
+              type="checkbox"
+              checked={bulkIds.has(w.id)}
+              onChange={() => toggleBulk(w.id)}
+              onClick={(e) => e.stopPropagation()}
+              aria-label={`Select ${w.name || `vmid ${w.vmid}`} for bulk migrate`}
+            />
+          ),
+        },
+      ]
+    : [];
 
   const workload = vms.find((w) => w.id === workloadId) || null;
   const topPick = recommendation?.find((c) => !c.blocked) || null;
@@ -245,7 +330,26 @@ export default function WorkloadLifecycleForm({
           <input type="checkbox" checked={filterByNode} onChange={(e) => setFilterByNode(e.target.checked)} />
           Filter to selected node(s)
         </label>
-        <span className="text-xs text-muted">{visibleVms.length} VM{visibleVms.length === 1 ? "" : "s"}</span>
+        <div className="flex items-center gap-3 text-xs text-muted">
+          {isAdmin && (
+            <>
+              <button
+                type="button"
+                className="hover:underline"
+                onClick={() => setBulkIds(new Set(visibleVms.map((w) => w.id)))}
+                title="Tick every VM currently shown in the table (respects the node filter)"
+              >
+                Select all shown
+              </button>
+              {bulkIds.size > 0 && (
+                <button type="button" className="hover:underline" onClick={() => setBulkIds(new Set())}>
+                  Clear ({bulkIds.size})
+                </button>
+              )}
+            </>
+          )}
+          <span>{visibleVms.length} VM{visibleVms.length === 1 ? "" : "s"}</span>
+        </div>
       </div>
 
       <div className="max-h-[34rem] overflow-y-auto" ref={tableScrollRef}>
@@ -256,6 +360,7 @@ export default function WorkloadLifecycleForm({
           onRowClick={(w) => selectWorkload(w.id)}
           rowClassName={(w) => (workloadId === w.id ? "bg-accent/10 pyxie-jump-target" : "")}
           columns={[
+            ...bulkColumns,
             {
               header: "Name",
               render: (w) => (
@@ -310,6 +415,39 @@ export default function WorkloadLifecycleForm({
           ]}
         />
       </div>
+
+      {isAdmin && bulkIds.size > 0 && (
+        <div className="flex flex-wrap items-end gap-3 border border-accent/30 rounded p-3">
+          <div className="text-sm">
+            <span className="font-medium">{bulkIds.size}</span> VM{bulkIds.size === 1 ? "" : "s"} selected for bulk migrate
+          </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">Destination</label>
+            <select
+              className="bg-surface2 border border-border rounded px-2 py-1.5 text-sm min-w-[240px]"
+              value={bulkDestId}
+              onChange={(e) => setBulkDestId(e.target.value)}
+            >
+              <option value="">Auto: best fit for each VM</option>
+              {bulkDestNodes.map((n) => (
+                <option key={n.id} value={n.id}>
+                  {n.name}
+                  {n.maintenance_mode ? " (in maintenance -- will be blocked)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <button
+            onClick={runBulkPreview}
+            disabled={bulkPending}
+            title="Builds one reviewable line per selected VM -- nothing moves until you review and approve it."
+            className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          >
+            {bulkPending ? "Planning…" : "Preview Bulk Migrate"}
+          </button>
+          {bulkError && <div className="w-full text-sm text-bad">{bulkError}</div>}
+        </div>
+      )}
 
       {isAdmin && (
       <div className="flex flex-wrap items-end gap-3">
@@ -453,6 +591,7 @@ export default function WorkloadLifecycleForm({
 
       {error && <div className="text-sm text-bad">{error}</div>}
       {op && <OperationCard op={op} pending={pending} onApprove={approve} onUpdated={setOp} />}
+      {bulkOp && <OperationCard op={bulkOp} pending={bulkPending} onApprove={approveBulk} onUpdated={setBulkOp} />}
     </div>
   );
 }

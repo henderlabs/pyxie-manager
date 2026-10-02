@@ -104,6 +104,14 @@ export const OPERATION_TYPE_LABELS: Record<string, string> = {
   "workload.network_vlan_change": "Network VLAN Change",
 };
 
+/** Bulk Migrate is a cluster.rebalance whose plan was built from ticked VMs
+ *  (context.mode === "bulk_migrate"); everywhere that shows a title uses this
+ *  so it reads "Bulk Migrate", not "Balance Load". */
+export function operationTypeLabel(op: { operation_type_id: string; context?: Record<string, unknown> | null }): string {
+  if (op.operation_type_id === "cluster.rebalance" && op.context?.mode === "bulk_migrate") return "Bulk Migrate";
+  return OPERATION_TYPE_LABELS[op.operation_type_id] || op.operation_type_id;
+}
+
 function operationSummary(op: Operation): string {
   const r = op.dry_run_result;
   if (op.operation_type_id === "vm.live_migrate") {
@@ -127,7 +135,7 @@ function operationSummary(op: Operation): string {
   }
   if (op.operation_type_id === "cluster.rebalance") {
     const count = (r?.migrate_plan as unknown[] | undefined)?.length ?? 0;
-    return `${OPERATION_TYPE_LABELS[op.operation_type_id]} — ${count} workload${count === 1 ? "" : "s"} planned`;
+    return `${operationTypeLabel(op)} — ${count} workload${count === 1 ? "" : "s"} planned`;
   }
   if (["workload.shutdown", "workload.start", "workload.force_stop", "workload.reboot"].includes(op.operation_type_id)) {
     return `${OPERATION_TYPE_LABELS[op.operation_type_id]} — ${r?.workload_name || `vmid ${r?.vmid}`}${r?.workload_name ? ` (vmid ${r?.vmid})` : ""} on ${r?.node || "?"}`;
@@ -610,7 +618,7 @@ export default function OperationCard({
               disabled={pending}
               className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
             >
-              {pending ? "Submitting…" : `Approve & Execute ${OPERATION_TYPE_LABELS[op.operation_type_id] || ""}`}
+              {pending ? "Submitting…" : `Approve & Execute ${operationTypeLabel(op)}`}
             </button>
           )}
           {onUpdated && <CancelButton op={op} onCancelled={onUpdated} />}

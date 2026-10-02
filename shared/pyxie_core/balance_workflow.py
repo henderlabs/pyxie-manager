@@ -32,6 +32,17 @@ from .operations_engine import (
     enter_stage,
     fail_operation,
 )
+from .discovery import build_pve_client
+from .maintenance import _has_pci_passthrough, _qemu_config
+from .models import Cluster, PveTarget
+from .placement import (
+    current_storage_name,
+    get_cluster_storage_preference,
+    is_currently_on_shared_storage,
+    rank_with_simulated_load,
+    recommend_destinations,
+    recommend_storage_for_candidate,
+)
 from .recommendations import _placement_recommendations
 
 
@@ -85,6 +96,179 @@ def dry_run_balance(db: Session, *, actor: str, node_ids: list | None = None) ->
     if not migrate_plan:
         op = enter_stage(db, op, status="dry_run", stage="preflight", dry_run_result=dry_run_result, context=ctx, actor=actor)
         return enter_stage(db, op, status="completed", stage="audit", actor=actor)
+    op = enter_stage(db, op, status="dry_run", stage="preflight", dry_run_result=dry_run_result, context=ctx, actor=actor)
+    return enter_stage(db, op, status="awaiting_approval", stage="awaiting_approval", actor=actor)
+
+
+def dry_run_bulk_migrate(
+    db: Session, *, actor: str, workload_ids: list, destination_node_id=None,
+) -> Operation:
+    """Bulk Migrate: the same reviewable/editable cluster.rebalance plan, but
+    for exactly the VMs the operator ticked on the Maintenance page rather
+    than whatever the balance scoring pass suggests. One line per VM (ranked
+    destination, storage, live/offline), approved once, executed as resumable
+    child migrations by execute_balance() -- no new execution path.
+
+    destination_node_id None  -> best unblocked destination per VM, with each
+        planned move counted against the next one's headroom (same batch
+        simulation evacuation uses, so three VMs can't be planned onto a
+        node that only fits two).
+    destination_node_id given -> that node for every VM, but only where it is
+        actually eligible; a VM it can't take is listed under
+        skipped_workloads with the reason instead of being forced there.
+
+    Smallest VMs are planned first so one large, slow move (a big database)
+    doesn't hold up the rest and runs last by default; the order is just
+    the list order, nothing else depends on it.
+    """
+    if not workload_ids:
+        raise BalanceWorkflowError("no VMs selected")
+
+    wanted = {str(w) for w in workload_ids}
+    workloads = (
+        db.query(Workload)
+        .filter(Workload.id.in_(list(wanted)), Workload.is_missing.is_(False), Workload.type == "vm")
+        .all()
+    )
+    found = {str(w.id) for w in workloads}
+    skipped: list[dict] = [
+        {"workload_id": wid, "vmid": None, "name": None, "reasons": ["not found, or no longer a VM in inventory"]}
+        for wid in sorted(wanted - found)
+    ]
+    workloads.sort(key=lambda w: ((w.memory_bytes or 0), (w.name or "")))
+
+    dest_node = None
+    if destination_node_id is not None:
+        dest_node = db.query(Node).filter(Node.id == destination_node_id, Node.is_missing.is_(False)).one_or_none()
+        if dest_node is None:
+            raise BalanceWorkflowError("the chosen destination node was not found")
+        if dest_node.maintenance_mode:
+            raise BalanceWorkflowError(f"{dest_node.name} is in maintenance mode -- exit it first, or pick another node")
+        if dest_node.status != "online":
+            raise BalanceWorkflowError(f"{dest_node.name} is not online")
+
+    migrate_plan: list[dict] = []
+    by_cluster: dict = {}
+    for wl in workloads:
+        by_cluster.setdefault(wl.cluster_id, []).append(wl)
+
+    for cluster_id, cluster_wls in by_cluster.items():
+        cluster = db.query(Cluster).filter(Cluster.id == cluster_id).one_or_none()
+        target = db.query(PveTarget).filter(PveTarget.id == cluster.pve_target_id).one_or_none() if cluster else None
+        if cluster is None or target is None:
+            for wl in cluster_wls:
+                skipped.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "reasons": ["its cluster or PVE target is not in inventory"]})
+            continue
+        try:
+            client, _cred = build_pve_client(db, target)
+        except Exception as exc:  # noqa: BLE001
+            raise BalanceWorkflowError(f"could not build a PVE read client to plan the moves: {exc}") from exc
+
+        with client:
+            candidates_all = (
+                db.query(Node)
+                .filter(Node.cluster_id == cluster.id, Node.is_missing.is_(False), Node.status == "online", Node.maintenance_mode.is_(False))
+                .all()
+            )
+            nodes_by_id = {n.id: n for n in candidates_all}
+            simulated_added_bytes: dict = {}
+
+            for wl in cluster_wls:
+                row = {"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name}
+                if dest_node is not None and dest_node.cluster_id != cluster.id:
+                    skipped.append({**row, "reasons": [f"{dest_node.name} is in a different cluster"]})
+                    continue
+                if dest_node is not None and wl.node_id == dest_node.id:
+                    skipped.append({**row, "reasons": [f"already on {dest_node.name}"]})
+                    continue
+                src = db.query(Node).filter(Node.id == wl.node_id).one_or_none()
+                if src is None:
+                    skipped.append({**row, "reasons": ["its current node is not in inventory"]})
+                    continue
+                running = wl.status == "running"
+                if running and _has_pci_passthrough(_qemu_config(client, src.name, wl)):
+                    skipped.append({**row, "reasons": ["PCI/device passthrough -- no safe automated path"]})
+                    continue
+
+                pool = [n for n in candidates_all if n.id != wl.node_id]
+                ranked = recommend_destinations(db, client, wl, pool, simulated_added_bytes=simulated_added_bytes)
+                ranked = rank_with_simulated_load(ranked, nodes_by_id, simulated_added_bytes)
+
+                if dest_node is not None:
+                    pick = next((c for c in ranked if str(c.node_id) == str(dest_node.id)), None)
+                    if pick is None or pick.blocked:
+                        why = (pick.blocking_reasons if pick else None) or [f"{dest_node.name} is not an eligible destination for this VM"]
+                        skipped.append({**row, "reasons": list(why)})
+                        continue
+                else:
+                    pick = next((c for c in ranked if not c.blocked), None)
+                    if pick is None:
+                        why = (ranked[0].blocking_reasons if ranked else None) or ["no eligible destination node"]
+                        skipped.append({**row, "reasons": [f"no eligible destination -- {why[0]}"]})
+                        continue
+
+                destination = nodes_by_id[pick.node_id]
+                simulated_added_bytes[destination.id] = simulated_added_bytes.get(destination.id, 0) + (wl.memory_bytes or 0)
+                currently_on_shared = is_currently_on_shared_storage(client, src, wl, db)
+                current_storage = current_storage_name(client, src, wl)
+                effective_pref = wl.storage_preference or get_cluster_storage_preference(db, cluster.id)
+                storage_rec = recommend_storage_for_candidate(db, destination.id, currently_on_shared, storage_preference=effective_pref)
+                item = {
+                    "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
+                    "destination_node_id": str(destination.id), "destination_node": destination.name,
+                    "destination_storage_id": storage_rec["id"] if storage_rec else None,
+                    "currently_on_shared": currently_on_shared,
+                    "current_storage": current_storage,
+                    "storage_preference": effective_pref,
+                    "candidates": [
+                        {
+                            "node_id": str(c.node_id), "node_name": c.node_name, "score": c.score,
+                            "blocked": c.blocked, "blocking_reasons": c.blocking_reasons, "reasons": c.reasons,
+                        }
+                        for c in ranked
+                    ],
+                    # Running guests move live; a stopped one is just an
+                    # offline move (cheap on shared storage). Both editable
+                    # per line in the plan preview.
+                    "transport": "live" if running else "offline",
+                }
+                if dest_node is not None:
+                    # An explicit "send them all to X" is a manual pick, so a
+                    # later Re-score leaves it alone instead of silently
+                    # re-choosing; X was just verified eligible for this VM
+                    # (including earlier moves in this batch) above.
+                    item["manually_set"] = True
+                migrate_plan.append(item)
+
+    if not migrate_plan:
+        detail = "; ".join(f"{(r.get('name') or r['workload_id'])}: {r['reasons'][0]}" for r in skipped[:6]) or "nothing to move"
+        raise BalanceWorkflowError(f"none of the selected VMs can be moved -- {detail}")
+
+    reasons = [
+        f"{len(migrate_plan)} of {len(wanted)} selected VM(s) planned. Smallest first, largest last. "
+        "Review and change any line below; nothing moves until you approve."
+    ]
+    for r in skipped[:12]:
+        label = r.get("name") or r["workload_id"]
+        vm = f" (vmid {r['vmid']})" if r.get("vmid") else ""
+        reasons.append(f"Not planned: {label}{vm} -- {r['reasons'][0]}")
+    if len(skipped) > 12:
+        reasons.append(f"...and {len(skipped) - 12} more not planned.")
+
+    op = create_operation(
+        db, "cluster.rebalance",
+        context={
+            "mode": "bulk_migrate", "node_ids": None,
+            "workload_ids": sorted(wanted),
+            "destination_node_id": str(dest_node.id) if dest_node else None,
+        },
+        created_by=actor,
+    )
+    dry_run_result = {
+        "node": None, "reasons": reasons, "eligible": True, "blocking_safety_rules": [],
+        "migrate_plan": migrate_plan, "skipped_workloads": skipped, "mode": "bulk_migrate",
+    }
+    ctx = {**(op.context or {}), "migrate_plan": migrate_plan}
     op = enter_stage(db, op, status="dry_run", stage="preflight", dry_run_result=dry_run_result, context=ctx, actor=actor)
     return enter_stage(db, op, status="awaiting_approval", stage="awaiting_approval", actor=actor)
 

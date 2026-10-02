@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from . import rollback
-from .credentials import load_host_maintenance_credentials
+from .credentials import load_host_maintenance_credentials, load_pve_credentials
 from .host_maintenance_client import (
     HostMaintenanceClient,
     HostMaintenanceConnectionError,
@@ -39,6 +39,7 @@ from .host_maintenance_client import (
 from .locks import LockContention, acquire_lock, release_locks_for_operation
 from .maintenance import _quorum_after_removal
 from .models import Cluster, HostMaintenanceCredential, Node, Operation, PveTarget
+from .pve_client import PveClient
 from .operations_engine import (
     OperationError,
     block_operation,
@@ -70,7 +71,17 @@ def _packages_materially_differ(approved: list, fresh: list) -> bool:
     return {_package_key(p) for p in approved} != {_package_key(p) for p in fresh}
 
 
-def dry_run_host_update(db: Session, node: Node, *, actor: str, parent_operation_id=None, correlation_id=None) -> Operation:
+def dry_run_host_update(
+    db: Session, node: Node, *, actor: str, parent_operation_id=None, correlation_id=None, check_only: bool = False,
+) -> Operation:
+    """check_only=True is the "Check for Updates" button: a pure look, never
+    something to approve, so it (1) falls back to the read-only PVE API
+    package list when the SSH wrapper isn't connected for this host, instead
+    of blocking on a thing the check doesn't need, and (2) completes
+    immediately when there is nothing to apply, instead of parking an
+    approval for a no-op. Apply Updates and Full Maintenance call this with
+    check_only=False and behave exactly as before (they genuinely need the
+    wrapper, and approval semantics are unchanged)."""
     cluster, target = _load_context(db, node)
     op = create_operation(
         db, "host.update", cluster_id=cluster.id, node_id=node.id,
@@ -92,6 +103,42 @@ def dry_run_host_update(db: Session, node: Node, *, actor: str, parent_operation
             dry_run_result=dry_run_result, blocking_safety_rules=blocking_rules, actor=actor,
         )
 
+    def _api_list_only() -> Operation:
+        """Read-only fallback for Check for Updates on a host the wrapper
+        can't reach: the pending list from PVE's own API (maintenance
+        token, same source as the Pending-updates view). Completes
+        immediately as information -- there is nothing to approve, because
+        applying needs the wrapper."""
+        try:
+            creds = load_pve_credentials(db, target, "maintenance")
+            with PveClient(creds) as api:
+                raw = api.node_apt_updates(node.name)
+        except Exception as exc:  # noqa: BLE001
+            reasons.append(f"the PVE API package listing failed too: {exc}")
+            return _blocked()
+        packages = [
+            {"package": r.get("Package"), "current_version": r.get("OldVersion"), "new_version": r.get("Version")}
+            for r in raw
+        ]
+        note = (
+            "Read through the PVE API only -- this host is not connected for patching, so these can be reviewed "
+            "but not applied from PyXie. Connect it under Platform > Credentials > Host maintenance to apply updates."
+        )
+        info_reasons = list(reasons) + [note]
+        if not packages:
+            info_reasons.append("no pending package updates on this host right now")
+        dry_run_result = {
+            "node": node.name, "eligible": True, "source": "pve_api", "apply_available": False,
+            "planned_packages": packages, "planned_package_count": len(packages),
+            "plan_computed_at": now().isoformat(),
+            "reasons": info_reasons, "blocking_safety_rules": [],
+        }
+        done = enter_stage(
+            db, op, status="dry_run", stage="dry_run", dry_run_result=dry_run_result,
+            context={"node": node.name, "check_only": True, "source": "pve_api"}, actor=actor,
+        )
+        return enter_stage(db, done, status="completed", stage="audit", actor=actor)
+
     cred_row = (
         db.query(HostMaintenanceCredential)
         .filter(HostMaintenanceCredential.pve_target_id == target.id)
@@ -100,19 +147,19 @@ def dry_run_host_update(db: Session, node: Node, *, actor: str, parent_operation
     if cred_row is None:
         reasons.append("no host-maintenance SSH credential configured for this cluster -- see Platform > Credentials")
         blocking_rules.append("SAFE-HOSTCRED-001")
-        return _blocked()
+        return _api_list_only() if check_only else _blocked()
 
     if not node.management_ip:
         reasons.append(f"no management_ip on record for {node.name} yet -- run inventory discovery first")
         blocking_rules.append("SAFE-HOSTCRED-001")
-        return _blocked()
+        return _api_list_only() if check_only else _blocked()
 
     try:
         hm_creds = load_host_maintenance_credentials(db, target, node)
     except Exception as exc:
         reasons.append(f"could not load host-maintenance credentials: {exc}")
         blocking_rules.append("SAFE-HOSTCRED-001")
-        return _blocked()
+        return _api_list_only() if check_only else _blocked()
 
     try:
         with HostMaintenanceClient(hm_creds) as client:
@@ -134,7 +181,7 @@ def dry_run_host_update(db: Session, node: Node, *, actor: str, parent_operation
     except (HostMaintenanceConnectionError, HostMaintenanceProtocolError) as exc:
         reasons.append(f"could not reach host-maintenance wrapper: {exc}")
         blocking_rules.append("SAFE-HOSTCONN-001")
-        return _blocked()
+        return _api_list_only() if check_only else _blocked()
 
     cred_row.status = "valid"
     cred_row.last_validated_at = now()
@@ -185,6 +232,9 @@ def dry_run_host_update(db: Session, node: Node, *, actor: str, parent_operation
             dry_run_result=dry_run_result, blocking_safety_rules=blocking_rules, context=context, actor=actor,
         )
     op = enter_stage(db, op, status="dry_run", stage="dry_run", dry_run_result=dry_run_result, context=context, actor=actor)
+    if check_only and not packages:
+        # Up to date: a look that found nothing has nothing to approve.
+        return enter_stage(db, op, status="completed", stage="audit", actor=actor)
     return enter_stage(db, op, status="awaiting_approval", stage="awaiting_approval", actor=actor)
 
 

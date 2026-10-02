@@ -616,8 +616,14 @@ def create_node_evacuation_dry_run(payload: NodeIdRequest, user=Depends(get_curr
     return _serialize(op)
 
 
+class HostUpdateRequest(NodeIdRequest):
+    # True only from the "Check for Updates" button (a look, never an
+    # approval); Apply Updates and Full Maintenance leave it False.
+    check_only: bool = False
+
+
 @router.post("/host-updates/dry-run", dependencies=[Depends(require_admin)])
-def create_host_update_dry_run(payload: NodeIdRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
+def create_host_update_dry_run(payload: HostUpdateRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
     from pyxie_core.host_update_workflow import dry_run_host_update
     node = db.query(Node).filter(Node.id == payload.node_id).one_or_none()
     if node is None:
@@ -625,7 +631,7 @@ def create_host_update_dry_run(payload: NodeIdRequest, user=Depends(get_current_
     existing = _existing_live_op(db, "host.update", node.id)
     if existing is not None:
         return _serialize(existing)
-    op = dry_run_host_update(db, node, actor=user.email)
+    op = dry_run_host_update(db, node, actor=user.email, check_only=payload.check_only)
     return _serialize(op)
 
 
@@ -694,6 +700,10 @@ def create_exit_maintenance_dry_run(payload: NodeIdRequest, user=Depends(get_cur
 
 class BalanceRequest(BaseModel):
     node_ids: list[uuid.UUID] | None = None
+    # Bulk Migrate: plan exactly these VMs (optionally all onto one node)
+    # instead of running the balance scoring pass.
+    workload_ids: list[uuid.UUID] | None = None
+    destination_node_id: uuid.UUID | None = None
 
 
 @router.post("/cluster-rebalance/dry-run", dependencies=[Depends(require_admin)])
@@ -704,8 +714,22 @@ def create_balance_dry_run(payload: BalanceRequest, user=Depends(get_current_use
     destinations are never restricted to that set. Not tied to one node,
     so the idempotency guard checks for any other live cluster.rebalance
     regardless of scope."""
-    from pyxie_core.balance_workflow import dry_run_balance
+    from pyxie_core.balance_workflow import BalanceWorkflowError, dry_run_balance, dry_run_bulk_migrate
     existing = _existing_live_op(db, "cluster.rebalance", None)
+    if payload.workload_ids:
+        # Bulk Migrate shares the cluster.rebalance slot (one at a time). Unlike
+        # Balance Load, silently handing back someone else's pending plan
+        # would show the wrong VMs, so say so instead.
+        if existing is not None:
+            raise HTTPException(409, "a Balance Load or Bulk Migrate is already awaiting approval or running -- approve, cancel, or dismiss it first")
+        try:
+            op = dry_run_bulk_migrate(
+                db, actor=user.email, workload_ids=payload.workload_ids,
+                destination_node_id=payload.destination_node_id,
+            )
+        except BalanceWorkflowError as exc:
+            raise HTTPException(400, str(exc))
+        return _serialize(op)
     if existing is not None:
         return _serialize(existing)
     op = dry_run_balance(db, actor=user.email, node_ids=payload.node_ids)

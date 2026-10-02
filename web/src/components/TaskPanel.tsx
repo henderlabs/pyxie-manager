@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
 import type { Operation } from "@/lib/api";
-import { OPERATION_TYPE_LABELS } from "@/components/OperationCard";
+import { OPERATION_TYPE_LABELS, operationTypeLabel } from "@/components/OperationCard";
 import StatusBadge from "@/components/StatusBadge";
 import { ChecklistIcon, SpinnerIcon, HourglassIcon, HistoryIcon, PinIcon } from "@/components/Icons";
 import { onOperationsChanged } from "@/lib/operationsBus";
@@ -202,7 +202,7 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-text truncate">
-          {OPERATION_TYPE_LABELS[op.operation_type_id] || op.operation_type_id}
+          {operationTypeLabel(op)}
         </span>
         <StatusBadge status={op.status} />
       </div>

@@ -47,7 +47,7 @@ const ACTIONS = [
     id: "check-updates",
     key: "host-updates",
     label: "Check for Updates",
-    description: "Shows which package updates are available on the selected node(s) -- nothing is installed until you approve it.",
+    description: "Shows which package updates are available on the selected node(s). A host not yet connected for patching is read through the PVE API (review only). A host with updates pending can then be applied; one that is up to date needs nothing.",
     icon: PackageIcon,
     group: "action" as const,
   },
@@ -194,7 +194,11 @@ export default function NodeActionsForm({
             body: JSON.stringify(
               actionKey === "maintenance-runs"
                 ? { node_id: nodeId, force_reboot: forceReboot, restore_after: !leaveEmpty }
-                : { node_id: nodeId }
+                : // "Check for Updates" is a look (no approval, works on hosts not yet
+                  // connected for patching); Apply Updates is the same key with autoApprove.
+                  actionKey === "host-updates" && !autoApprove
+                  ? { node_id: nodeId, check_only: true }
+                  : { node_id: nodeId }
             ),
           });
           const data = await res.json();
