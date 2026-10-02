@@ -412,6 +412,7 @@ export type RightsizingAssessment = {
   status: string;
   cpu_suggestion: { current: number; suggested: number; direction: "increase" | "decrease"; reason: string } | null;
   memory_host_only?: boolean;
+  window_days?: number | null;
   memory_note?: string | null;
   memory_pressure?: { days: number; samples: number; swap_in_bytes: number; swap_out_bytes: number } | null;
   memory_suggestion: {
