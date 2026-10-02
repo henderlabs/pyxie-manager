@@ -50,6 +50,26 @@ def _node_rows(node_id, rrd_points: list[dict]) -> list[dict]:
     return rows
 
 
+# A VM "has guest memory stats" when at least one sample in the window differs
+# from the host-side figure by more than this fraction of its allocation (floor
+# 8 MiB). With no balloon stats PVE reports mem == memhost in every sample.
+MEM_GUEST_STATS_TOLERANCE = 0.005
+MEM_GUEST_STATS_FLOOR_BYTES = 8 * 1024 * 1024
+
+
+def mem_guest_stats_from_rrd(rrd_points: list[dict]):
+    """True / False / None (not enough comparable samples to say)."""
+    comparable = False
+    for p in rrd_points:
+        mem, host, maxmem = p.get("mem"), p.get("memhost"), p.get("maxmem")
+        if mem is None or not host or not maxmem:
+            continue
+        comparable = True
+        if abs(host - mem) > max(MEM_GUEST_STATS_TOLERANCE * maxmem, MEM_GUEST_STATS_FLOOR_BYTES):
+            return True
+    return False if comparable else None
+
+
 def _workload_rows(workload_id, rrd_points: list[dict]) -> list[dict]:
     rows = []
     for p in rrd_points:
@@ -108,13 +128,20 @@ def collect_metrics_for_cluster(db: Session, client: PveClient, cluster_id) -> d
         timeframes = [REFRESH_TIMEFRAME] if has_history else [*BACKFILL_TIMEFRAMES, REFRESH_TIMEFRAME]
         rrd_fn = client.qemu_rrddata if wl.type == "vm" else client.lxc_rrddata
         rows = []
+        hour_data = None
         for tf in timeframes:
             try:
                 data = rrd_fn(node.name, wl.vmid, tf)
             except Exception:
                 continue
+            if tf == REFRESH_TIMEFRAME:
+                hour_data = data
             rows.extend(_workload_rows(wl.id, data))
         _upsert_points(db, rows)
+        if wl.type == "vm" and hour_data:
+            flag = mem_guest_stats_from_rrd(hour_data)
+            if flag is not None and wl.mem_guest_stats != flag:
+                wl.mem_guest_stats = flag
         collected["workloads"] += 1
         collected["points"] += len(rows)
 
@@ -123,7 +150,7 @@ def collect_metrics_for_cluster(db: Session, client: PveClient, cluster_id) -> d
 
 def observation_stats(
     db: Session, object_type: str, object_id, metric: str,
-    window_days: int | None = None, since=None,
+    window_days: int | None = None, since=None, max_value: float | None = None,
 ):
     """Returns (avg, p95, max, sample_count, earliest, latest) for a metric,
     optionally restricted to the last `window_days` days and/or to samples
@@ -147,6 +174,8 @@ def observation_stats(
         MetricPoint.metric == metric,
         MetricPoint.value.isnot(None),
     )
+    if max_value is not None:
+        q = q.filter(MetricPoint.value <= max_value)
     if window_days:
         cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
         q = q.filter(MetricPoint.sampled_at >= cutoff)
@@ -162,6 +191,8 @@ def observation_stats(
             MetricPoint.metric == metric,
             MetricPoint.value.isnot(None),
         )
+        if max_value is not None:
+            pq = pq.filter(MetricPoint.value <= max_value)
         if window_days:
             pq = pq.filter(MetricPoint.sampled_at >= cutoff)
         if since:
@@ -182,7 +213,7 @@ def observation_stats(
 
 
 def observation_stats_batch(
-    db: Session, object_type: str, object_ids: list, metric: str,
+    db: Session, object_type: str, object_ids: list, metric: str, max_value: float | None = None,
 ) -> dict:
     """Batched version of observation_stats() for the common case (no
     per-object `since`/`window_days` cutoff) -- rightsizing's real bottleneck
@@ -234,6 +265,7 @@ def observation_stats_batch(
             MetricPoint.object_id.in_(object_ids),
             MetricPoint.metric == metric,
             MetricPoint.value.isnot(None),
+            *(() if max_value is None else (MetricPoint.value <= max_value,)),
         )
         .group_by(MetricPoint.object_id)
         .all()
@@ -260,6 +292,7 @@ def observation_stats_batch(
                 MetricPoint.object_id == object_id,
                 MetricPoint.metric == metric,
                 MetricPoint.value.isnot(None),
+                *(() if max_value is None else (MetricPoint.value <= max_value,)),
             )
             .order_by(MetricPoint.value)
             .offset(rank0)
@@ -317,14 +350,30 @@ def latest_workload_metrics(db: Session) -> dict[str, dict]:
     rows = db.execute(
         text(
             """
-            SELECT w.id, m.metric, mp.value
+            SELECT w.id, 'cpu_pct' AS metric, mp.value
             FROM workloads w
-            CROSS JOIN (VALUES ('cpu_pct'), ('mem_pct')) AS m(metric)
             JOIN LATERAL (
                 SELECT value FROM metric_points
-                WHERE object_type = 'workload' AND object_id = w.id AND metric = m.metric
+                WHERE object_type = 'workload' AND object_id = w.id AND metric = 'cpu_pct'
                 ORDER BY sampled_at DESC LIMIT 1
             ) mp ON true
+            WHERE w.status = 'running' AND NOT w.is_missing
+            UNION ALL
+            -- RAM is the median of the last 5 one-minute samples, not the last
+            -- single one: a guest's reported memory swings by gigabytes minute
+            -- to minute and one sample that falls back to the host-side figure
+            -- read as "100%" while PVE's own live value was ~25%.
+            SELECT w.id, 'mem_pct' AS metric, mp.v
+            FROM workloads w
+            JOIN LATERAL (
+                SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY s.value) AS v
+                FROM (
+                    SELECT value FROM metric_points
+                    WHERE object_type = 'workload' AND object_id = w.id AND metric = 'mem_pct'
+                      AND value <= 100  -- >100% is the host-side figure, impossible as guest usage
+                    ORDER BY sampled_at DESC LIMIT 5
+                ) s
+            ) mp ON mp.v IS NOT NULL
             WHERE w.status = 'running' AND NOT w.is_missing
             """
         )
@@ -332,6 +381,13 @@ def latest_workload_metrics(db: Session) -> dict[str, dict]:
     out: dict[str, dict] = {}
     for object_id, metric, value in rows:
         out.setdefault(str(object_id), {})[metric] = value
+
+    # "host" = PVE gives no guest memory stats for this VM, so mem_pct is the
+    # host-side figure (~100%), not usage; the UI shows it muted, not red.
+    host_only_ids = [wid for (wid,) in db.query(Workload.id).filter(Workload.mem_guest_stats.is_(False)).all()]
+    for wid in host_only_ids:
+        if str(wid) in out and "mem_pct" in out[str(wid)]:
+            out[str(wid)]["mem_source"] = "host"
 
     stopped_ids = (
         db.query(Workload.id)

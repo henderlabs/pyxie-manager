@@ -17,7 +17,7 @@ import { CpuIcon, MemoryIcon } from "@/components/Icons";
 import { findingWorkloadIds } from "@/lib/findings";
 import { useMe } from "@/lib/useMe";
 
-type WorkloadMetric = { cpu_pct?: number; mem_pct?: number };
+type WorkloadMetric = { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host" };
 
 /** Throws on a failed save instead of resolving silently -- every select
  * below (and the Notes cell) relies on this to know a PATCH didn't
@@ -382,8 +382,8 @@ export default function WorkloadsTable({
         {
           header: "RAM Usage",
           tooltip: "Live, as of the last poll (every 5s) -- distinct from the RAM column, which is the configured allocation, not actual usage.",
-          render: (w) => <Meter value={metrics[w.id]?.mem_pct ?? null} width={56} />,
-          sortValue: (w) => metrics[w.id]?.mem_pct,
+          render: (w) => <Meter value={metrics[w.id]?.mem_pct ?? null} width={56} hostOnly={metrics[w.id]?.mem_source === "host"} />,
+          sortValue: (w) => (metrics[w.id]?.mem_source === "host" ? undefined : metrics[w.id]?.mem_pct),
         },
         {
           header: "vCPU",

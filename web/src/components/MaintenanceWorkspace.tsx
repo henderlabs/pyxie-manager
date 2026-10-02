@@ -8,7 +8,7 @@ import WorkloadLifecycleForm from "@/components/WorkloadLifecycleForm";
 import { onOperationsChanged } from "@/lib/operationsBus";
 import { WrenchIcon, ClockIcon } from "@/components/Icons";
 
-type WorkloadMetric = { cpu_pct?: number; mem_pct?: number };
+type WorkloadMetric = { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host" };
 type WorkloadStorage = { name: string; scope: string | null };
 
 export default function MaintenanceWorkspace({

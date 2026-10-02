@@ -144,6 +144,9 @@ class Workload(Base):
     status = Column(String, nullable=False, default="unknown")
     cpu_cores = Column(Integer, nullable=True)
     memory_bytes = Column(BigInteger, nullable=True)
+    # See migration 0035. True: PVE reports guest-used memory; False: only the host-side
+    # figure (mem == memhost in every recent sample); None: not evaluated / n/a.
+    mem_guest_stats = Column(Boolean, nullable=True)
     os_type = Column(String, nullable=True)  # PVE qemu config 'ostype' (win11, win10, l26, other, ...); null for lxc/unset
     tags = Column(JSONB, nullable=True)
     ha_state = Column(String, nullable=True)

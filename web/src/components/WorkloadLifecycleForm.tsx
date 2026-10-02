@@ -11,7 +11,7 @@ import { useOperationPolling } from "@/lib/useOperationPolling";
 import { notifyOperationsChanged, onOperationsChanged } from "@/lib/operationsBus";
 import { useMe } from "@/lib/useMe";
 
-type WorkloadMetric = { cpu_pct?: number; mem_pct?: number };
+type WorkloadMetric = { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host" };
 type WorkloadStorage = { name: string; scope: string | null };
 
 type RecommendCandidate = {
@@ -397,8 +397,8 @@ export default function WorkloadLifecycleForm({
             },
             {
               header: "RAM",
-              render: (w) => <Meter value={metrics[w.id]?.mem_pct ?? null} width={56} />,
-              sortValue: (w) => metrics[w.id]?.mem_pct,
+              render: (w) => <Meter value={metrics[w.id]?.mem_pct ?? null} width={56} hostOnly={metrics[w.id]?.mem_source === "host"} />,
+              sortValue: (w) => (metrics[w.id]?.mem_source === "host" ? undefined : metrics[w.id]?.mem_pct),
             },
             {
               header: "Storage",

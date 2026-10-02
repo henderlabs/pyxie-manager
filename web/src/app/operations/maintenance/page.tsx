@@ -27,7 +27,7 @@ export default async function MaintenancePage({
       apiFetch<Node[]>("/api/nodes"),
       apiFetch<Workload[]>("/api/workloads"),
       apiFetch<Operation[]>("/api/operations?limit=200"),
-      apiFetch<Record<string, { cpu_pct?: number; mem_pct?: number }>>("/api/workloads/latest-metrics"),
+      apiFetch<Record<string, { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host" }>>("/api/workloads/latest-metrics"),
       apiFetch<Record<string, { name: string; scope: string | null }>>("/api/workloads/current-storage"),
       apiFetch<StorageItem[]>("/api/storage"),
       apiFetch<Recommendation[]>("/api/recommendations"),

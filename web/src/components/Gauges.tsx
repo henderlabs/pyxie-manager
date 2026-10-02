@@ -61,8 +61,23 @@ export function RadialGauge({
   );
 }
 
-export function Meter({ value, width = 88 }: { value: number | null; width?: number }) {
+export function Meter({ value, width = 88, hostOnly = false }: { value: number | null; width?: number; hostOnly?: boolean }) {
   const pct = value === null ? 0 : Math.min(Math.max(value, 0), 100);
+  if (hostOnly && value !== null) {
+    // PVE gives no guest memory stats for this VM: the number is the host-side
+    // size of its QEMU process (~100%), not usage. Muted, not alarm-coloured.
+    return (
+      <div
+        className="flex items-center gap-2"
+        title={`PVE reports only host-side memory for this VM (${Math.round(value)}% of its allocation) -- it provides no guest memory stats, so this is not a real usage reading. Enable the balloon device and guest agent for a true figure.`}
+      >
+        <div className="h-1.5 rounded-full bg-border overflow-hidden shrink-0" style={{ width }}>
+          <div className="h-full rounded-full opacity-40" style={{ width: `${pct}%`, backgroundColor: "#6b7280" }} />
+        </div>
+        <span className="text-xs text-muted tabular-nums w-9 text-right italic">host</span>
+      </div>
+    );
+  }
   const color = colorForPct(value);
   return (
     <div className="flex items-center gap-2">
