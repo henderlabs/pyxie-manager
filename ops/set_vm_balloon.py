@@ -86,23 +86,34 @@ def main() -> int:
         else:
             try:
                 client.set_vm_balloon(node.name, w.vmid, balloon_mb=new)
-                pending = client._get(f"/nodes/{node.name}/qemu/{w.vmid}/pending")
-                got = next((p.get("pending") for p in pending if p.get("key") == "balloon"), None)
+                entry = next(
+                    (p for p in client._get(f"/nodes/{node.name}/qemu/{w.vmid}/pending") if p.get("key") == "balloon"), {}
+                )
+                # A running VM holds the change as `pending`; a stopped VM has no pending
+                # state, the new value is simply its current `value`.
+                got = entry.get("pending")
                 if got is not None and int(got) == new:
+                    ok, applies = True, "next VM start/PVE reboot"
                     result = f"SET (pending until power-cycle; PVE confirms pending balloon={got})"
+                elif got is None and entry.get("value") is not None and int(entry["value"]) == new and w.status != "running":
+                    ok, applies = True, "immediately (VM is stopped)"
+                    result = f"SET (VM is stopped, effective from its next start; PVE confirms balloon={entry['value']})"
+                else:
+                    ok, applies = False, None
+                    result = f"sent, but PVE shows value={entry.get('value')!r} pending={got!r} -- check"
+                if ok:
                     applied += 1
                 else:
-                    result = f"sent, but PVE pending shows {got!r} -- check"
                     failed += 1
                 write_audit_event(
                     db, event_category="workload", event_type="workload.balloon_configured",
                     actor=args.actor, actor_type="user" if "@" in args.actor else "system",
                     cluster_id=w.cluster_id, node_id=w.node_id, workload_id=w.id, operation="configure",
                     state_before={"balloon": current, "memory_mb": memory_mb},
-                    state_after={"balloon": new, "memory_mb": memory_mb, "applies": "next VM start/PVE reboot"},
-                    result="success" if got is not None and int(got) == new else "failure",
+                    state_after={"balloon": new, "memory_mb": memory_mb, "applies": applies},
+                    result="success" if ok else "failure",
                     severity="info",
-                    metadata={"summary": f"{w.name}: balloon minimum {current} -> {new} MiB (maximum {memory_mb} MiB); pending until power-cycle"},
+                    metadata={"summary": f"{w.name}: balloon minimum {current} -> {new} MiB (maximum {memory_mb} MiB); applies {applies}"},
                     commit=True,
                 )
             except Exception as exc:  # noqa: BLE001
