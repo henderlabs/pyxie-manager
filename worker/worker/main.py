@@ -73,9 +73,34 @@ def scheduler_loop():
         time.sleep(interval)
 
 
+def live_memory_loop():
+    """Keeps the RAM meter within ~30s of PVE's own summary screen. Separate from the
+    heavy 5-minute sync so it is never held up by it; a failure only means the meter
+    falls back to the last sync's value (readers ignore rows older than 3 minutes)."""
+    from pyxie_core.live_memory import INTERVAL_SECONDS, refresh_live_memory
+
+    _wait_for_db()
+    log.info("live memory refresher started (every %ss)", INTERVAL_SECONDS)
+    failures = 0
+    while True:
+        db = SessionLocal()
+        try:
+            refresh_live_memory(db)
+            failures = 0
+        except Exception:
+            db.rollback()
+            failures += 1
+            if failures in (1, 10) or failures % 120 == 0:  # don't flood the log if PVE is down
+                log.exception("live memory refresh failed (%s in a row)", failures)
+        finally:
+            db.close()
+        time.sleep(INTERVAL_SECONDS)
+
+
 def main():
     t = threading.Thread(target=scheduler_loop, daemon=True)
     t.start()
+    threading.Thread(target=live_memory_loop, daemon=True).start()
 
     try:
         from worker.jobs import resume_inflight_operations
