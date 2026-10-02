@@ -422,6 +422,21 @@ def latest_workload_metrics(db: Session) -> dict[str, dict]:
     for wid, used, total in live:
         out.setdefault(str(wid), {})["mem_pct"] = used / total * 100
 
+    # Fresher still: the worker's ~30s live-memory loop (workload_live_mem). Rows older
+    # than 3 minutes are ignored so a stalled loop quietly falls back to the above.
+    fresh = db.execute(
+        text(
+            """
+            SELECT l.workload_id, l.mem_used_bytes, w.memory_bytes
+            FROM workload_live_mem l JOIN workloads w ON w.id = l.workload_id
+            WHERE l.sampled_at > now() - interval '180 seconds'
+              AND w.status = 'running' AND NOT w.is_missing AND w.memory_bytes > 0
+            """
+        )
+    ).all()
+    for wid, used, total in fresh:
+        out.setdefault(str(wid), {})["mem_pct"] = used / total * 100
+
     # "host" = PVE gives no guest memory stats for this VM, so mem_pct is the
     # host-side figure (~100%), not usage; the UI shows it muted, not red.
     host_only_ids = [wid for (wid,) in db.query(Workload.id).filter(Workload.mem_guest_stats.is_(False)).all()]

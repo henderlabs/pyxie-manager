@@ -579,6 +579,18 @@ class MetricPoint(Base):
     source = Column(String, nullable=False, default="pve_rrd")
 
 
+class WorkloadLiveMem(Base):
+    """Latest live memory in use per running VM, as PVE's cluster resources list
+    reports it (what the PVE summary screen shows). Upserted every ~30s by the
+    worker's live-memory loop (migration 0038)."""
+
+    __tablename__ = "workload_live_mem"
+
+    workload_id = Column(UUID(as_uuid=True), ForeignKey("workloads.id", ondelete="CASCADE"), primary_key=True)
+    mem_used_bytes = Column(BigInteger, nullable=False)
+    sampled_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class MemPressureSample(Base):
     """One reading of a VM's guest memory counters (from PVE's ballooninfo), every
     ~5 minutes. The counters are cumulative since the guest booted, so what matters

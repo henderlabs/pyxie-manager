@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from .models import MemPressureSample, Node, Workload
 
-COLLECT_EVERY_SECONDS = 270   # inventory runs every ~60s; sample about every 5 min
+COLLECT_EVERY_SECONDS = 240   # the full sync runs about every 300s; sample on each run
 RETENTION_DAYS = 90
 LOOKBACK_DAYS = 14            # how much history Rightsizing weighs
 MIN_DAYS = 7                  # history needed before a "no pressure" verdict is trusted
