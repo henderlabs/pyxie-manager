@@ -56,6 +56,29 @@ def _load_context(db: Session, node: Node):
     return cluster, target
 
 
+def running_on_node_live(db: Session, target: PveTarget, node: Node) -> int:
+    """How many guests are running on this node RIGHT NOW, asked of PVE.
+
+    The post-evacuation check used to count rows in PyXie's inventory, which lags
+    PVE by up to an inventory cycle: when the last migration finished seconds
+    earlier the row still said "running" and a fully evacuated node failed
+    verification (m401, 2026-10-02). Falls back to the inventory only if PVE
+    cannot be read."""
+    try:
+        client, _cred = build_pve_client(db, target)
+        try:
+            guests = list(client.qemu_list(node.name) or []) + list(client.lxc_list(node.name) or [])
+        finally:
+            close = getattr(client, "close", None)
+            if close:
+                close()
+        return sum(1 for g in guests if g.get("status") == "running")
+    except Exception:  # noqa: BLE001 -- fall back to what we last saw
+        return db.query(Workload).filter(
+            Workload.node_id == node.id, Workload.is_missing.is_(False), Workload.status == "running"
+        ).count()
+
+
 def _get_live_reboot_required(db: Session, target: PveTarget, node: Node) -> bool | None:
     """Best-effort, read-only reboot-required check via the host-maintenance
     wrapper. Returns None (unknown) if the kit isn't provisioned, reachable,
@@ -571,9 +594,7 @@ def execute_enter_maintenance(db: Session, operation_id) -> Operation:
             op = enter_stage(db, op, status="verifying", stage="verifying")
 
         if op.status == "verifying":
-            still_running = db.query(Workload).filter(
-                Workload.node_id == node.id, Workload.is_missing.is_(False), Workload.status == "running"
-            ).count()
+            still_running = running_on_node_live(db, target, node)
             if still_running:
                 release_locks_for_operation(db, op.id)
                 return fail_operation(db, op, error=f"{still_running} workload(s) still running on {node.name} after evacuation")

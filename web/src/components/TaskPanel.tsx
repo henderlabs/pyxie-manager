@@ -273,9 +273,14 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
   );
 }
 
-function QueuedRow({ label, subject }: { label: string; subject: string }) {
+function QueuedRow({ label, subject, by, since }: { label: string; subject: string; by?: string | null; since?: string | null }) {
+  // A queued step has no row of its own yet, so it inherits who asked and when
+  // from the operation that owns the plan -- enough to spot one that is stuck.
   return (
-    <div className="block px-3 py-2 border-b border-border/60 opacity-70">
+    <div
+      className="block px-3 py-2 border-b border-border/60 opacity-70"
+      title={[since ? `Queued since ${new Date(since).toLocaleString()}` : "", by ? `Requested by ${by}` : ""].filter(Boolean).join("\n")}
+    >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-text truncate">{label}</span>
         <StatusBadge status="queued" />
@@ -284,6 +289,12 @@ function QueuedRow({ label, subject }: { label: string; subject: string }) {
         <span className="text-[11px] text-muted truncate">{subject}</span>
         <span className="text-[11px] text-muted shrink-0">waiting on prior step</span>
       </div>
+      {(by || since) && (
+        <div className="flex items-center justify-between gap-2 mt-0.5">
+          <span className="text-[11px] text-muted truncate">{by ? `by ${by}` : ""}</span>
+          <span className="text-[11px] text-muted shrink-0 tabular-nums">{since ? `queued ${startTimeText(since)}` : ""}</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -452,7 +463,9 @@ export default function TaskPanel({
               onApproved={refresh}
               extraCount={queuedCount}
               renderExtra={(op) =>
-                queuedByParentId[op.id]?.map((q) => <QueuedRow key={q.key} label={q.label} subject={q.subject} />)
+                queuedByParentId[op.id]?.map((q) => (
+                  <QueuedRow key={q.key} label={q.label} subject={q.subject} by={op.initiated_by} since={op.approved_at || op.started_at || op.created_at} />
+                ))
               }
               isAdmin={isAdmin}
             />

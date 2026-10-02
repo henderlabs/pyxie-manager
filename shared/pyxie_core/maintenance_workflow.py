@@ -49,6 +49,7 @@ from .operations_engine import (
 )
 from .placement import current_storage_name, get_cluster_storage_preference, is_currently_on_shared_storage, rank_with_simulated_load, recommend_destinations, recommend_storage_for_candidate
 from .discovery import build_pve_client
+from .node_maintenance_workflow import running_on_node_live
 
 
 class MaintenanceWorkflowError(Exception):
@@ -593,9 +594,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
             cancelled = check_cancel_requested(db, op)
             if cancelled:
                 return cancelled
-            still_running = db.query(Workload).filter(
-                Workload.node_id == node.id, Workload.is_missing.is_(False), Workload.status == "running"
-            ).count()
+            still_running = running_on_node_live(db, target, node)
             if still_running:
                 release_locks_for_operation(db, op.id)
                 return fail_operation(db, op, error=f"{still_running} workload(s) still running on {node.name} after evacuation -- stopping before reboot")
