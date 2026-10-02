@@ -515,6 +515,12 @@ export type Operation = {
   rollback_classification: string | null;
   blocking_safety_rules: string[] | null;
   error: string | null;
+  // Resolved server-side to the person: for a step run inside a bigger operation
+  // (bulk migrate, evacuation) this is whoever started that operation.
+  initiated_by?: string | null;
+  initiated_by_email?: string | null;
+  approver?: string | null;
+  approver_email?: string | null;
   created_by: string | null;
   approved_by: string | null;
   dismissed: boolean;

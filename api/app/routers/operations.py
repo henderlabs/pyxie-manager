@@ -3,10 +3,10 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from pyxie_core.discovery import build_pve_client
-from pyxie_core.models import Cluster, Node, Operation, PveTarget, Storage, Workload
+from pyxie_core.models import Cluster, Node, Operation, PveTarget, Storage, User, Workload
 from pyxie_core.migration_workflow import MigrationWorkflowError, approve as approve_migration, dry_run_migration
 from pyxie_core.audit import write_audit_event
 from pyxie_core.locks import release_locks_for_operation
@@ -20,8 +20,50 @@ from ..deps import get_db
 router = APIRouter(prefix="/api/operations", tags=["operations"], dependencies=[Depends(get_current_user)])
 
 
+def _resolve_actor(op: Operation, field: str):
+    """Who actually did it. An operation spawned by a bigger one (each migration
+    inside a bulk migrate, an evacuation, a rebalance) records the PARENT as its
+    actor ("cluster.rebalance:<uuid>"), not the person; walk up to the operation
+    a human started. `field` is "created_by" (who clicked Preview/initiate) or
+    "approved_by" (who clicked Approve)."""
+    sess = object_session(op)
+    cur, value, hops = op, getattr(op, field), 0
+    while sess is not None and value and "@" not in value and ":" in value and cur.parent_operation_id is not None and hops < 4:
+        parent = sess.get(Operation, cur.parent_operation_id)
+        if parent is None:
+            break
+        cur, value, hops = parent, getattr(parent, field), hops + 1
+    return value
+
+
+def _actor_label(op: Operation, value):
+    """Display name for a person (their PyXie display name, else the part of the
+    email before the @); \"PyXie (automatic)\" for anything not started by a
+    person. Cached per request so a 100-row list doesn't do 100 user lookups."""
+    if not value:
+        return None
+    if "@" not in value:
+        return "PyXie (automatic)"
+    sess = object_session(op)
+    if sess is None:
+        return value.split("@")[0]
+    cache = sess.info.setdefault("actor_labels", {})
+    if value not in cache:
+        user = sess.query(User).filter(User.email == value).one_or_none()
+        cache[value] = (user.display_name if user and user.display_name else value.split("@")[0])
+    return cache[value]
+
+
 def _serialize(op: Operation) -> dict:
+    initiator = _resolve_actor(op, "created_by")
+    approver = _resolve_actor(op, "approved_by")
     return {
+        # Resolved to the person: for a migration run inside a bigger operation this is
+        # whoever started that operation, not "cluster.rebalance:<id>".
+        "initiated_by": _actor_label(op, initiator),
+        "initiated_by_email": initiator if initiator and "@" in initiator else None,
+        "approver": _actor_label(op, approver),
+        "approver_email": approver if approver and "@" in approver else None,
         "id": str(op.id),
         "operation_type_id": op.operation_type_id,
         "correlation_id": str(op.correlation_id),
