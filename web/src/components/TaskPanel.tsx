@@ -143,6 +143,14 @@ function relativeTime(iso: string | null): string {
   return `${Math.round(seconds / 86400)}d ago`;
 }
 
+/** "Oct 2, 8:32:17 AM" in the viewer's own time zone. */
+function startTimeText(iso: string | null): string {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString([], {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit",
+  });
+}
+
 function ProgressBar({ pct }: { pct: number | null | undefined }) {
   if (pct != null) {
     return (
@@ -212,6 +220,25 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
           {relativeTime(op.completed_at || op.started_at || op.created_at)}
         </span>
       </div>
+      {(op.started_at || op.created_at) && (
+        <div
+          className="flex items-center justify-between gap-2 mt-0.5"
+          title={[
+            op.started_at ? `Started ${new Date(op.started_at).toLocaleString()}` : `Requested ${new Date(op.created_at).toLocaleString()}`,
+            op.initiated_by_email ? `Initiated by ${op.initiated_by_email}` : op.initiated_by ? `Initiated by ${op.initiated_by}` : "",
+            op.approver_email ? `Approved by ${op.approver_email}` : "",
+          ].filter(Boolean).join("\n")}
+        >
+          <span className="text-[11px] text-muted truncate">{op.initiated_by ? `by ${op.initiated_by}` : ""}</span>
+          <span className="text-[11px] text-muted shrink-0 tabular-nums">
+            {op.started_at ? "" : "requested "}
+            {startTimeText(op.started_at || op.created_at)}
+          </span>
+        </div>
+      )}
+      {op.approver && op.approver !== op.initiated_by && (
+        <div className="text-[11px] text-muted truncate mt-0.5">approved by {op.approver}</div>
+      )}
       {inFlight && <ProgressBar pct={op.progress?.pct ?? null} />}
       {op.status === "failed" && op.error && <div className="text-[11px] text-bad mt-1">{op.error}</div>}
       {op.status === "awaiting_approval" && isAdmin && (
