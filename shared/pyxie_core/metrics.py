@@ -142,6 +142,9 @@ def collect_metrics_for_cluster(db: Session, client: PveClient, cluster_id) -> d
             flag = mem_guest_stats_from_rrd(hour_data)
             if flag is not None and wl.mem_guest_stats != flag:
                 wl.mem_guest_stats = flag
+            hosts = [p["memhost"] for p in hour_data if p.get("memhost")]
+            if hosts:
+                wl.mem_host_bytes = int(hosts[-1])
         collected["workloads"] += 1
         collected["points"] += len(rows)
 

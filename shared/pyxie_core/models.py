@@ -147,6 +147,8 @@ class Workload(Base):
     # See migration 0035. True: PVE reports guest-used memory; False: only the host-side
     # figure (mem == memhost in every recent sample); None: not evaluated / n/a.
     mem_guest_stats = Column(Boolean, nullable=True)
+    # Host-side size of the VM process (PVE `memhost`), from the RRD series each cycle.
+    mem_host_bytes = Column(BigInteger, nullable=True)
     # Live memory in use as PVE reports it (VM list `mem`), refreshed each inventory
     # cycle; what the PVE summary screen shows. None when not running / not seen yet.
     mem_used_bytes = Column(BigInteger, nullable=True)
