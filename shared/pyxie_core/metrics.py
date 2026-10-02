@@ -386,8 +386,24 @@ def latest_workload_metrics(db: Session) -> dict[str, dict]:
     # host-side figure (~100%), not usage; the UI shows it muted, not red.
     host_only_ids = [wid for (wid,) in db.query(Workload.id).filter(Workload.mem_guest_stats.is_(False)).all()]
     for wid in host_only_ids:
-        if str(wid) in out and "mem_pct" in out[str(wid)]:
-            out[str(wid)]["mem_source"] = "host"
+        entry = out.get(str(wid))
+        if entry is None:
+            continue
+        if "mem_pct" not in entry:
+            # Every recent sample was >100% (host-side process size), so the median
+            # above had nothing valid to use -- still show the latest raw host-side
+            # figure, labelled "host", rather than a blank.
+            raw = (
+                db.query(MetricPoint.value)
+                .filter(MetricPoint.object_type == "workload", MetricPoint.object_id == wid, MetricPoint.metric == "mem_pct")
+                .order_by(MetricPoint.sampled_at.desc())
+                .limit(1)
+                .scalar()
+            )
+            if raw is not None:
+                entry["mem_pct"] = raw
+        if "mem_pct" in entry:
+            entry["mem_source"] = "host"
 
     stopped_ids = (
         db.query(Workload.id)
