@@ -87,14 +87,7 @@ export default function RightsizingTable({
         {
           header: "Memory (P95)",
           render: (a) =>
-            a.currently_running && a.memory_host_only ? (
-              <span
-                className="text-muted text-xs italic"
-                title="PVE gives no guest memory stats for this VM (balloon/guest agent), so its memory reading is the host-side size of the VM process (~100%), not real usage. Memory is not assessed for it."
-              >
-                host-side only · not assessed
-              </span>
-            ) : a.currently_running ? (
+            a.currently_running ? (
               <div className="flex items-center gap-2">
                 <Meter value={a.memory.p95} width={56} />
                 <span className="text-muted text-xs whitespace-nowrap">avg {a.memory.avg ?? "—"}% · max {a.memory.max ?? "—"}%</span>

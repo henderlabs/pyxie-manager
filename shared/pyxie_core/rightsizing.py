@@ -232,7 +232,13 @@ def _compute_assessment(
 
     if workload.memory_bytes and mem_stats["p95"] is not None and workload.mem_guest_stats is not False:
         headroom_p95_bytes = mem_stats["p95"] / 100 * workload.memory_bytes * 1.3
-        headroom_max_bytes = (mem_stats["max"] or 0) / 100 * workload.memory_bytes * _peak_multiplier(mem_target_pct)
+        # Size to the 99th percentile, not the single highest sample: one stray
+        # reading (a ballooned guest briefly reporting its host-side size, a
+        # backup window) used to decide the whole recommendation. P99 over months
+        # of one-minute samples still covers every sustained peak; it only
+        # ignores the top 1%. Falls back to the absolute max if no p99 was computed.
+        peak_pct = mem_stats["p99"] if mem_stats.get("p99") is not None else (mem_stats["max"] or 0)
+        headroom_max_bytes = peak_pct / 100 * workload.memory_bytes * _peak_multiplier(mem_target_pct)
         headroom_needed_bytes = max(headroom_p95_bytes, headroom_max_bytes, min_memory_bytes)
         # round suggestion to nearest whole GB (half-GB steps like
         # 8.5GB/9.5GB were needless precision), never below the
@@ -256,7 +262,8 @@ def _compute_assessment(
                 "suggested_bytes": suggested_bytes,
                 "direction": "increase",
                 "reason": (
-                    f"Peak memory usage {mem_stats['max']}% of allocation over {round(days)}d "
+                    f"99th-percentile memory usage {peak_pct}% of allocation over {round(days)}d "
+                    f"(single highest sample {mem_stats['max']}%) "
                     f"already exceeds the {mem_target_pct}% target -- at risk of swapping/OOM"
                 ),
             }
@@ -284,7 +291,7 @@ def assess_all_workloads(db) -> list[dict]:
     since_by_id = _last_resize_completed_at_batch(db, [wl.id for wl in workloads])
     no_cutoff_ids = [wl.id for wl in workloads if wl.id not in since_by_id]
     cpu_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "cpu_pct")
-    mem_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "mem_pct", max_value=MEM_PCT_VALID_MAX)
+    mem_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "mem_pct", max_value=MEM_PCT_VALID_MAX, with_p99=True)
 
     results = []
     for wl in workloads:

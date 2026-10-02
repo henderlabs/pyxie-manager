@@ -184,6 +184,7 @@ def observation_stats(
     avg, mx, count, earliest, latest = q.one()
 
     p95 = None
+    p99 = None
     if count:
         pq = db.query(MetricPoint.value).filter(
             MetricPoint.object_type == object_type,
@@ -201,10 +202,13 @@ def observation_stats(
         if values:
             idx = min(len(values) - 1, int(round(0.95 * (len(values) - 1))))
             p95 = values[idx]
+            idx99 = min(len(values) - 1, int(round(0.99 * (len(values) - 1))))
+            p99 = values[idx99]
 
     return {
         "avg": round(avg, 1) if avg is not None else None,
         "p95": round(p95, 1) if p95 is not None else None,
+        "p99": round(p99, 1) if p99 is not None else None,
         "max": round(mx, 1) if mx is not None else None,
         "sample_count": count or 0,
         "earliest": earliest,
@@ -214,6 +218,7 @@ def observation_stats(
 
 def observation_stats_batch(
     db: Session, object_type: str, object_ids: list, metric: str, max_value: float | None = None,
+    with_p99: bool = False,
 ) -> dict:
     """Batched version of observation_stats() for the common case (no
     per-object `since`/`window_days` cutoff) -- rightsizing's real bottleneck
@@ -248,7 +253,7 @@ def observation_stats_batch(
     if not object_ids:
         return {}
 
-    empty = {"avg": None, "p95": None, "max": None, "sample_count": 0, "earliest": None, "latest": None}
+    empty = {"avg": None, "p95": None, "p99": None, "max": None, "sample_count": 0, "earliest": None, "latest": None}
     out = {oid: dict(empty) for oid in object_ids}
 
     agg_rows = (
@@ -274,6 +279,7 @@ def observation_stats_batch(
         out[object_id] = {
             "avg": round(avg, 1) if avg is not None else None,
             "p95": None,  # filled in below, one targeted OFFSET/LIMIT query at a time
+            "p99": None,
             "max": round(mx, 1) if mx is not None else None,
             "sample_count": count or 0,
             "earliest": earliest,
@@ -301,6 +307,25 @@ def observation_stats_batch(
         )
         if p95 is not None:
             stats["p95"] = round(p95, 1)
+
+        if with_p99:
+            rank99 = min(n - 1, int(round(0.99 * (n - 1))))
+            p99 = (
+                db.query(MetricPoint.value)
+                .filter(
+                    MetricPoint.object_type == object_type,
+                    MetricPoint.object_id == object_id,
+                    MetricPoint.metric == metric,
+                    MetricPoint.value.isnot(None),
+                    *(() if max_value is None else (MetricPoint.value <= max_value,)),
+                )
+                .order_by(MetricPoint.value)
+                .offset(rank99)
+                .limit(1)
+                .scalar()
+            )
+            if p99 is not None:
+                stats["p99"] = round(p99, 1)
 
     return out
 
