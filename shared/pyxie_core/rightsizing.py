@@ -118,6 +118,13 @@ def _rightsizing_settings(db) -> tuple[int, int, bool]:
     )
 
 
+# A guest cannot use more than 100% of its own RAM. PVE's VM memory series falls
+# back to the host-side size of the QEMU process (allocation plus overhead, so
+# ~100.4%) whenever guest stats are unavailable; those samples are not usage and
+# used to drive the "peak memory already exceeds the target" suggestions.
+MEM_PCT_VALID_MAX = 100.0
+
+
 def assess_workload(
     db, workload: Workload, cpu_target_pct: int, mem_target_pct: int, round_vcpu_even: bool = False
 ) -> dict:
@@ -132,7 +139,7 @@ def assess_workload(
     shared so the batched path can't silently drift from this one."""
     since = _last_resize_completed_at(db, workload.id)
     cpu_stats = observation_stats(db, "workload", workload.id, "cpu_pct", since=since)
-    mem_stats = observation_stats(db, "workload", workload.id, "mem_pct", since=since)
+    mem_stats = observation_stats(db, "workload", workload.id, "mem_pct", since=since, max_value=MEM_PCT_VALID_MAX)
     return _compute_assessment(workload, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even)
 
 
@@ -172,6 +179,11 @@ def _compute_assessment(
         "status": workload.status,
         "cpu_suggestion": None,
         "memory_suggestion": None,
+        # PVE gives no guest memory stats for this VM, so its "memory usage"
+        # is the host-side figure (~100% of allocation), not what the guest
+        # uses. Not assessed -- otherwise every such VM got an "increase
+        # memory / at risk of OOM" suggestion.
+        "memory_host_only": workload.mem_guest_stats is False,
     }
 
     if confidence not in MIN_CONFIDENCE_FOR_ACTION:
@@ -218,7 +230,7 @@ def _compute_assessment(
                 ),
             }
 
-    if workload.memory_bytes and mem_stats["p95"] is not None:
+    if workload.memory_bytes and mem_stats["p95"] is not None and workload.mem_guest_stats is not False:
         headroom_p95_bytes = mem_stats["p95"] / 100 * workload.memory_bytes * 1.3
         headroom_max_bytes = (mem_stats["max"] or 0) / 100 * workload.memory_bytes * _peak_multiplier(mem_target_pct)
         headroom_needed_bytes = max(headroom_p95_bytes, headroom_max_bytes, min_memory_bytes)
@@ -272,7 +284,7 @@ def assess_all_workloads(db) -> list[dict]:
     since_by_id = _last_resize_completed_at_batch(db, [wl.id for wl in workloads])
     no_cutoff_ids = [wl.id for wl in workloads if wl.id not in since_by_id]
     cpu_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "cpu_pct")
-    mem_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "mem_pct")
+    mem_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "mem_pct", max_value=MEM_PCT_VALID_MAX)
 
     results = []
     for wl in workloads:
@@ -282,7 +294,7 @@ def assess_all_workloads(db) -> list[dict]:
             mem_stats = mem_batch[wl.id]
         else:
             cpu_stats = observation_stats(db, "workload", wl.id, "cpu_pct", since=since)
-            mem_stats = observation_stats(db, "workload", wl.id, "mem_pct", since=since)
+            mem_stats = observation_stats(db, "workload", wl.id, "mem_pct", since=since, max_value=MEM_PCT_VALID_MAX)
         results.append(_compute_assessment(wl, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even))
     return results
 
@@ -307,6 +319,7 @@ def _serialize_assessment(a: dict) -> dict:
         "status": a["status"],
         "cpu_suggestion": a["cpu_suggestion"],
         "memory_suggestion": a["memory_suggestion"],
+        "memory_host_only": a.get("memory_host_only", False),
     }
 
 
