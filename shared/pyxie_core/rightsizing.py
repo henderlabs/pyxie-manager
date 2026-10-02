@@ -140,7 +140,13 @@ def assess_workload(
     shared so the batched path can't silently drift from this one."""
     since = _last_resize_completed_at(db, workload.id)
     cpu_stats = observation_stats(db, "workload", workload.id, "cpu_pct", since=since)
-    mem_stats = observation_stats(db, "workload", workload.id, "mem_pct", since=since, max_value=MEM_PCT_VALID_MAX)
+    # VMs with no guest memory stats are never assessed for memory, so show their real
+    # (host-side, possibly >100%) numbers exactly as PVE reports them; the >100% filter
+    # only protects the sizing math for VMs that DO have guest stats.
+    mem_stats = observation_stats(
+        db, "workload", workload.id, "mem_pct", since=since,
+        max_value=None if workload.mem_guest_stats is False else MEM_PCT_VALID_MAX,
+    )
     pressure = pressure_summary_one(db, workload.id, since=since)
     return _compute_assessment(workload, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even, pressure=pressure)
 
@@ -309,17 +315,22 @@ def assess_all_workloads(db) -> list[dict]:
     mem_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "mem_pct", max_value=MEM_PCT_VALID_MAX, with_p99=True)
 
     pressure_by_id = pressure_summaries(db)
+    host_only_ids = [wl.id for wl in workloads if wl.mem_guest_stats is False and wl.id in set(no_cutoff_ids)]
+    host_only_mem = observation_stats_batch(db, "workload", host_only_ids, "mem_pct") if host_only_ids else {}
 
     results = []
     for wl in workloads:
         since = since_by_id.get(wl.id)
         if since is None:
             cpu_stats = cpu_batch[wl.id]
-            mem_stats = mem_batch[wl.id]
+            mem_stats = host_only_mem.get(wl.id) or mem_batch[wl.id]
             pressure = pressure_by_id.get(wl.id)
         else:
             cpu_stats = observation_stats(db, "workload", wl.id, "cpu_pct", since=since)
-            mem_stats = observation_stats(db, "workload", wl.id, "mem_pct", since=since, max_value=MEM_PCT_VALID_MAX)
+            mem_stats = observation_stats(
+                db, "workload", wl.id, "mem_pct", since=since,
+                max_value=None if wl.mem_guest_stats is False else MEM_PCT_VALID_MAX,
+            )
             pressure = pressure_summary_one(db, wl.id, since=since)
         results.append(_compute_assessment(wl, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even, pressure=pressure))
     return results
