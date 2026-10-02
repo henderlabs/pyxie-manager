@@ -4,9 +4,11 @@ memory use. Run INSIDE the pyxie-manager-api container:
     docker cp ops/set_vm_balloon.py pyxie-manager-api:/tmp/
     docker exec pyxie-manager-api python /tmp/set_vm_balloon.py --vmids 215,1044 --fraction 0.5          # dry run
     docker exec pyxie-manager-api python /tmp/set_vm_balloon.py --vmids 215,1044 --fraction 0.5 --apply --actor you@example.com
+    docker exec pyxie-manager-api python /tmp/set_vm_balloon.py --vmids 1078 --below-max-mb 2048 --apply --actor you@example.com   # databases: minimum = max - 2 GiB
 
 The VM's `memory` (maximum) is left alone; `balloon` (the minimum) is set to
-fraction x memory. Why: with `balloon: 0` PVE has no way to ask the guest what it
+fraction x memory, or to memory minus --below-max-mb (keeps PVE from reclaiming
+more than that much, e.g. for databases). Why: with `balloon: 0` PVE has no way to ask the guest what it
 uses and reports the host-side process size (~100% for any VM that has touched its
 RAM); with the device present it reports the guest's own figure (what Windows Task
 Manager shows). The change is pending until the VM is next started or rebooted
@@ -29,11 +31,16 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--vmids", required=True, help="comma-separated VMIDs")
     ap.add_argument("--fraction", type=float, default=0.5, help="balloon minimum as a fraction of memory (default 0.5)")
+    ap.add_argument("--below-max-mb", type=int, default=None,
+                    help="instead of --fraction: balloon minimum = memory minus this many MiB")
     ap.add_argument("--apply", action="store_true", help="make the change (default: dry run)")
     ap.add_argument("--actor", default="system", help="who is making the change, for the audit log")
     args = ap.parse_args()
     if not 0 < args.fraction <= 1:
         print("--fraction must be > 0 and <= 1", file=sys.stderr)
+        return 2
+    if args.below_max_mb is not None and args.below_max_mb < 0:
+        print("--below-max-mb must be >= 0", file=sys.stderr)
         return 2
 
     db = SessionLocal()
@@ -53,7 +60,8 @@ def main() -> int:
 
     applied = failed = 0
     with_clients = {}
-    print(f"{'DRY RUN' if not args.apply else 'APPLY'}: balloon minimum = {args.fraction:g} x memory (memory/maximum unchanged)\n")
+    rule = f"memory minus {args.below_max_mb} MiB" if args.below_max_mb is not None else f"{args.fraction:g} x memory"
+    print(f"{'DRY RUN' if not args.apply else 'APPLY'}: balloon minimum = {rule} (memory/maximum unchanged)\n")
     print(f"{'vm':<16}{'vmid':<7}{'node':<14}{'status':<9}{'memory MiB':<12}{'balloon now':<13}{'balloon new':<12}result")
     for w, node, target in plans:
         key = target.id
@@ -63,7 +71,13 @@ def main() -> int:
         cfg = client._get(f"/nodes/{node.name}/qemu/{w.vmid}/config")
         memory_mb = int(cfg["memory"])
         current = cfg.get("balloon")
-        new = max(1, int(memory_mb * args.fraction))
+        if args.below_max_mb is not None:
+            new = memory_mb - args.below_max_mb
+            if new <= 0:
+                print(f"{w.name}: --below-max-mb {args.below_max_mb} leaves no memory (max is {memory_mb} MiB) -- skipped")
+                continue
+        else:
+            new = max(1, int(memory_mb * args.fraction))
         result = ""
         if current not in (None, 0) and int(current) == new:
             result = "already set -- no change"
