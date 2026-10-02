@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Workload } from "@/lib/api";
 import { Card, CardTitle, EmptyState } from "@/components/Card";
 import { useMe } from "@/lib/useMe";
+import WorkloadSearchSelect from "@/components/WorkloadSearchSelect";
 
 type Rule = {
   id: string;
@@ -139,29 +140,11 @@ export default function AffinityRuleManager({ initialRules, workloads }: { initi
             <>
               <div>
                 <label className="block text-xs text-muted mb-1">Workload A</label>
-                <select
-                  className="bg-surface2 border border-border rounded px-2 py-1.5 text-sm min-w-[180px]"
-                  value={form.workloadA}
-                  onChange={(e) => setForm((f) => ({ ...f, workloadA: e.target.value }))}
-                >
-                  <option value="">Select…</option>
-                  {workloads.map((w) => (
-                    <option key={w.id} value={w.id}>{w.name ? `${w.name} (vmid ${w.vmid})` : `vmid ${w.vmid}`}</option>
-                  ))}
-                </select>
+                <WorkloadSearchSelect vms={workloads} value={form.workloadA} onChange={(id) => setForm((f) => ({ ...f, workloadA: id }))} />
               </div>
               <div>
                 <label className="block text-xs text-muted mb-1">Workload B</label>
-                <select
-                  className="bg-surface2 border border-border rounded px-2 py-1.5 text-sm min-w-[180px]"
-                  value={form.workloadB}
-                  onChange={(e) => setForm((f) => ({ ...f, workloadB: e.target.value }))}
-                >
-                  <option value="">Select…</option>
-                  {workloads.map((w) => (
-                    <option key={w.id} value={w.id}>{w.name ? `${w.name} (vmid ${w.vmid})` : `vmid ${w.vmid}`}</option>
-                  ))}
-                </select>
+                <WorkloadSearchSelect vms={workloads} value={form.workloadB} onChange={(id) => setForm((f) => ({ ...f, workloadB: id }))} />
               </div>
             </>
           )}
