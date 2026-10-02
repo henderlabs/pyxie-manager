@@ -383,7 +383,7 @@ export default function WorkloadsTable({
           header: "RAM Usage",
           tooltip: "Live, as of the last poll (every 5s) -- distinct from the RAM column, which is the configured allocation, not actual usage.",
           render: (w) => <Meter value={metrics[w.id]?.mem_pct ?? null} width={56} hostOnly={metrics[w.id]?.mem_source === "host"} />,
-          sortValue: (w) => (metrics[w.id]?.mem_source === "host" ? undefined : metrics[w.id]?.mem_pct),
+          sortValue: (w) => metrics[w.id]?.mem_pct,
         },
         {
           header: "vCPU",

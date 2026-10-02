@@ -382,6 +382,21 @@ def latest_workload_metrics(db: Session) -> dict[str, dict]:
     for object_id, metric, value in rows:
         out.setdefault(str(object_id), {})[metric] = value
 
+    # Live value, exactly what PVE's own summary screen / Datacenter table show
+    # (VM list mem / maxmem, refreshed every inventory cycle). Preferred over the
+    # history-based figure above, which stays as the fallback until the first
+    # inventory cycle after an upgrade has filled this in.
+    live = (
+        db.query(Workload.id, Workload.mem_used_bytes, Workload.memory_bytes)
+        .filter(
+            Workload.status == "running", Workload.is_missing.is_(False),
+            Workload.mem_used_bytes.isnot(None), Workload.memory_bytes > 0,
+        )
+        .all()
+    )
+    for wid, used, total in live:
+        out.setdefault(str(wid), {})["mem_pct"] = used / total * 100
+
     # "host" = PVE gives no guest memory stats for this VM, so mem_pct is the
     # host-side figure (~100%), not usage; the UI shows it muted, not red.
     host_only_ids = [wid for (wid,) in db.query(Workload.id).filter(Workload.mem_guest_stats.is_(False)).all()]
