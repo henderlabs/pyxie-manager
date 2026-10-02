@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from .locks import LockContention, acquire_lock, release_locks_for_operation
-from .maintenance import _quorum_after_removal
+from .maintenance import _qemu_config, _quorum_after_removal, vm_lock_reason
 from .migration_workflow import (
     MigrationWorkflowError,
     approve as approve_migration,
@@ -102,6 +102,10 @@ def dry_run_evacuation(db: Session, node: Node, *, actor: str) -> Operation:
             nodes_by_id = {n.id: n for n in candidates_all}
             simulated_added_bytes: dict = {}
             for wl in running_vms:
+                lock_reason = vm_lock_reason(wl.vmid, _qemu_config(client, node.name, wl))
+                if lock_reason:
+                    unmigratable.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "reasons": [lock_reason]})
+                    continue
                 ranked = recommend_destinations(db, client, wl, candidates_all, simulated_added_bytes=simulated_added_bytes)
                 ranked = rank_with_simulated_load(ranked, nodes_by_id, simulated_added_bytes)
                 top = next((c for c in ranked if not c.blocked), None)
