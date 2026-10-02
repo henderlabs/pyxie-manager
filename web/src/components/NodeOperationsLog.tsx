@@ -169,7 +169,9 @@ export default function NodeOperationsLog({ initialOperations }: { initialOperat
                 <div>
                   <div className="text-sm text-text flex items-center gap-1.5">
                     <span className="text-muted">{TYPE_ICONS[op.operation_type_id]}</span>
-                    {TYPE_LABELS[op.operation_type_id] || op.operation_type_id} — {subtitleFor(op)}
+                    {op.operation_type_id === "cluster.rebalance" && (op.context as Record<string, unknown> | null)?.mode === "bulk_migrate"
+                      ? "Bulk Migrate"
+                      : TYPE_LABELS[op.operation_type_id] || op.operation_type_id} — {subtitleFor(op)}
                   </div>
                   <div className="text-xs text-muted">{new Date(op.created_at).toLocaleString()} · {op.created_by}</div>
                   {op.status === "blocked" && op.blocking_safety_rules && op.blocking_safety_rules.length > 0 && (
