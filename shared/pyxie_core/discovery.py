@@ -350,6 +350,25 @@ def _run_discovery_inner(db: Session, target: PveTarget, actor: str = "system") 
             for entry in log_entries:
                 _upsert_cluster_log_entry(db, cluster, entry)
 
+            # Live memory in use, taken from the CLUSTER resources list -- the same source
+            # the PVE summary screen and Datacenter table use (guest-reported when the VM
+            # has balloon/agent stats). The per-node VM list is NOT used for this: its
+            # `mem` is the host-side process size for ballooned VMs (PAW-JChugg showed
+            # 100.7% there while PVE's summary said 48.3%).
+            try:
+                resource_rows = client.cluster_resources("vm") or []
+            except Exception as e:
+                resource_rows = []
+                degraded_reasons.append(f"cluster resources fetch failed ({e})")
+            if resource_rows:
+                live_mem = {
+                    int(r["vmid"]): r.get("mem")
+                    for r in resource_rows
+                    if r.get("vmid") is not None and r.get("status") == "running"
+                }
+                for w in db.query(Workload).filter(Workload.cluster_id == cluster.id, Workload.is_missing.is_(False)).all():
+                    w.mem_used_bytes = live_mem.get(w.vmid) if w.status == "running" else None
+
             # For any node whose qemu/lxc/storage listing failed above,
             # carry forward its existing non-missing workloads/storage into
             # the seen-sets so the reconciliation below leaves them alone.
@@ -586,7 +605,6 @@ def _upsert_workload(db: Session, cluster: Cluster, node: Node, data: dict, wtyp
     wl.status = data.get("status", "unknown")
     wl.cpu_cores = data.get("cpus")
     wl.memory_bytes = data.get("maxmem")
-    wl.mem_used_bytes = data.get("mem") if wl.status == "running" else None
     if os_type is not None:
         wl.os_type = os_type
     tags = data.get("tags")
