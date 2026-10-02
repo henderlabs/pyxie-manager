@@ -14,7 +14,7 @@ output -- is a hard failure, never partially parsed or guessed at.
 
 Two independent guardrails on apply(), matching every other mutation in
 this codebase:
-  1. PVE_MUTATIONS_ENABLED must be exactly "true" -- the SAME global kill
+  1. The PVE writes switch (Platform > Settings) must be on -- the SAME global kill
      switch pve_write_client.py uses, so there is one switch for every
      mutation PyXie can make, PVE API or host SSH alike.
   2. Everything else in the Safety Contract (approval, revalidation,
@@ -83,7 +83,16 @@ class MutationsDisabledError(Exception):
 
 
 def _mutations_enabled() -> bool:
-    return os.environ.get("PVE_MUTATIONS_ENABLED", "false").strip().lower() == "true"
+    """The SAME global write switch the PVE write client uses -- the live
+    Platform > Settings toggle (app_settings.pve_mutations_enabled), re-read
+    on every call. This used to read the retired PVE_MUTATIONS_ENABLED env
+    var, which migration 0026 replaced; host updates were missed in that
+    move, so Apply Updates refused to run on any install where the toggle
+    was on but the stale env var was false (found live on CRE, 2026-10-01).
+    One source of truth: delegate to pve_write_client rather than duplicate."""
+    from .pve_write_client import _mutations_enabled as _live_switch
+
+    return _live_switch()
 
 
 def sanitize_captured_output(text: str, *, max_chars: int = 4000) -> str:
@@ -260,7 +269,9 @@ class HostMaintenanceClient:
 
     def apply(self) -> dict:
         if not _mutations_enabled():
-            raise MutationsDisabledError("PVE_MUTATIONS_ENABLED is not 'true' -- refusing to apply host updates")
+            raise MutationsDisabledError(
+                "PVE writes are disabled -- refusing to apply host updates. Enable them in Platform \u2192 Settings."
+            )
         return self._run("apply")
 
     def verify(self) -> dict:
