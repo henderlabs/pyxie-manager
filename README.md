@@ -298,8 +298,63 @@ high 60d+).
   **(Historical Data)** in its own title, with a note explaining it
   reflects the last background pass, not the current instant -- unlike
   the Workloads page, which is live.
+
+  How the numbers are chosen (v0.16 onward):
+  - **Window:** running VMs are sized from the last 30 days
+    (`RIGHTSIZING_WINDOW_DAYS`); stopped ones keep their full history.
+    Confidence still counts the *whole* history, so a VM with a year of
+    data is not downgraded because its sizing window is short.
+  - **Peaks use the 99th percentile** (CPU and memory), not the absolute
+    maximum, so one stray sample no longer forces an "increase". The
+    absolute peak is the fallback when no P99 is available.
+  - **Memory "increase" needs real pressure.** PVE's per-VM "used" memory
+    includes the guest's file cache, so healthy cache-heavy VMs read
+    95-98%. An increase is only suggested when the guest is also swapping
+    in (at least 256 MiB/day over at least 7 of the last 14 days,
+    from `workload_mem_pressure`); otherwise the row shows a note
+    ("gathering memory-pressure data (N of 7 days)" or "high usage is
+    file cache"). Containers keep the usage-only rule.
+  - **Host-only VMs** (no balloon/guest memory stats) are not assessed
+    for memory at all, because their memory figure is the host-side
+    process size, not usage.
+  - The table also shows a live "now" reading beside the historical peak.
 - **Capacity** (`shared/pyxie_core/capacity.py`): allocated vs. observed
   per node/cluster, busiest node, most-constrained resource.
+
+## Memory readings and ballooning
+
+What the RAM columns show, and why it can differ from PVE:
+
+- **Source of truth is PVE's cluster resources feed** (`cluster/resources`,
+  the same figure as the VM's Summary screen and the Datacenter table),
+  *not* the per-node VM list, whose `mem` is the host-side process size for
+  ballooned VMs. A worker thread (`live_memory_loop`, every 30 s) writes it
+  to `workload_live_mem`; readings older than 3 minutes are ignored and the
+  history-based figure is the fallback. A flapping reading keeps the last
+  good value.
+- **Ballooning decides whether that figure means anything.** With the
+  memory balloon device present, PVE asks the guest what it uses (what
+  Windows Task Manager shows). With `balloon: 0` the device is removed and
+  PVE falls back to the host process size, which is close to 100% for any
+  VM that has touched its RAM. Such a VM is marked **host-only**
+  (`workloads.mem_guest_stats = false`): its meter is shown muted with a
+  tooltip, and it is excluded from memory rightsizing.
+- **Ballooning column.** The Workloads table and the pInfo report show
+  `Off`, `Pending` (configured, but a running VM still reports no guest
+  stats) or `On` with the guest minimum. State logic lives in
+  `shared/pyxie_core/balloon.py`. pHealth adds two checks: **Ballooning
+  off** (warning) and **Ballooning not active yet** (info).
+- **The balloon device cannot be hot-added.** A change made to a running VM
+  is held by PVE as a *pending* change that applies at its next start or
+  PVE-initiated reboot -- a restart from inside the guest does not apply
+  it. Stopped VMs take the change immediately.
+- **Enabling it.** `ops/set_vm_balloon.py` (dry run by default; run inside
+  the API container) sets the minimum as a fraction of the VM's memory
+  (`--fraction`, default 0.5) or as memory minus N MiB (`--below-max-mb`,
+  for databases you do not want starved); the maximum is never changed.
+  It goes through the PVE-writes switch and writes a
+  `workload.balloon_configured` audit event. A PyXie action on the VM page
+  is on the wish list.
 
 ## Protection subsystem
 
@@ -342,6 +397,30 @@ wrapper installed on each node (a separate SSH trust model, one keypair per
 PVE target, but installed and host-key-pinned per node). Everything else in
 this section works from the PVE API tokens alone. See step 7 of
 [`docs/adding-a-host.md`](docs/adding-a-host.md).
+
+**Plans see their own earlier moves.** A batch plan (Balance Load, Bulk
+Migrate, evacuation, full maintenance) is built one VM at a time against a
+running tally of what the plan has already committed. The tally carries the
+memory added to each destination *and* where each VM has been planned to
+go (`placement.note_planned_move`, `PLANNED_KEY`), so PyXie affinity rules
+and RAM headroom are evaluated against the plan, not just against today's
+placement. Before v0.18.3 only memory was tracked, so a hard keep-apart
+rule could not stop a plan sending both databases to the same empty node.
+Each move is still re-checked, against live state, when it actually runs.
+
+**Verify asks PVE, not the inventory.** The stage that confirms a node is
+empty before it enters maintenance mode (and before a maintenance run
+reboots it) counts running guests with a live PVE query
+(`node_maintenance_workflow.running_on_node_live`), falling back to the
+inventory only if PVE cannot be read. The inventory can lag a finished
+migration by up to one cycle and used to fail a fully evacuated node.
+
+Operational procedure: [`docs/patching-a-node.md`](docs/patching-a-node.md).
+
+The Tasks panel (right side of every page) shows, for each operation,
+when it started (or was requested) and who initiated and approved it.
+Queued plan steps show the requester and the time they were queued, so a
+stuck queue is visible.
 
 The Workloads page has a paginated, searchable table (matching the same
 search logic as the Maintenance page's VM picker) and a quick single-VM
@@ -407,6 +486,11 @@ moves to the destination.
 - **Rightsizing cache:** `rightsizing_cache` -- a singleton row (same
   pattern as `app_settings`) holding the last background pass's full
   assessment set, so the Rightsizing page never recomputes on request.
+- **Memory telemetry:** `workload_mem_pressure` (guest swap-in/out and
+  fault counters, sampled about every 4 minutes, pruned after 90 days),
+  `workload_live_mem` (latest live guest memory reading per VM, refreshed
+  every 30 s); `workloads.mem_guest_stats`, `mem_used_bytes`,
+  `mem_host_bytes`; `workload_configs.balloon_mb` (0 = no balloon device).
 - **Placement:** `placement_affinity_rules` (PyXie-level keep-together/
   keep-apart, independent of PVE's own HA affinity), node performance/
   trust tiers (stored as `policies` rows), `workloads.preferred_node_id`
