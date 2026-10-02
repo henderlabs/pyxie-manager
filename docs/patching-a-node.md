@@ -48,6 +48,32 @@ patching wrapper installed and its host key pinned.
 A *Full Maintenance* run chains all of these; the staged form above is
 easier to stop and was used on live workloads.
 
+## When a VM is locked
+
+The preview lists any VM that has a PVE `lock` as blocked, and the plan
+cannot be approved until it is cleared. A `backup` lock clears itself when
+the backup finishes: wait, then preview again. A `snapshot`,
+`snapshot-delete` or `rollback` lock that does not clear usually means an
+interrupted snapshot operation left it behind (for example a backup
+product's snapshot that was removed from the disk but never from the VM's
+config). On the VM's node, as root:
+
+1. Make sure nothing is working on it: there should be no active task for
+   that VM (Node > Tasks, or `pvesh get /nodes/<node>/tasks --source active`).
+2. If the snapshot is still listed in `qm listsnapshot <vmid>`, check
+   whether it really exists in the disk file:
+   `qemu-img snapshot -l -U /mnt/pve/<storage>/images/<vmid>/<disk>.qcow2`
+   (`-U` allows reading a disk that is in use). An empty list means the
+   entry in the config is stale.
+3. Clear the lock and remove the stale entry in one go. A failed delete
+   re-takes the lock, so unlock immediately before it:
+   `qm unlock <vmid> && qm delsnapshot <vmid> <snapname> --force`
+   (`--force` only drops the config entry and is safe once step 2 shows the
+   disk has no such snapshot; if the disk still has the snapshot, run
+   `qm delsnapshot` without `--force` first so it is merged).
+4. Check `qm listsnapshot <vmid>` and `qm config <vmid> | grep -E "lock|parent"`
+   are clean, then preview again.
+
 ## Things to know
 
 - **A failed operation cannot be resumed.** Start a new one (for example,
