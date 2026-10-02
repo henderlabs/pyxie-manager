@@ -586,6 +586,7 @@ def _upsert_workload(db: Session, cluster: Cluster, node: Node, data: dict, wtyp
     wl.status = data.get("status", "unknown")
     wl.cpu_cores = data.get("cpus")
     wl.memory_bytes = data.get("maxmem")
+    wl.mem_used_bytes = data.get("mem") if wl.status == "running" else None
     if os_type is not None:
         wl.os_type = os_type
     tags = data.get("tags")

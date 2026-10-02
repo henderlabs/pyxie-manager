@@ -63,24 +63,14 @@ export function RadialGauge({
 
 export function Meter({ value, width = 88, hostOnly = false }: { value: number | null; width?: number; hostOnly?: boolean }) {
   const pct = value === null ? 0 : Math.min(Math.max(value, 0), 100);
-  if (hostOnly && value !== null) {
-    // PVE gives no guest memory stats for this VM: the number is the host-side
-    // size of its QEMU process (~100%), not usage. Muted, not alarm-coloured.
-    return (
-      <div
-        className="flex items-center gap-2"
-        title={`PVE reports only host-side memory for this VM (${Math.round(value)}% of its allocation) -- it provides no guest memory stats, so this is not a real usage reading. Enable the balloon device and guest agent for a true figure.`}
-      >
-        <div className="h-1.5 rounded-full bg-border overflow-hidden shrink-0" style={{ width }}>
-          <div className="h-full rounded-full opacity-40" style={{ width: `${pct}%`, backgroundColor: "#6b7280" }} />
-        </div>
-        <span className="text-xs text-muted tabular-nums w-9 text-right italic">host</span>
-      </div>
-    );
-  }
   const color = colorForPct(value);
+  // Always the same number PVE's summary screen shows. For the few VMs that give PVE no
+  // guest memory stats, PVE itself reports the host-side figure; say so on hover only.
+  const tip = hostOnly
+    ? "PVE reports host-side memory for this VM (no balloon/guest-agent memory stats), so this matches PVE's summary but is not a guest-level reading."
+    : undefined;
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" title={tip}>
       <div className="h-1.5 rounded-full bg-border overflow-hidden shrink-0" style={{ width }}>
         <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
       </div>

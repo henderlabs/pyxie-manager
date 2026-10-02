@@ -398,7 +398,7 @@ export default function WorkloadLifecycleForm({
             {
               header: "RAM",
               render: (w) => <Meter value={metrics[w.id]?.mem_pct ?? null} width={56} hostOnly={metrics[w.id]?.mem_source === "host"} />,
-              sortValue: (w) => (metrics[w.id]?.mem_source === "host" ? undefined : metrics[w.id]?.mem_pct),
+              sortValue: (w) => metrics[w.id]?.mem_pct,
             },
             {
               header: "Storage",
