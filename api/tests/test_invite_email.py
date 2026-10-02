@@ -44,3 +44,36 @@ def test_multipart_message_carries_both_parts():
     parsed = email.message_from_string(msg.as_string(), policy=policy.default)
     kinds = [p.get_content_type() for p in parsed.iter_parts()]
     assert kinds == ["text/plain", "text/html"]
+
+
+def test_logo_is_referenced_by_cid_and_the_file_ships():
+    from pyxie_core.invite_email import LOGO_CID, logo_bytes
+    h = invite_email_html(LINK, 7)
+    assert f'src="cid:{LOGO_CID}"' in h and 'alt="PyXie Proxmox Operations"' in h
+    assert logo_bytes()[:8] == b"\x89PNG\r\n\x1a\n" and len(logo_bytes()) < 150_000
+
+
+def test_send_email_builds_alternative_with_related_image(monkeypatch):
+    import smtplib
+    from types import SimpleNamespace
+    from pyxie_core import mail
+    sent = {}
+
+    class FakeSMTP:
+        def __init__(self, *a, **k): pass
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def starttls(self): pass
+        def login(self, *a): pass
+        def sendmail(self, frm, to, raw): sent["raw"] = raw
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    s = SimpleNamespace(smtp_host="h", smtp_port=25, smtp_from_address="a@b", smtp_use_tls=False, smtp_username=None, smtp_encrypted_password=None)
+    from pyxie_core.invite_email import LOGO_CID, logo_bytes
+    mail.send_email(s, "c@d", "subj", invite_email_text(LINK, 7), html=invite_email_html(LINK, 7), inline_images={LOGO_CID: logo_bytes()})
+    parsed = email.message_from_string(sent["raw"], policy=policy.default)
+    assert parsed.get_content_type() == "multipart/alternative"
+    first, second = list(parsed.iter_parts())
+    assert first.get_content_type() == "text/plain" and second.get_content_type() == "multipart/related"
+    kinds = [p.get_content_type() for p in second.iter_parts()]
+    assert kinds == ["text/html", "image/png"]
+    assert list(second.iter_parts())[1]["Content-ID"] == f"<{LOGO_CID}>"

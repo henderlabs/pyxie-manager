@@ -1,4 +1,5 @@
 import smtplib
+from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -9,7 +10,10 @@ class SmtpNotConfigured(Exception):
     """Raised when a send is attempted without a host/from-address set."""
 
 
-def send_email(settings, to_address: str, subject: str, body: str, html: str | None = None) -> None:
+def send_email(
+    settings, to_address: str, subject: str, body: str, html: str | None = None,
+    inline_images: dict[str, bytes] | None = None,
+) -> None:
     """Send one email (plain text, plus an HTML alternative when `html` is given) using the SMTP settings stored on an
     AppSettings row. Raises on any failure (unreachable host, auth
     rejected, etc.) -- callers decide how to report it, e.g. the
@@ -21,7 +25,19 @@ def send_email(settings, to_address: str, subject: str, body: str, html: str | N
     if html:
         msg = MIMEMultipart("alternative")
         msg.attach(MIMEText(body, "plain"))  # clients that cannot show HTML fall back to this
-        msg.attach(MIMEText(html, "html"))
+        if inline_images:
+            # html + the images it references by cid:, as one "related" part, so the
+            # pictures travel inside the message instead of being fetched from a server
+            related = MIMEMultipart("related")
+            related.attach(MIMEText(html, "html"))
+            for cid, data in inline_images.items():
+                img = MIMEImage(data, _subtype="png")
+                img.add_header("Content-ID", f"<{cid}>")
+                img.add_header("Content-Disposition", "inline", filename=f"{cid}.png")
+                related.attach(img)
+            msg.attach(related)
+        else:
+            msg.attach(MIMEText(html, "html"))
     else:
         msg = MIMEText(body)
     msg["Subject"] = subject
