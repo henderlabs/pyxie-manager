@@ -40,6 +40,7 @@ wastes allocation on smaller hosts).
 
 from sqlalchemy import func
 
+from .mem_pressure import memory_pressure_verdict, pressure_summaries, pressure_summary_one
 from .metrics import confidence_for_observation_days, observation_days, observation_stats, observation_stats_batch
 from .models import AppSettings, Operation, Workload
 
@@ -140,12 +141,13 @@ def assess_workload(
     since = _last_resize_completed_at(db, workload.id)
     cpu_stats = observation_stats(db, "workload", workload.id, "cpu_pct", since=since)
     mem_stats = observation_stats(db, "workload", workload.id, "mem_pct", since=since, max_value=MEM_PCT_VALID_MAX)
-    return _compute_assessment(workload, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even)
+    pressure = pressure_summary_one(db, workload.id, since=since)
+    return _compute_assessment(workload, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even, pressure=pressure)
 
 
 def _compute_assessment(
     workload: Workload, cpu_stats: dict, mem_stats: dict, cpu_target_pct: int, mem_target_pct: int,
-    round_vcpu_even: bool = False,
+    round_vcpu_even: bool = False, pressure: dict | None = None,
 ) -> dict:
     days = observation_days(
         min([d for d in (cpu_stats["earliest"], mem_stats["earliest"]) if d], default=None),
@@ -184,6 +186,10 @@ def _compute_assessment(
         # uses. Not assessed -- otherwise every such VM got an "increase
         # memory / at risk of OOM" suggestion.
         "memory_host_only": workload.mem_guest_stats is False,
+        # Why there is no "add memory" suggestion despite high usage ("gathering
+        # memory-pressure data (3 of 7 days)", "high usage is file cache ...").
+        "memory_note": None,
+        "memory_pressure": pressure,
     }
 
     if confidence not in MIN_CONFIDENCE_FOR_ACTION:
@@ -257,16 +263,25 @@ def _compute_assessment(
                 "reason": reason,
             }
         elif suggested_bytes > workload.memory_bytes * 1.05:
-            result["memory_suggestion"] = {
-                "current_bytes": workload.memory_bytes,
-                "suggested_bytes": suggested_bytes,
-                "direction": "increase",
-                "reason": (
-                    f"99th-percentile memory usage {peak_pct}% of allocation over {round(days)}d "
-                    f"(single highest sample {mem_stats['max']}%) "
-                    f"already exceeds the {mem_target_pct}% target -- at risk of swapping/OOM"
-                ),
-            }
+            # PVE's "used" memory counts file cache, so high usage alone does not mean the
+            # guest needs more RAM. For VMs, require evidence of real pressure (sustained
+            # swapping); containers have no such counters and keep the usage-only rule.
+            gate = memory_pressure_verdict(pressure) if workload.type == "vm" else {"state": "pressure", "detail": None}
+            if gate["state"] == "pressure":
+                why = f"; {gate['detail']}" if gate.get("detail") else ""
+                result["memory_suggestion"] = {
+                    "current_bytes": workload.memory_bytes,
+                    "suggested_bytes": suggested_bytes,
+                    "direction": "increase",
+                    "reason": (
+                        f"99th-percentile memory usage {peak_pct}% of allocation over {round(days)}d "
+                        f"(single highest sample {mem_stats['max']}%) "
+                        f"already exceeds the {mem_target_pct}% target and there is real memory pressure"
+                        f"{why} -- at risk of swapping/OOM"
+                    ),
+                }
+            else:
+                result["memory_note"] = gate["note"]
 
     return result
 
@@ -293,16 +308,20 @@ def assess_all_workloads(db) -> list[dict]:
     cpu_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "cpu_pct")
     mem_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "mem_pct", max_value=MEM_PCT_VALID_MAX, with_p99=True)
 
+    pressure_by_id = pressure_summaries(db)
+
     results = []
     for wl in workloads:
         since = since_by_id.get(wl.id)
         if since is None:
             cpu_stats = cpu_batch[wl.id]
             mem_stats = mem_batch[wl.id]
+            pressure = pressure_by_id.get(wl.id)
         else:
             cpu_stats = observation_stats(db, "workload", wl.id, "cpu_pct", since=since)
             mem_stats = observation_stats(db, "workload", wl.id, "mem_pct", since=since, max_value=MEM_PCT_VALID_MAX)
-        results.append(_compute_assessment(wl, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even))
+            pressure = pressure_summary_one(db, wl.id, since=since)
+        results.append(_compute_assessment(wl, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even, pressure=pressure))
     return results
 
 
@@ -327,6 +346,8 @@ def _serialize_assessment(a: dict) -> dict:
         "cpu_suggestion": a["cpu_suggestion"],
         "memory_suggestion": a["memory_suggestion"],
         "memory_host_only": a.get("memory_host_only", False),
+        "memory_note": a.get("memory_note"),
+        "memory_pressure": a.get("memory_pressure"),
     }
 
 

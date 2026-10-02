@@ -290,6 +290,11 @@ class PveClient:
     def qemu_config(self, node: str, vmid: int) -> dict:
         return self._get(f"/nodes/{node}/qemu/{vmid}/config")
 
+    def qemu_status_current(self, node: str, vmid: int) -> dict:
+        """Live per-VM status, including `ballooninfo` (guest free/total memory,
+        cumulative swap-in/out and page-fault counters) when the guest reports it."""
+        return self._get(f"/nodes/{node}/qemu/{vmid}/status/current")
+
     def qemu_snapshots(self, node: str, vmid: int) -> list[dict]:
         return self._get(f"/nodes/{node}/qemu/{vmid}/snapshot") or []
 

@@ -579,6 +579,25 @@ class MetricPoint(Base):
     source = Column(String, nullable=False, default="pve_rrd")
 
 
+class MemPressureSample(Base):
+    """One reading of a VM's guest memory counters (from PVE's ballooninfo), every
+    ~5 minutes. The counters are cumulative since the guest booted, so what matters
+    is the change between samples: a guest that is genuinely short of RAM keeps
+    swapping IN; one whose memory is merely full of file cache does not. This is
+    the evidence Rightsizing needs before it tells anyone to add memory, because
+    PVE's "used" memory includes that cache (migration 0037)."""
+
+    __tablename__ = "workload_mem_pressure"
+
+    workload_id = Column(UUID(as_uuid=True), ForeignKey("workloads.id", ondelete="CASCADE"), primary_key=True)
+    sampled_at = Column(DateTime(timezone=True), primary_key=True)
+    swapped_in_bytes = Column(BigInteger, nullable=False, default=0)
+    swapped_out_bytes = Column(BigInteger, nullable=False, default=0)
+    major_faults = Column(BigInteger, nullable=False, default=0)
+    free_bytes = Column(BigInteger, nullable=True)
+    total_bytes = Column(BigInteger, nullable=True)
+
+
 # ---------------------------------------------------------------------------
 # Findings -- an observed condition, not necessarily a recommendation.
 # ---------------------------------------------------------------------------
