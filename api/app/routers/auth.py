@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from pyxie_core.audit import write_audit_event
 from pyxie_core.auth import generate_session_token, hash_password, session_expiry, verify_password
+from pyxie_core.invite_email import invite_email_html, invite_email_text
 from pyxie_core.mail import send_email
 from pyxie_core.models import AppSettings, Session as SessionModel, User
 
@@ -224,7 +225,8 @@ def _send_invite_email(db: Session, user: User, base_url: str | None, *, actor: 
             settings,
             user.email,
             subject="You've been invited to PyXie",
-            body=f"You've been invited to PyXie Manager. Set up your account:\n\n{link}\n\nThis link expires in {INVITE_TTL_DAYS} days and works once.",
+            body=invite_email_text(link, INVITE_TTL_DAYS),
+            html=invite_email_html(link, INVITE_TTL_DAYS),
         )
     except Exception as e:
         write_audit_event(
