@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from . import host_update_workflow, lifecycle_workflow, reboot_workflow
 from .locks import LockContention, acquire_lock, release_locks_for_operation
-from .maintenance import _quorum_after_removal, _has_pci_passthrough, _qemu_config
+from .maintenance import _quorum_after_removal, _has_pci_passthrough, _qemu_config, vm_lock_reason
 from .migration_workflow import (
     MigrationWorkflowError,
     approve as approve_migration,
@@ -131,6 +131,10 @@ def dry_run_maintenance(
                 if _has_pci_passthrough(config):
                     blocked_workloads.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
                                                "reasons": ["PCI/device passthrough -- no safe automated path"]})
+                    continue
+                lock_reason = vm_lock_reason(wl.vmid, config)
+                if lock_reason:
+                    blocked_workloads.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "reasons": [lock_reason]})
                     continue
                 ranked = recommend_destinations(db, client, wl, candidates_all, simulated_added_bytes=simulated_added_bytes)
                 ranked = rank_with_simulated_load(ranked, nodes_by_id, simulated_added_bytes)

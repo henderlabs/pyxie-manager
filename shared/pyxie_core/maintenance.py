@@ -89,6 +89,28 @@ def _qemu_config(client, node_name: str, wl: Workload) -> dict | None:
         return None
 
 
+def vm_lock_reason(vmid, config: dict | None) -> str | None:
+    """Why a VM that PVE has LOCKED cannot be migrated, or None if it is not locked.
+
+    PVE refuses to migrate a locked VM, so a plan that includes one fails partway
+    (m402, 2026-10-02: a Commvault snapshot-delete lock left stale for a day stopped
+    an evacuation at VM 209 after 18 VMs had already moved). Flagging it in the
+    preview lets the operator clear it first."""
+    lock = (config or {}).get("lock")
+    if not lock:
+        return None
+    base = f"VM is locked ({lock}) -- PVE refuses to migrate a locked VM"
+    if lock == "backup":
+        return f"{base}. A backup is running: wait for it to finish, then preview again."
+    if lock in ("snapshot", "snapshot-delete", "rollback"):
+        return (
+            f"{base}. An interrupted snapshot operation usually leaves this behind. If no PVE task is running for "
+            f"this VM, run `qm unlock {vmid}` on its node (then delete the leftover snapshot if it is no longer needed) "
+            "and preview again."
+        )
+    return f"{base}. Wait for the task holding it to finish, or if none is running run `qm unlock {vmid}` on its node, then preview again."
+
+
 def _has_pci_passthrough(config: dict | None) -> bool | None:
     if config is None:
         return None

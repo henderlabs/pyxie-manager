@@ -24,7 +24,7 @@ from . import lifecycle_workflow
 from .credentials import CredentialNotConfigured, HostNotAddressable, load_host_maintenance_credentials
 from .host_maintenance_client import HostMaintenanceClient, HostMaintenanceConnectionError, HostMaintenanceProtocolError
 from .locks import LockContention, acquire_lock, release_locks_for_operation
-from .maintenance import _has_pci_passthrough, _qemu_config, _quorum_after_removal
+from .maintenance import _has_pci_passthrough, _qemu_config, _quorum_after_removal, vm_lock_reason
 from .migration_workflow import (
     MigrationWorkflowError,
     approve as approve_migration,
@@ -157,6 +157,10 @@ def dry_run_enter_maintenance(db: Session, node: Node, *, actor: str, reason: st
                 if _has_pci_passthrough(config):
                     blocked_workloads.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
                                                "reasons": ["PCI/device passthrough -- no safe automated path"]})
+                    continue
+                lock_reason = vm_lock_reason(wl.vmid, config)
+                if lock_reason:
+                    blocked_workloads.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "reasons": [lock_reason]})
                     continue
                 ranked = recommend_destinations(db, client, wl, candidates_all, simulated_added_bytes=simulated_added_bytes)
                 ranked = rank_with_simulated_load(ranked, nodes_by_id, simulated_added_bytes)
