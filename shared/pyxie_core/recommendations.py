@@ -14,6 +14,7 @@ from .capacity import compute_capacity
 from .discovery import build_pve_client
 from .models import Cluster, Node, PveTarget, Recommendation, Workload
 from .placement import (
+    note_planned_move,
     current_storage_name,
     get_cluster_storage_preference,
     is_currently_on_shared_storage,
@@ -306,7 +307,7 @@ def _placement_recommendations(db: Session, source_node_ids: set | None = None) 
                 if improvement < PLACEMENT_IMPROVEMENT_THRESHOLD:
                     continue
 
-                simulated_added_bytes[best.node_id] = simulated_added_bytes.get(best.node_id, 0) + (wl.memory_bytes or 0)
+                note_planned_move(simulated_added_bytes, wl, best.node_id)
 
                 # Storage decision, same source of truth every other
                 # migration path (evacuation, maintenance, the manual "Move

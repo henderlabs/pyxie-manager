@@ -36,6 +36,7 @@ from .discovery import build_pve_client
 from .maintenance import _has_pci_passthrough, _qemu_config
 from .models import Cluster, PveTarget
 from .placement import (
+    note_planned_move,
     current_storage_name,
     get_cluster_storage_preference,
     is_currently_on_shared_storage,
@@ -208,7 +209,7 @@ def dry_run_bulk_migrate(
                         continue
 
                 destination = nodes_by_id[pick.node_id]
-                simulated_added_bytes[destination.id] = simulated_added_bytes.get(destination.id, 0) + (wl.memory_bytes or 0)
+                note_planned_move(simulated_added_bytes, wl, destination.id)
                 currently_on_shared = is_currently_on_shared_storage(client, src, wl, db)
                 current_storage = current_storage_name(client, src, wl)
                 effective_pref = wl.storage_preference or get_cluster_storage_preference(db, cluster.id)

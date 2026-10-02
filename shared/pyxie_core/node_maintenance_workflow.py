@@ -42,7 +42,7 @@ from .operations_engine import (
     enter_stage,
     fail_operation,
 )
-from .placement import current_storage_name, get_cluster_storage_preference, is_currently_on_shared_storage, rank_with_simulated_load, recommend_destinations, recommend_storage_for_candidate
+from .placement import note_planned_move, current_storage_name, get_cluster_storage_preference, is_currently_on_shared_storage, rank_with_simulated_load, recommend_destinations, recommend_storage_for_candidate
 from .discovery import build_pve_client
 
 
@@ -163,7 +163,7 @@ def dry_run_enter_maintenance(db: Session, node: Node, *, actor: str, reason: st
                 top = next((c for c in ranked if not c.blocked), None)
                 if top:
                     destination_node = db.query(Node).filter(Node.id == top.node_id).one()
-                    simulated_added_bytes[destination_node.id] = simulated_added_bytes.get(destination_node.id, 0) + (wl.memory_bytes or 0)
+                    note_planned_move(simulated_added_bytes, wl, destination_node.id)
                     currently_on_shared = is_currently_on_shared_storage(client, node, wl, db)
                     current_storage = current_storage_name(client, node, wl)
                     effective_pref = wl.storage_preference or get_cluster_storage_preference(db, cluster.id)
