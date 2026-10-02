@@ -178,7 +178,35 @@ def _partner_workload_ids(db: Session, rule: PlacementAffinityRule, workload: Wo
     return {str(w.id) for w in partners if w.tags and rule.tag in w.tags}
 
 
-def evaluate_affinity(db: Session, workload: Workload, candidate_node: Node) -> tuple[bool, list[str], float]:
+# Reserved key inside the batch's `simulated_added_bytes` tally that carries the
+# placements already decided EARLIER IN THE SAME PLAN ({workload_id: node_id}), so
+# affinity rules see them too. Without it every item was checked against where
+# things are TODAY, and a hard keep-apart rule still let a plan send both
+# databases to the same empty node (CRE-QADB2 + CRE-StgDB2 -> m401, 2026-10-02).
+PLANNED_KEY = "__planned_placements__"
+
+
+def note_planned_move(simulated_added_bytes: dict, workload, node_id) -> None:
+    """Record a planned move: memory debited from the destination AND the
+    workload's new location for affinity checks."""
+    simulated_added_bytes[node_id] = simulated_added_bytes.get(node_id, 0) + (workload.memory_bytes or 0)
+    simulated_added_bytes.setdefault(PLANNED_KEY, {})[str(workload.id)] = str(node_id)
+
+
+def residents_with_planned(resident_ids: set, planned: dict | None, candidate_node_id) -> set:
+    """Who will be on `candidate_node_id` once the already-planned moves happen."""
+    out = set(resident_ids)
+    for wid, nid in (planned or {}).items():
+        if str(nid) == str(candidate_node_id):
+            out.add(str(wid))
+        else:
+            out.discard(str(wid))
+    return out
+
+
+def evaluate_affinity(
+    db: Session, workload: Workload, candidate_node: Node, planned: dict | None = None
+) -> tuple[bool, list[str], float]:
     """Returns (blocked, reasons, soft_score_delta) for placing `workload` on
     `candidate_node`, given every affinity rule referencing it."""
     rules = _affinity_rules_for_workload(db, workload)
@@ -189,6 +217,7 @@ def evaluate_affinity(db: Session, workload: Workload, candidate_node: Node) -> 
         str(w.id)
         for w in db.query(Workload).filter(Workload.node_id == candidate_node.id, Workload.is_missing.is_(False)).all()
     }
+    resident_ids = residents_with_planned(resident_ids, planned, candidate_node.id)
 
     blocked = False
     reasons: list[str] = []
@@ -300,7 +329,7 @@ def recommend_destinations(
             )
 
         # -- PyXie affinity rules --
-        aff_blocked, aff_reasons, aff_score = evaluate_affinity(db, workload, node)
+        aff_blocked, aff_reasons, aff_score = evaluate_affinity(db, workload, node, (simulated_added_bytes or {}).get(PLANNED_KEY))
         if aff_blocked:
             blocked = True
         blocking_reasons.extend(r for r in aff_reasons if r.startswith("BLOCKED"))
@@ -447,7 +476,7 @@ def rescore_migrate_plan(db: Session, migrate_plan: list[dict]) -> list[dict]:
                 dest_id = item.get("destination_node_id")
                 if dest_id:
                     dest_uuid = dest_id if isinstance(dest_id, uuid.UUID) else uuid.UUID(str(dest_id))
-                    simulated_added_bytes[dest_uuid] = simulated_added_bytes.get(dest_uuid, 0) + (workload.memory_bytes or 0)
+                    note_planned_move(simulated_added_bytes, workload, dest_uuid)
                 updated.append(item)
                 continue
 
@@ -487,7 +516,7 @@ def rescore_migrate_plan(db: Session, migrate_plan: list[dict]) -> list[dict]:
                 continue
 
             destination_node = nodes_by_id[top.node_id]
-            simulated_added_bytes[top.node_id] = simulated_added_bytes.get(top.node_id, 0) + (workload.memory_bytes or 0)
+            note_planned_move(simulated_added_bytes, workload, top.node_id)
 
             storage_rec = recommend_storage_for_candidate(
                 db, destination_node.id, bool(item.get("currently_on_shared")), storage_preference=item.get("storage_preference"),
