@@ -70,6 +70,15 @@ undecryptable. Back it up alongside any database dump, outside of git.
 
 ## Email notifications
 
+Account invitations are sent as a multipart message: a plain-text body plus
+an HTML version with the PyXie logo (attached inline, so it needs no
+hosted image), a **Set up your account** button, the expiry, and a
+copy-paste fallback link (`shared/pyxie_core/invite_email.py`,
+`mail.send_email(..., html=..., inline_images=...)`). The link is a
+one-time token that expires after 7 days. Sending is best-effort and
+audited (`auth.invite.emailed`); if SMTP is off the invite is still created
+and the link can be copied by hand.
+
 **Where:** Platform -> Settings -> Notifications. The email server (SMTP)
 settings live on the `AppSettings` singleton and are configured on that
 page; the stored password is never returned in plaintext (`smtp_password_set`
@@ -414,6 +423,14 @@ reboots it) counts running guests with a live PVE query
 (`node_maintenance_workflow.running_on_node_live`), falling back to the
 inventory only if PVE cannot be read. The inventory can lag a finished
 migration by up to one cycle and used to fail a fully evacuated node.
+
+**Locked VMs are caught in the preview.** PVE refuses to migrate a VM that
+has a `lock` in its config (a running backup, or the stale remains of an
+interrupted snapshot). The Enter Maintenance, Full Maintenance and
+evacuation previews read each running VM's config and list any locked VM as
+blocked (`maintenance.vm_lock_reason`), with the lock type and the fix, so
+the plan cannot be approved only to fail partway through (m402, 2026-10-02:
+a Commvault snapshot-delete lock stopped an evacuation after 18 moves).
 
 Operational procedure: [`docs/patching-a-node.md`](docs/patching-a-node.md).
 
