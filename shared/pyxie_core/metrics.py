@@ -501,6 +501,22 @@ def latest_workload_metrics(db: Session) -> dict[str, dict]:
     for (object_id,) in stopped_ids:
         out[str(object_id)] = {"cpu_pct": 0, "mem_pct": 0}
 
+    # Ballooning on/off (from the VM config), so the tables can show it next to RAM.
+    from .balloon import balloon_state
+    from .models import WorkloadConfig
+
+    for wid, wtype, status, guest, bmb in (
+        db.query(Workload.id, Workload.type, Workload.status, Workload.mem_guest_stats, WorkloadConfig.balloon_mb)
+        .outerjoin(WorkloadConfig, WorkloadConfig.workload_id == Workload.id)
+        .filter(Workload.is_missing.is_(False), Workload.type == "vm")
+        .all()
+    ):
+        state = balloon_state(wtype, status, bmb, guest)
+        if state is not None:
+            entry = out.setdefault(str(wid), {})
+            entry["ballooning"] = state
+            entry["balloon_min_mb"] = bmb
+
     return out
 
 

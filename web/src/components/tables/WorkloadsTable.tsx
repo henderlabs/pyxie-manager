@@ -17,7 +17,7 @@ import { CpuIcon, MemoryIcon } from "@/components/Icons";
 import { findingWorkloadIds } from "@/lib/findings";
 import { useMe } from "@/lib/useMe";
 
-type WorkloadMetric = { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host" };
+type WorkloadMetric = { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host"; ballooning?: "on" | "off" | "pending"; balloon_min_mb?: number | null };
 
 /** Throws on a failed save instead of resolving silently -- every select
  * below (and the Notes cell) relies on this to know a PATCH didn't
@@ -384,6 +384,26 @@ export default function WorkloadsTable({
           tooltip: "Live, as of the last poll (every 5s) -- distinct from the RAM column, which is the configured allocation, not actual usage.",
           render: (w) => <Meter value={metrics[w.id]?.mem_pct ?? null} width={56} hostOnly={metrics[w.id]?.mem_source === "host"} />,
           sortValue: (w) => metrics[w.id]?.mem_pct,
+        },
+        {
+          header: "Ballooning",
+          tooltip:
+            "Whether the VM has the memory-balloon device. Off: PVE cannot see the guest's real memory use, so RAM Usage shows the host-side size (often ~100%). Pending: configured, takes effect after a power-cycle through PVE (not a restart from inside the guest). The number is the guest minimum.",
+          render: (w) => {
+            const m = metrics[w.id];
+            if (w.type !== "vm" || !m?.ballooning) return <span className="text-muted">—</span>;
+            if (m.ballooning === "off")
+              return <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-500/15 text-red-600 dark:text-red-400">Off</span>;
+            const min = m.balloon_min_mb ? `min ${formatBytes(m.balloon_min_mb * 1048576)}` : "";
+            return m.ballooning === "pending" ? (
+              <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-amber-500/15 text-amber-600 dark:text-amber-400" title="Configured, not active until the VM is power-cycled through PVE">
+                Pending {min}
+              </span>
+            ) : (
+              <span className="text-xs text-muted whitespace-nowrap">On {min}</span>
+            );
+          },
+          sortValue: (w) => metrics[w.id]?.ballooning,
         },
         {
           header: "vCPU",

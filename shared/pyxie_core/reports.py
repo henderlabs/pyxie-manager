@@ -17,6 +17,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from .balloon import balloon_label, balloon_state
 from .models import (
     Cluster,
     Finding,
@@ -173,6 +174,7 @@ VINFO = [
     Col("cores_per_socket", "Cores / socket", "int", hidden=True),
     Col("cpu_type", "CPU type", hidden=True),
     Col("memory_mb", "Memory (MiB)", "int"),
+    Col("ballooning", "Ballooning"),
     Col("disk_count", "Disks", "int"),
     Col("provisioned_gib", "Provisioned (GiB)", "num"),
     Col("nic_count", "NICs", "int"),
@@ -220,6 +222,11 @@ def build_vinfo(db: Session, scope: Scope) -> list[dict]:
                 "cores_per_socket": cfg.cores_per_socket if cfg else None,
                 "cpu_type": cfg.cpu_type if cfg else None,
                 "memory_mb": cfg.memory_mb if cfg and cfg.memory_mb else (w.memory_bytes // MIB if w.memory_bytes else None),
+                "ballooning": balloon_label(
+                    balloon_state(w.type, w.status, cfg.balloon_mb, w.mem_guest_stats) if cfg else None,
+                    cfg.balloon_mb if cfg else None,
+                    cfg.memory_mb if cfg else None,
+                ),
                 "disk_count": len(disks) if cfg else None,
                 "provisioned_gib": _gib(sum(d.size_bytes or 0 for d in disks)) if cfg else None,
                 "nic_count": len(ctx["nics"].get(w.id, [])) if cfg else None,
@@ -587,6 +594,12 @@ def build_vhealth(db: Session, scope: Scope) -> list[dict]:
                 add("warning", "Guest agent not responding", detail="Agent is enabled but did not answer (agent not running in the guest, or guest not ready)", **who)
             elif cfg.agent_enabled is False:
                 add("info", "Guest agent not enabled", detail="No guest agent: IPs unavailable and graceful shutdown relies on ACPI", **who)
+        if cfg is not None and w.type == "vm":
+            bstate = balloon_state(w.type, w.status, cfg.balloon_mb, w.mem_guest_stats)
+            if bstate == "off":
+                add("warning", "Ballooning off", detail="No memory balloon device: PVE cannot see the guest's real memory use and shows the host-side size (often ~100%). Set a balloon minimum, then power-cycle the VM", **who)
+            elif bstate == "pending":
+                add("info", "Ballooning not active yet", detail="Ballooning is configured but PVE reports no guest memory stats: power-cycle the VM through PVE (a restart from inside the guest does not apply it), or install the balloon driver in the guest", **who)
         if cfg is not None and (now - cfg.collected_at).total_seconds() > DETAIL_STALE_HOURS * 3600:
             add("warning", "Details out of date", detail=f"Config/disk/NIC details last collected {cfg.collected_at:%Y-%m-%d %H:%M} UTC", since=cfg.collected_at, **who)
 
