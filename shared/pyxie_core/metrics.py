@@ -221,7 +221,7 @@ def observation_stats(
 
 def observation_stats_batch(
     db: Session, object_type: str, object_ids: list, metric: str, max_value: float | None = None,
-    with_p99: bool = False,
+    with_p99: bool = False, window_days: int | None = None,
 ) -> dict:
     """Batched version of observation_stats() for the common case (no
     per-object `since`/`window_days` cutoff) -- rightsizing's real bottleneck
@@ -259,6 +259,13 @@ def observation_stats_batch(
     empty = {"avg": None, "p95": None, "p99": None, "max": None, "sample_count": 0, "earliest": None, "latest": None}
     out = {oid: dict(empty) for oid in object_ids}
 
+    # Extra row filters shared by the aggregate and the per-object percentile probes.
+    extra = []
+    if max_value is not None:
+        extra.append(MetricPoint.value <= max_value)
+    if window_days:
+        extra.append(MetricPoint.sampled_at >= datetime.now(timezone.utc) - timedelta(days=window_days))
+
     agg_rows = (
         db.query(
             MetricPoint.object_id,
@@ -273,7 +280,7 @@ def observation_stats_batch(
             MetricPoint.object_id.in_(object_ids),
             MetricPoint.metric == metric,
             MetricPoint.value.isnot(None),
-            *(() if max_value is None else (MetricPoint.value <= max_value,)),
+            *extra,
         )
         .group_by(MetricPoint.object_id)
         .all()
@@ -301,7 +308,7 @@ def observation_stats_batch(
                 MetricPoint.object_id == object_id,
                 MetricPoint.metric == metric,
                 MetricPoint.value.isnot(None),
-                *(() if max_value is None else (MetricPoint.value <= max_value,)),
+                *extra,
             )
             .order_by(MetricPoint.value)
             .offset(rank0)
@@ -320,7 +327,7 @@ def observation_stats_batch(
                     MetricPoint.object_id == object_id,
                     MetricPoint.metric == metric,
                     MetricPoint.value.isnot(None),
-                    *(() if max_value is None else (MetricPoint.value <= max_value,)),
+                    *extra,
                 )
                 .order_by(MetricPoint.value)
                 .offset(rank99)
@@ -331,6 +338,29 @@ def observation_stats_batch(
                 stats["p99"] = round(p99, 1)
 
     return out
+
+
+_SPAN_SQL = """
+SELECT w.id,
+       (SELECT sampled_at FROM metric_points WHERE object_type = 'workload' AND object_id = w.id AND metric = 'cpu_pct'
+        ORDER BY sampled_at ASC LIMIT 1) AS first_at,
+       (SELECT sampled_at FROM metric_points WHERE object_type = 'workload' AND object_id = w.id AND metric = 'cpu_pct'
+        ORDER BY sampled_at DESC LIMIT 1) AS last_at
+FROM workloads w WHERE NOT w.is_missing {only}
+"""
+
+
+def observation_span_batch(db: Session) -> dict:
+    """workload id -> (first sample, last sample) over ALL history (two indexed
+    probes per workload). Rightsizing sizes on a recent window but still needs the
+    full span to decide how confident it can be."""
+    rows = db.execute(text(_SPAN_SQL.format(only=""))).all()
+    return {r.id: (r.first_at, r.last_at) for r in rows}
+
+
+def observation_span_one(db: Session, workload_id):
+    row = db.execute(text(_SPAN_SQL.format(only="AND w.id = :wid")), {"wid": workload_id}).first()
+    return (row.first_at, row.last_at) if row else (None, None)
 
 
 def observation_days(earliest, latest) -> float:

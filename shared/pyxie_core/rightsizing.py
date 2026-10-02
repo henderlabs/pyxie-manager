@@ -41,7 +41,10 @@ wastes allocation on smaller hosts).
 from sqlalchemy import func
 
 from .mem_pressure import memory_pressure_verdict, pressure_summaries, pressure_summary_one
-from .metrics import confidence_for_observation_days, observation_days, observation_stats, observation_stats_batch
+from .metrics import (
+    confidence_for_observation_days, observation_days, observation_span_batch, observation_span_one,
+    observation_stats, observation_stats_batch,
+)
 from .models import AppSettings, Operation, Workload
 
 MIN_CONFIDENCE_FOR_ACTION = {"moderate", "high"}
@@ -125,41 +128,52 @@ def _rightsizing_settings(db) -> tuple[int, int, bool]:
 # used to drive the "peak memory already exceeds the target" suggestions.
 MEM_PCT_VALID_MAX = 100.0
 
+# Sizing for a running workload looks at this many recent days. A longer history
+# kept old behaviour in the P95/peak forever (PAW-OCabezas showed a 301-day P95 of
+# 96% for a VM that now sits at 33%). Confidence still counts the full history, and
+# a stopped workload keeps showing its whole last-running history.
+RIGHTSIZING_WINDOW_DAYS = 30
+
 
 def assess_workload(
     db, workload: Workload, cpu_target_pct: int, mem_target_pct: int, round_vcpu_even: bool = False
 ) -> dict:
-    """Single-workload path -- still does its own 3 queries (last-resize
-    lookup + 2x observation_stats), used directly wherever just one
-    workload's assessment is needed. assess_all_workloads() below does NOT
-    call this in a loop anymore (that was the real N+1: 130 workloads x ~5
-    queries each = 650+ round trips, confirmed live as a 4+ second cost on
-    cre-pyxie's real fleet size) -- it batches the same three lookups
-    across every workload instead, then calls _compute_assessment() with
-    the results, which is the exact same math this function runs below,
-    shared so the batched path can't silently drift from this one."""
+    """Single-workload path (assess_all_workloads batches the same lookups and runs
+    the identical _compute_assessment math)."""
     since = _last_resize_completed_at(db, workload.id)
-    cpu_stats = observation_stats(db, "workload", workload.id, "cpu_pct", since=since)
+    window = RIGHTSIZING_WINDOW_DAYS if workload.status == "running" else None
+    cpu_stats = observation_stats(db, "workload", workload.id, "cpu_pct", since=since, window_days=window)
     # VMs with no guest memory stats are never assessed for memory, so show their real
     # (host-side, possibly >100%) numbers exactly as PVE reports them; the >100% filter
     # only protects the sizing math for VMs that DO have guest stats.
     mem_stats = observation_stats(
-        db, "workload", workload.id, "mem_pct", since=since,
+        db, "workload", workload.id, "mem_pct", since=since, window_days=window,
         max_value=None if workload.mem_guest_stats is False else MEM_PCT_VALID_MAX,
     )
     pressure = pressure_summary_one(db, workload.id, since=since)
-    return _compute_assessment(workload, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even, pressure=pressure)
+    first, last = observation_span_one(db, workload.id)
+    if since is not None and first is not None:
+        first = max(first, since)
+    return _compute_assessment(
+        workload, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even,
+        pressure=pressure, history_days=observation_days(first, last),
+    )
 
 
 def _compute_assessment(
     workload: Workload, cpu_stats: dict, mem_stats: dict, cpu_target_pct: int, mem_target_pct: int,
-    round_vcpu_even: bool = False, pressure: dict | None = None,
+    round_vcpu_even: bool = False, pressure: dict | None = None, history_days: float | None = None,
 ) -> dict:
-    days = observation_days(
-        min([d for d in (cpu_stats["earliest"], mem_stats["earliest"]) if d], default=None),
-        max([d for d in (cpu_stats["latest"], mem_stats["latest"]) if d], default=None),
-    )
+    if history_days is not None:
+        days = history_days  # full history available (the sizing window is shorter)
+    else:
+        days = observation_days(
+            min([d for d in (cpu_stats["earliest"], mem_stats["earliest"]) if d], default=None),
+            max([d for d in (cpu_stats["latest"], mem_stats["latest"]) if d], default=None),
+        )
     confidence = confidence_for_observation_days(days)
+    running_now = workload.status == "running"
+    window = min(days, RIGHTSIZING_WINDOW_DAYS) if running_now else days
 
     result = {
         "workload_id": workload.id,
@@ -172,6 +186,7 @@ def _compute_assessment(
         "cpu": _json_safe_stats(cpu_stats),
         "memory": _json_safe_stats(mem_stats),
         "observation_days": round(days, 1),
+        "window_days": RIGHTSIZING_WINDOW_DAYS if running_now else None,
         "confidence": confidence,
         # The cpu/memory stats above are historical (whatever was observed
         # while this workload was last running -- possibly months ago for
@@ -214,7 +229,10 @@ def _compute_assessment(
 
     if workload.cpu_cores and cpu_stats["p95"] is not None:
         headroom_p95 = cpu_stats["p95"] / 100 * workload.cpu_cores * 1.5
-        headroom_max = (cpu_stats["max"] or 0) / 100 * workload.cpu_cores * _peak_multiplier(cpu_target_pct)
+        # 99th percentile, not the single highest sample (one stray reading used to
+        # decide the whole recommendation); falls back to the max if no p99 exists.
+        cpu_peak = cpu_stats["p99"] if cpu_stats.get("p99") is not None else (cpu_stats["max"] or 0)
+        headroom_max = cpu_peak / 100 * workload.cpu_cores * _peak_multiplier(cpu_target_pct)
         suggested = max(min_vcpu, round(max(headroom_p95, headroom_max)))
         if round_vcpu_even and suggested % 2 != 0:
             # Round up, never down -- rounding down would eat into the
@@ -222,7 +240,7 @@ def _compute_assessment(
             suggested += 1
 
         if suggested < workload.cpu_cores:
-            reason = f"P95 CPU usage {cpu_stats['p95']}% of {workload.cpu_cores} vCPU over {round(days)}d (peak {cpu_stats['max']}%)"
+            reason = f"P95 CPU usage {cpu_stats['p95']}% of {workload.cpu_cores} vCPU over the last {round(window)}d (peak {cpu_stats['max']}%)"
             if is_windows and suggested == min_vcpu and round(max(headroom_p95, headroom_max)) < min_vcpu:
                 reason += f" -- floored at {min_vcpu} vCPU, Windows guest"
             result["cpu_suggestion"] = {
@@ -237,7 +255,8 @@ def _compute_assessment(
                 "suggested": suggested,
                 "direction": "increase",
                 "reason": (
-                    f"Peak CPU usage {cpu_stats['max']}% of {workload.cpu_cores} vCPU over {round(days)}d "
+                    f"99th-percentile CPU usage {cpu_peak}% of {workload.cpu_cores} vCPU over the last {round(window)}d "
+                    f"(single highest sample {cpu_stats['max']}%) "
                     f"already exceeds the {cpu_target_pct}% target -- at risk of scheduling contention"
                 ),
             }
@@ -259,7 +278,7 @@ def _compute_assessment(
         suggested_bytes = max(min_memory_bytes, round(headroom_needed_bytes / one_gb) * one_gb)
 
         if suggested_bytes < workload.memory_bytes * 0.85:
-            reason = f"P95 memory usage {mem_stats['p95']}% of allocation over {round(days)}d (peak {mem_stats['max']}%)"
+            reason = f"P95 memory usage {mem_stats['p95']}% of allocation over the last {round(window)}d (peak {mem_stats['max']}%)"
             if is_windows and suggested_bytes == min_memory_bytes:
                 reason += f" -- floored at {min_memory_bytes // (1024**3)}GB, Windows guest"
             result["memory_suggestion"] = {
@@ -280,7 +299,7 @@ def _compute_assessment(
                     "suggested_bytes": suggested_bytes,
                     "direction": "increase",
                     "reason": (
-                        f"99th-percentile memory usage {peak_pct}% of allocation over {round(days)}d "
+                        f"99th-percentile memory usage {peak_pct}% of allocation over the last {round(window)}d "
                         f"(single highest sample {mem_stats['max']}%) "
                         f"already exceeds the {mem_target_pct}% target and there is real memory pressure"
                         f"{why} -- at risk of swapping/OOM"
@@ -293,46 +312,63 @@ def _compute_assessment(
 
 
 def assess_all_workloads(db) -> list[dict]:
-    """Batched: one grouped query for every workload's last-resize cutoff,
-    then one pair of batched observation_stats queries (cpu_pct, mem_pct)
-    covering every workload with no cutoff -- the overwhelming majority,
-    since a resize is a rare event, not something most workloads have ever
-    had. Only the few workloads that HAVE been resized (a real per-workload
-    `since` date, which a single grouped query can't apply per-row) fall
-    back to the single-workload observation_stats() path. Whichever path a
-    workload's stats came from, _compute_assessment() runs the identical
-    suggestion math assess_workload() runs for the single-workload case --
-    verified to produce byte-identical output against the old
-    one-query-per-workload implementation."""
+    """Batched. Running workloads are sized on the last RIGHTSIZING_WINDOW_DAYS days;
+    stopped ones keep their whole last-running history (shown as stale history).
+    Workloads that have been resized fall back to the single-workload query path
+    (a per-workload `since` can't be applied in one grouped query). Confidence is
+    from the full history span, not the window. Every path runs the same
+    _compute_assessment() math."""
     cpu_target_pct, mem_target_pct, round_vcpu_even = _rightsizing_settings(db)
     workloads = db.query(Workload).filter(Workload.is_missing.is_(False)).all()
     if not workloads:
         return []
 
+    window = RIGHTSIZING_WINDOW_DAYS
     since_by_id = _last_resize_completed_at_batch(db, [wl.id for wl in workloads])
-    no_cutoff_ids = [wl.id for wl in workloads if wl.id not in since_by_id]
-    cpu_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "cpu_pct")
-    mem_batch = observation_stats_batch(db, "workload", no_cutoff_ids, "mem_pct", max_value=MEM_PCT_VALID_MAX, with_p99=True)
+    spans = observation_span_batch(db)
+    no_cutoff = [wl for wl in workloads if wl.id not in since_by_id]
+    run_ids = [wl.id for wl in no_cutoff if wl.status == "running"]
+    idle_ids = [wl.id for wl in no_cutoff if wl.status != "running"]
 
+    cpu_batch = {
+        **observation_stats_batch(db, "workload", run_ids, "cpu_pct", window_days=window, with_p99=True),
+        **observation_stats_batch(db, "workload", idle_ids, "cpu_pct"),
+    }
+    mem_batch = {
+        **observation_stats_batch(db, "workload", run_ids, "mem_pct", max_value=MEM_PCT_VALID_MAX, window_days=window, with_p99=True),
+        **observation_stats_batch(db, "workload", idle_ids, "mem_pct", max_value=MEM_PCT_VALID_MAX),
+    }
+
+    # VMs with no guest memory stats are never assessed for memory: show their real numbers.
+    host_only = [wl for wl in no_cutoff if wl.mem_guest_stats is False]
+    host_only_mem = {
+        **observation_stats_batch(db, "workload", [w.id for w in host_only if w.status == "running"], "mem_pct", window_days=window),
+        **observation_stats_batch(db, "workload", [w.id for w in host_only if w.status != "running"], "mem_pct"),
+    }
     pressure_by_id = pressure_summaries(db)
-    host_only_ids = [wl.id for wl in workloads if wl.mem_guest_stats is False and wl.id in set(no_cutoff_ids)]
-    host_only_mem = observation_stats_batch(db, "workload", host_only_ids, "mem_pct") if host_only_ids else {}
 
     results = []
     for wl in workloads:
         since = since_by_id.get(wl.id)
+        win = window if wl.status == "running" else None
         if since is None:
             cpu_stats = cpu_batch[wl.id]
             mem_stats = host_only_mem.get(wl.id) or mem_batch[wl.id]
             pressure = pressure_by_id.get(wl.id)
         else:
-            cpu_stats = observation_stats(db, "workload", wl.id, "cpu_pct", since=since)
+            cpu_stats = observation_stats(db, "workload", wl.id, "cpu_pct", since=since, window_days=win)
             mem_stats = observation_stats(
-                db, "workload", wl.id, "mem_pct", since=since,
+                db, "workload", wl.id, "mem_pct", since=since, window_days=win,
                 max_value=None if wl.mem_guest_stats is False else MEM_PCT_VALID_MAX,
             )
             pressure = pressure_summary_one(db, wl.id, since=since)
-        results.append(_compute_assessment(wl, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even, pressure=pressure))
+        first, last = spans.get(wl.id, (None, None))
+        if since is not None and first is not None:
+            first = max(first, since)
+        results.append(_compute_assessment(
+            wl, cpu_stats, mem_stats, cpu_target_pct, mem_target_pct, round_vcpu_even,
+            pressure=pressure, history_days=observation_days(first, last),
+        ))
     return results
 
 
@@ -351,6 +387,7 @@ def _serialize_assessment(a: dict) -> dict:
         "cpu": a["cpu"],
         "memory": a["memory"],
         "observation_days": a["observation_days"],
+        "window_days": a.get("window_days"),
         "confidence": a["confidence"],
         "currently_running": a["currently_running"],
         "status": a["status"],

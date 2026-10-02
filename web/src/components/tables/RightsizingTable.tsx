@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type { Node, ObservationStats, Recommendation, RightsizingAssessment } from "@/lib/api";
 import { Table } from "@/components/Table";
 import StatusBadge from "@/components/StatusBadge";
@@ -41,6 +42,25 @@ export default function RightsizingTable({
   recommendations: Recommendation[];
 }) {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+  // Live "now" next to the historical figures, from the same source as the Workloads
+  // page (PVE's own numbers), so a 30-day P95 is never mistaken for the current reading.
+  const [live, setLive] = useState<Record<string, { cpu_pct?: number; mem_pct?: number }>>({});
+  useEffect(() => {
+    function load() {
+      fetch("/api/workloads/latest-metrics")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => d && setLive(d))
+        .catch(() => {});
+    }
+    load();
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+  }, []);
+  const nowText = (id: string, key: "cpu_pct" | "mem_pct") => {
+    const v = live[id]?.[key];
+    return v == null ? null : `now ${Math.round(v)}%`;
+  };
   const recommendationIdByWorkload = new Map(
     recommendations.filter((r) => r.object_id).map((r) => [r.object_id as string, r.id])
   );
@@ -72,11 +92,15 @@ export default function RightsizingTable({
         },
         {
           header: "CPU (P95)",
+          tooltip: "95th percentile CPU over the last 30 days while running. \"now\" is the live reading from PVE.",
           render: (a) =>
             a.currently_running ? (
-              <div className="flex items-center gap-2">
-                <Meter value={a.cpu.p95} width={56} />
-                <span className="text-muted text-xs whitespace-nowrap">avg {a.cpu.avg ?? "—"}% · max {a.cpu.max ?? "—"}%</span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <Meter value={a.cpu.p95} width={56} />
+                  <span className="text-muted text-xs whitespace-nowrap">avg {a.cpu.avg ?? "—"}% · max {a.cpu.max ?? "—"}%</span>
+                </div>
+                <div className="text-[11px] text-muted mt-0.5">{nowText(a.workload_id, "cpu_pct")}</div>
               </div>
             ) : (
               <StaleHistorical stats={a.cpu} status={a.status} />
@@ -86,6 +110,7 @@ export default function RightsizingTable({
         },
         {
           header: "Memory (P95)",
+          tooltip: "95th percentile memory over the last 30 days while running. \"now\" is the live reading from PVE.",
           render: (a) =>
             a.currently_running ? (
               <div>
@@ -93,6 +118,7 @@ export default function RightsizingTable({
                   <Meter value={a.memory.p95} width={56} />
                   <span className="text-muted text-xs whitespace-nowrap">avg {a.memory.avg ?? "—"}% · max {a.memory.max ?? "—"}%</span>
                 </div>
+                <div className="text-[11px] text-muted mt-0.5">{nowText(a.workload_id, "mem_pct")}</div>
                 {a.memory_note && <div className="text-[11px] text-muted mt-0.5">{a.memory_note}</div>}
               </div>
             ) : (

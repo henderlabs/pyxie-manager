@@ -43,8 +43,10 @@ NO_PRESSURE = {"days": 10.0, "samples": 2880, "swap_in_bytes": 0, "swap_out_byte
 GATHERING = {"days": 2.0, "samples": 576, "swap_in_bytes": 0, "swap_out_bytes": 0}
 
 
-def _assess(mem_stats, pressure=None, **wl):
-    return _compute_assessment(_workload(**wl), CPU, mem_stats, 75, 75, pressure=pressure)
+def _assess(mem_stats, pressure=None, cpu=None, history_days=None, **wl):
+    return _compute_assessment(
+        _workload(**wl), cpu or CPU, mem_stats, 75, 75, pressure=pressure, history_days=history_days
+    )
 
 
 def _mem_suggestion(mem_stats, pressure=None, **wl):
@@ -110,3 +112,43 @@ def test_verdict_thresholds():
     # a trickle (1 GiB total over 10 days = ~100 MiB/day) is not pressure
     trickle = {"days": 10.0, "swap_in_bytes": 1 * GiB}
     assert memory_pressure_verdict(trickle)["state"] == "no_pressure"
+
+
+# ---- CPU uses the 99th percentile too ---------------------------------------------
+
+def _cpu_suggestion(cpu_stats, **wl):
+    return _assess(_stats(30, 40, 60, p99=50), NO_PRESSURE, cpu=cpu_stats, **wl)["cpu_suggestion"]
+
+
+def test_a_single_cpu_spike_no_longer_forces_more_vcpus():
+    # PAW-OCabezas: CPU p95 10%, p99 20%, one 104% sample used to say "4 -> 6 vCPU"
+    s = _cpu_suggestion(_stats(5, 10, 104, p99=20))
+    assert s is None or s["direction"] != "increase"
+
+
+def test_sustained_cpu_load_still_recommends_more_vcpus():
+    s = _cpu_suggestion(_stats(60, 90, 100, p99=98))
+    assert s is not None and s["direction"] == "increase"
+    assert "99th-percentile" in s["reason"] and "last" in s["reason"]
+
+
+def test_cpu_without_p99_falls_back_to_the_absolute_peak():
+    s = _cpu_suggestion(_stats(5, 10, 104))
+    assert s is not None and s["direction"] == "increase"
+
+
+# ---- the sizing window is not the confidence window ---------------------------------
+
+def test_confidence_counts_full_history_not_the_sizing_window():
+    short = {"avg": 30, "p95": 40, "p99": 55, "max": 60, "sample_count": 14000,
+             "earliest": NOW - timedelta(days=10), "latest": NOW}
+    # stats alone span 10 days -> only "preliminary" -> no suggestions
+    assert _assess(short, NO_PRESSURE, cpu=short)["confidence"] == "preliminary"
+    # but the VM has 300 days of history behind that recent window -> high
+    a = _assess(short, NO_PRESSURE, cpu=short, history_days=300.0)
+    assert a["confidence"] == "high" and a["observation_days"] == 300.0
+    assert a["window_days"] == 30
+
+
+def test_stopped_workloads_report_no_window():
+    assert _assess(HIGH, NO_PRESSURE, status="stopped")["window_days"] is None
