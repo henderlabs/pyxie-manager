@@ -52,7 +52,7 @@ export default function SiteRow({ site }: { site: Site }) {
         <button
           onClick={save}
           disabled={pending}
-          className="px-2 py-1 rounded text-xs font-medium bg-black text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="px-2 py-1 rounded text-xs font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           {pending ? "Saving…" : "Save"}
         </button>
@@ -69,12 +69,12 @@ export default function SiteRow({ site }: { site: Site }) {
         {error && <div className="text-xs text-bad">{error}</div>}
         <style jsx>{`
           .input {
-            background: #0b0e14;
-            border: 1px solid #232a38;
+            background: rgb(var(--c-canvas));
+            border: 1px solid rgb(var(--c-border));
             border-radius: 6px;
             padding: 4px 6px;
             font-size: 0.8rem;
-            color: #e6e9ef;
+            color: rgb(var(--c-text));
           }
         `}</style>
       </div>
