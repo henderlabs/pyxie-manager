@@ -7,7 +7,7 @@ import RebootBanner from "@/components/RebootBanner";
 import DashboardNodesList from "@/components/DashboardNodesList";
 import { HalfGauge } from "@/components/HalfGauge";
 import { BalanceGauge, NodeBalanceStrip } from "@/components/ClusterBalance";
-import { ClusterIcon, ServerIcon, WorkloadIcon, StorageIcon, PackageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon, ChecklistIcon } from "@/components/Icons";
+import { ClusterIcon, ServerIcon, WorkloadIcon, StorageIcon, PackageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon } from "@/components/Icons";
 import { formatBytes, formatPct } from "@/lib/format";
 
 export default async function DashboardPage() {
@@ -65,7 +65,7 @@ export default async function DashboardPage() {
         <RebootBanner nodes={summary.nodes_detail.map((n) => ({ id: n.id, name: n.name }))} />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,620px),1fr))] gap-4 mb-4">
       <Card>
         <CardTitle>Cluster Resource Usage</CardTitle>
         <div className="flex flex-wrap items-center justify-around gap-4 py-1">
@@ -116,12 +116,6 @@ export default async function DashboardPage() {
         <StatTile label="Storage" value={formatPct(summary.storage_used_pct)} sub="Used" icon={<StorageIcon />} />
         <StatTile label="Updates" value={summary.nodes_with_updates} sub="Nodes have updates" icon={<PackageIcon />} />
         <StatTile label="Active Findings" value={issueCount} sub="Critical + warning" icon={<HealthIcon />} />
-        <StatTile
-          label="Awaiting Approval"
-          value={summary.operations_awaiting_approval}
-          sub="Operations"
-          icon={<ChecklistIcon />}
-        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
