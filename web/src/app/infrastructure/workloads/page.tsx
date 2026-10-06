@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import type { Finding, Node, Recommendation, RightsizingAssessment, StorageItem, Workload } from "@/lib/api";
 import { PageHeader, StatTile } from "@/components/Card";
@@ -8,8 +9,10 @@ import { formatBytes } from "@/lib/format";
 export default async function WorkloadsPage({
   searchParams,
 }: {
-  searchParams: { type?: string };
+  searchParams: { type?: string; workload?: string };
 }) {
+  // Old deep links (?workload=<id>) now go to the single-workload page.
+  if (searchParams.workload) redirect(`/infrastructure/workloads/${searchParams.workload}`);
   const [workloads, nodes, storage, findings, rightsizing, rightsizingRecs] = await Promise.all([
     apiFetch<Workload[]>(`/api/workloads${searchParams.type ? `?type=${searchParams.type}` : ""}`),
     apiFetch<Node[]>("/api/nodes"),
