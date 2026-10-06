@@ -10,7 +10,7 @@ import { Meter } from "@/components/Gauges";
 import MetricChart from "@/components/MetricChart";
 import WorkloadLifecycleButtons from "@/components/WorkloadLifecycleButtons";
 import MigrateWorkloadAction from "@/components/MigrateWorkloadAction";
-import { ProfileSelect } from "@/components/ProfileSelect";
+import { PreferredHostSelect, ProfileSelect, StoragePreferenceSelect } from "@/components/ProfileSelect";
 import { formatBytes, formatUptime, formatRelativeTime } from "@/lib/format";
 import { onOperationsChanged } from "@/lib/operationsBus";
 import {
@@ -193,11 +193,14 @@ function IpRow({ workloadId, running }: { workloadId: string; running: boolean }
   return <Row label="IP addresses" value={value} />;
 }
 
-type Profile = {
+type ProfileValues = {
   sensitivity: string;
   downtime_tolerance: string;
-  onChange: (field: "sensitivity" | "downtime_tolerance", value: string) => void;
+  storage_preference: string | null;
+  preferred_node_id: string | null;
 };
+type Profile = { values: ProfileValues; onChange: (patch: Partial<ProfileValues>) => void };
+
 
 type PanelFinding = { id: string; severity: string; title: string };
 
@@ -212,6 +215,7 @@ export function WorkloadDetailPanel({
   onTabChange,
   initialTasks,
   profile,
+  clusterNodes,
 }: {
   workload: Workload;
   findings: PanelFinding[];
@@ -222,12 +226,18 @@ export function WorkloadDetailPanel({
   initialTasks?: WorkloadTask[];
   /** Provided by the table so its selects and this panel stay in step. */
   profile?: Profile;
+  /** Hosts in this workload's cluster, for the Preferred host choice. */
+  clusterNodes: Node[];
 }) {
   const [timeframe, setTimeframe] = useState<Timeframe>("hour");
-  const [localSensitivity, setLocalSensitivity] = useState(w.sensitivity);
-  const [localTolerance, setLocalTolerance] = useState(w.downtime_tolerance);
-  const sensitivity = profile ? profile.sensitivity : localSensitivity;
-  const tolerance = profile ? profile.downtime_tolerance : localTolerance;
+  const [localProfile, setLocalProfile] = useState<ProfileValues>({
+    sensitivity: w.sensitivity,
+    downtime_tolerance: w.downtime_tolerance,
+    storage_preference: w.storage_preference,
+    preferred_node_id: w.preferred_node_id,
+  });
+  const pv = profile ? profile.values : localProfile;
+  const changeProfile = (patch: Partial<ProfileValues>) => (profile ? profile.onChange(patch) : setLocalProfile((p) => ({ ...p, ...patch })));
   const lxc = w.type === "lxc";
   const cfg: ConfigSummary | null = live?.config ?? null;
   const st = live?.status ?? null;
@@ -284,7 +294,7 @@ export function WorkloadDetailPanel({
               <Card>
                 <div className="flex items-center justify-between"><CardTitle>Hardware</CardTitle><button type="button" onClick={() => onTabChange("hardware")} className="text-xs text-accent hover:underline">Details</button></div>
                 <dl>
-                  <Row label="vCPU / memory" value={`${cfg.vcpus ?? "—"} / ${cfg.memory_mb ? formatBytes(cfg.memory_mb * 1048576) : "—"}`} />
+                  <Row label="CPU / RAM" value={`${cfg.vcpus ?? "—"} vCPU · ${cfg.memory_mb ? formatBytes(cfg.memory_mb * 1048576) : "—"}`} />
                   <Row label="Disks" value={cfg.disks.filter((d) => d.kind === "disk").map((d) => `${d.size ?? "?"} on ${d.storage ?? "?"}`).join(", ") || "—"} />
                   <Row label="Network" value={cfg.nets.map((n) => `${n.bridge ?? "?"}${n.vlan_tag ? ` (VLAN ${n.vlan_tag})` : ""}`).join(", ") || "—"} />
                   {!lxc && <Row label="BIOS" value={cfg.bios || "—"} />}
@@ -292,10 +302,12 @@ export function WorkloadDetailPanel({
               </Card>
             )}
             <Card>
-              <CardTitle>PyXie profile</CardTitle>
+              <CardTitle>PyXie placement profile</CardTitle>
               <div className="space-y-2 text-sm">
-                <div className="flex items-center justify-between"><span className="text-muted">Sensitivity</span><ProfileSelect workloadId={w.id} field="sensitivity" value={sensitivity} options={["standard", "restricted"]} highlightWhen="restricted" onChanged={(v) => (profile ? profile.onChange("sensitivity", v) : setLocalSensitivity(v))} /></div>
-                <div className="flex items-center justify-between"><span className="text-muted">Downtime tolerance</span><ProfileSelect workloadId={w.id} field="downtime_tolerance" value={tolerance} options={["low", "standard", "high"]} highlightWhen="low" onChanged={(v) => (profile ? profile.onChange("downtime_tolerance", v) : setLocalTolerance(v))} /></div>
+                <div className="flex items-center justify-between" title="'restricted' means this workload is never placed on a node tagged Trust Tier = low."><span className="text-muted">Sensitivity</span><ProfileSelect workloadId={w.id} field="sensitivity" value={pv.sensitivity} options={["standard", "restricted"]} highlightWhen="restricted" onChanged={(v) => changeProfile({ sensitivity: v })} /></div>
+                <div className="flex items-center justify-between" title="How much outage this workload can absorb; 'low' favours the best, most-trusted nodes."><span className="text-muted">Downtime tolerance</span><ProfileSelect workloadId={w.id} field="downtime_tolerance" value={pv.downtime_tolerance} options={["low", "standard", "high"]} highlightWhen="low" onChanged={(v) => changeProfile({ downtime_tolerance: v })} /></div>
+                <div className="flex items-center justify-between" title="Where this workload's disk goes when migrated. 'auto' follows where it lives today."><span className="text-muted">Storage preference</span><StoragePreferenceSelect workloadId={w.id} value={pv.storage_preference} onChanged={(v) => changeProfile({ storage_preference: v })} /></div>
+                <div className="flex items-center justify-between" title="A soft preference for which node this workload lives on; never overrides a hard block."><span className="text-muted">Preferred host</span><PreferredHostSelect workloadId={w.id} clusterNodes={clusterNodes} value={pv.preferred_node_id} onChanged={(v) => changeProfile({ preferred_node_id: v })} /></div>
                 {w.placement_notes && <div className="text-muted whitespace-pre-wrap pt-1">{w.placement_notes}</div>}
               </div>
             </Card>
@@ -377,7 +389,7 @@ export function WorkloadDetailPanel({
 
 /** What an expanded Workloads table row shows. Mounted only while the row is open, so the
  * live polling stops the moment it is collapsed. */
-export function WorkloadRowDetail({ workload, findings, profile }: { workload: Workload; findings: PanelFinding[]; profile?: Profile }) {
+export function WorkloadRowDetail({ workload, findings, profile, clusterNodes }: { workload: Workload; findings: PanelFinding[]; profile?: Profile; clusterNodes: Node[] }) {
   const [tab, setTab] = useState<TabId>("summary");
   const { live } = useLive(workload.id);
   return (
@@ -392,7 +404,7 @@ export function WorkloadRowDetail({ workload, findings, profile }: { workload: W
           <Link href={`/infrastructure/workloads/${workload.id}`} className="text-accent hover:underline">Open full page ↗</Link>
         </div>
       </div>
-      <WorkloadDetailPanel workload={workload} findings={findings} live={live} tab={tab} onTabChange={setTab} profile={profile} />
+      <WorkloadDetailPanel workload={workload} findings={findings} live={live} tab={tab} onTabChange={setTab} profile={profile} clusterNodes={clusterNodes} />
     </div>
   );
 }
@@ -466,7 +478,7 @@ export default function WorkloadDetail({
         </div>
       </div>
 
-      <WorkloadDetailPanel workload={w} findings={overview.findings} live={live} tab={tab} onTabChange={setTab} initialTasks={tasks} />
+      <WorkloadDetailPanel workload={w} findings={overview.findings} live={live} tab={tab} onTabChange={setTab} initialTasks={tasks} clusterNodes={nodes.filter((n) => n.cluster_id === w.cluster_id)} />
     </div>
   );
 }

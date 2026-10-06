@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { Node } from "@/lib/api";
 import { useMe } from "@/lib/useMe";
 
 /** Throws on a failed save instead of resolving silently -- every select
@@ -67,3 +68,89 @@ export function ProfileSelect({
   );
 }
 
+export function StoragePreferenceSelect({
+  workloadId,
+  value,
+  onChanged,
+}: {
+  workloadId: string;
+  value: string | null;
+  onChanged: (v: string | null) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const me = useMe();
+  const isAdmin = me === undefined || me?.is_admin === true;
+  async function change(newValue: string) {
+    const stored = newValue === "auto" ? null : newValue;
+    setSaving(true);
+    setError(null);
+    try {
+      await patchPlacementProfile(workloadId, { storage_preference: stored });
+      onChanged(stored);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <select
+      className={`bg-surface2 border rounded px-1.5 py-1 text-xs ${error ? "border-bad" : "border-border"}`}
+      value={value || "auto"}
+      disabled={saving || !isAdmin}
+      title={error || undefined}
+      onChange={(e) => change(e.target.value)}
+    >
+      <option value="auto">auto (current)</option>
+      <option value="local">local</option>
+      <option value="shared">shared</option>
+    </select>
+  );
+}
+
+export function PreferredHostSelect({
+  workloadId,
+  clusterNodes,
+  value,
+  onChanged,
+}: {
+  workloadId: string;
+  clusterNodes: Node[];
+  value: string | null;
+  onChanged: (v: string | null) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const me = useMe();
+  const isAdmin = me === undefined || me?.is_admin === true;
+  async function change(newValue: string) {
+    const stored = newValue === "none" ? null : newValue;
+    setSaving(true);
+    setError(null);
+    try {
+      await patchPlacementProfile(workloadId, { preferred_node_id: stored });
+      onChanged(stored);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <select
+      className={`bg-surface2 border rounded px-1.5 py-1 text-xs ${error ? "border-bad" : "border-border"}`}
+      value={value || "none"}
+      disabled={saving || !isAdmin}
+      title={error || undefined}
+      onChange={(e) => change(e.target.value)}
+    >
+      <option value="none">no preference</option>
+      {clusterNodes.map((n) => (
+        <option key={n.id} value={n.id}>
+          {n.name}
+        </option>
+      ))}
+    </select>
+  );
+}
