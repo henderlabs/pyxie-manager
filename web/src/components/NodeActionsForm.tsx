@@ -7,9 +7,9 @@ import OperationCard from "@/components/OperationCard";
 import DefaultStorageSelect from "@/components/DefaultStorageSelect";
 import { Table } from "@/components/Table";
 import { Meter } from "@/components/Gauges";
-import { notifyOperationsChanged } from "@/lib/operationsBus";
+import { notifyOperationsChanged, onOperationsChanged } from "@/lib/operationsBus";
 import { useMe } from "@/lib/useMe";
-import { isInFlight } from "@/lib/operationStatus";
+import { isInFlight, isTerminal } from "@/lib/operationStatus";
 import { formatBytes, isOverprovisioned, overprovisionedPct } from "@/lib/format";
 import { WrenchIcon, PlugIcon, PackageIcon, ClockIcon, ChecklistIcon, MigrateIcon } from "@/components/Icons";
 
@@ -294,6 +294,38 @@ export default function NodeActionsForm({
       }
     }, 2000);
     return () => clearInterval(interval);
+  }, [ops]);
+
+  // A card still waiting on approval is NOT "in flight", so the poll above
+  // never watches it -- approving it from the Task Panel (or another tab)
+  // left it reading "Awaiting Approval" until the page was reloaded. Refresh
+  // every not-yet-finished op the moment anything signals a change, with a
+  // slow fallback for approvals made somewhere the bus can't reach.
+  useEffect(() => {
+    const waiting = ops.filter((o) => !isTerminal(o.status) && !isInFlight(o.status));
+    if (waiting.length === 0) return;
+    let cancelled = false;
+    async function refreshWaiting() {
+      const fresh = await Promise.all(
+        waiting.map(async (o) => {
+          try {
+            const res = await fetch(`/api/operations/${o.id}`);
+            return res.ok ? ((await res.json()) as Operation) : o;
+          } catch {
+            return o;
+          }
+        })
+      );
+      if (cancelled || !fresh.some((o, i) => o.status !== waiting[i].status)) return;
+      setOps((prev) => prev.map((o) => fresh.find((f) => f.id === o.id) ?? o));
+    }
+    const unsubscribe = onOperationsChanged(refreshWaiting);
+    const interval = setInterval(refreshWaiting, 5000);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      clearInterval(interval);
+    };
   }, [ops]);
 
   async function approveOne(op: Operation) {
