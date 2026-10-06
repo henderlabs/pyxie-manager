@@ -192,12 +192,12 @@ export default function UsersTable({ initial }: { initial: UserAccount[] }) {
       <style jsx>{`
         .input {
           width: 100%;
-          background: #0b0e14;
-          border: 1px solid #232a38;
+          background: rgb(var(--c-canvas));
+          border: 1px solid rgb(var(--c-border));
           border-radius: 6px;
           padding: 6px 8px;
           font-size: 0.8rem;
-          color: #e6e9ef;
+          color: rgb(var(--c-text));
         }
       `}</style>
     </div>

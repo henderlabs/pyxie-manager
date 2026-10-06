@@ -72,7 +72,7 @@ export function HalfGauge({
             <path
               d={d}
               fill="none"
-              stroke={scale === "balance" ? (value >= 80 ? "#2fbf71" : value >= 60 ? "#e5a94c" : "#e5484d") : colorForPct(value)}
+              stroke={scale === "balance" ? (value >= 80 ? "rgb(var(--c-good))" : value >= 60 ? "rgb(var(--c-warn))" : "rgb(var(--c-bad))") : colorForPct(value)}
               strokeWidth={strokeWidth}
               strokeLinecap="round"
               pathLength={100}

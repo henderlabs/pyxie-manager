@@ -362,7 +362,7 @@ export default function NodeActionsForm({
         onClick={() => runPreview(a.key, a.id === "apply-updates")}
         disabled={selectedNodeIds.length === 0 || pending}
         title={a.description}
-        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-black text-white border disabled:opacity-50 ${styles}`}
+        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border disabled:opacity-50 ${styles}`}
       >
         <Icon className="w-4 h-4" />
         {a.label}
@@ -521,7 +521,7 @@ export default function NodeActionsForm({
               ? "Evaluate the VMs on the selected node(s) and propose better homes for them anywhere eligible in the cluster."
               : "Evaluate every running VM cluster-wide and propose moves that would improve overall balance."
           }
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           <MigrateIcon className="w-4 h-4" />
           {balancePending ? "Evaluating…" : "Balance Load"}

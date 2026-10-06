@@ -283,7 +283,7 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
           <button
             onClick={approve}
             disabled={approving}
-            className="px-2 py-1 rounded text-[11px] font-medium bg-black text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
+            className="px-2 py-1 rounded text-[11px] font-medium bg-ink text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
           >
             {approving ? "Approving…" : "Approve & Execute"}
           </button>
@@ -468,7 +468,7 @@ export default function TaskPanel({
         style={{ width: PANEL_WIDTH_PX, transform: open ? "translateX(0)" : "translateX(100%)" }}
       >
         <div className="px-4 py-4 border-b border-border flex items-center justify-between shrink-0">
-          <div className="text-sm font-bold text-white uppercase tracking-wide flex items-center gap-2">
+          <div className="text-sm font-bold text-text uppercase tracking-wide flex items-center gap-2">
             <ChecklistIcon className="w-4 h-4" />
             Tasks
           </div>

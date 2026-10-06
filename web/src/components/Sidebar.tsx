@@ -1,5 +1,6 @@
 "use client";
 
+import ThemeToggle from "@/components/ThemeToggle";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -82,7 +83,7 @@ const SECTIONS: NavSection[] = [
   },
 ];
 
-export default function Sidebar({ version }: { version: string }) {
+export default function Sidebar({ version, instance }: { version: string; instance: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const [me, setMe] = useState<{ email: string; display_name: string | null; is_admin: boolean } | null>(null);
@@ -197,7 +198,8 @@ export default function Sidebar({ version }: { version: string }) {
   return (
     <aside className="w-60 shrink-0 border-r border-border bg-surface h-screen sticky top-0 flex flex-col">
       <Link href="/" className="px-4 py-5 border-b border-border flex items-center justify-center">
-        <img src="/pyxie-logo.png" alt="PyXie — Proxmox Operations" className="h-12 w-auto" />
+        <img src="/pyxie-logo.png" alt="PyXie — Proxmox Operations" className="logo-for-dark h-12 w-auto" />
+        <img src="/pyxie-logo-light.png" alt="PyXie — Proxmox Operations" className="logo-for-light h-12 w-auto" />
       </Link>
       <nav className="flex-1 overflow-y-auto pb-3">
         {SECTIONS.map((section) => (
@@ -227,6 +229,9 @@ export default function Sidebar({ version }: { version: string }) {
         ))}
       </nav>
       <div className="px-4 py-3 border-t border-border text-xs">
+        <div className="mb-2.5">
+          <ThemeToggle />
+        </div>
         {me ? (
           <div className="flex items-center justify-between gap-2">
             <Link href="/profile" className="text-muted hover:text-text truncate" title={`${me.email} — edit profile`}>
@@ -241,7 +246,7 @@ export default function Sidebar({ version }: { version: string }) {
         )}
       </div>
       <div className="px-4 py-1.5 flex items-center justify-between text-xs text-muted/70 tracking-wide">
-        <span>v{version}</span>
+        <span className="truncate min-w-0" title={`${instance} v${version}`}>{instance} v{version}</span>
         {lastRefreshed && (
           <button
             onClick={refreshNow}

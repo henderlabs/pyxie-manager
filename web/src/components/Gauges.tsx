@@ -1,8 +1,8 @@
-const COLOR_GOOD = "#2fbf71";
-const COLOR_WARN = "#e5a94c";
-const COLOR_BAD = "#e5484d";
-export const COLOR_MUTED = "#8b95a7";
-export const COLOR_TRACK = "#232a38";
+const COLOR_GOOD = "rgb(var(--c-good))";
+const COLOR_WARN = "rgb(var(--c-warn))";
+const COLOR_BAD = "rgb(var(--c-bad))";
+export const COLOR_MUTED = "rgb(var(--c-muted))";
+export const COLOR_TRACK = "rgb(var(--c-border))";
 
 export function colorForPct(value: number | null): string {
   if (value === null) return COLOR_MUTED;

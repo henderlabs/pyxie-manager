@@ -1,13 +1,23 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import fs from "fs";
 import path from "path";
 import "./globals.css";
 import AppChrome from "@/components/AppChrome";
+import { instanceNameFromHost } from "@/lib/instanceName";
 
-export const metadata: Metadata = {
-  title: "PyXie",
-  description: "Proxmox VE operations console",
-};
+// Behind Caddy the browser's address arrives as X-Forwarded-Host (or Host).
+function currentInstanceName(): string {
+  const h = headers();
+  return instanceNameFromHost(h.get("x-forwarded-host") || h.get("host"), process.env.PYXIE_INSTANCE_NAME);
+}
+
+export function generateMetadata(): Metadata {
+  return {
+    title: currentInstanceName(),
+    description: "Proxmox VE operations console",
+  };
+}
 
 // Read directly from the repo-root VERSION file on every request (not baked
 // in at build time) so the sidebar always reflects exactly what's on disk --
@@ -20,11 +30,17 @@ function readVersion(): string {
   }
 }
 
+// Runs before the page paints: the saved choice (light / dark / match this computer); with none saved, dark.
+const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("pyxie:theme");var t=p==="light"||p==="dark"?p:(p==="system"&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark");document.documentElement.setAttribute("data-theme",t);}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="flex bg-canvas text-text min-h-screen">
-        <AppChrome version={readVersion()}>{children}</AppChrome>
+        <AppChrome version={readVersion()} instance={currentInstanceName()}>{children}</AppChrome>
       </body>
     </html>
   );

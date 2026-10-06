@@ -169,7 +169,7 @@ async function AuditChannel({
         siteNameById={siteNameById}
         providerNameById={providerNameById}
       />
-      <style>{`.select { background:#161b26; border:1px solid #232a38; border-radius:6px; padding:6px 8px; color:#e6e9ef; }`}</style>
+      <style>{`.select { background:rgb(var(--c-surface2)); border:1px solid rgb(var(--c-border)); border-radius:6px; padding:6px 8px; color:rgb(var(--c-text)); }`}</style>
     </>
   );
 }

@@ -643,7 +643,7 @@ export default function OperationCard({
             <button
               onClick={onApprove}
               disabled={pending || nothingToMove}
-              className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
+              className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
             >
               {pending ? "Submitting…" : `Approve & Execute ${operationTypeLabel(op)}`}
             </button>

@@ -287,7 +287,7 @@ export default function NotificationRules({
             <button
               type="submit"
               disabled={pending}
-              className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+              className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
             >
               {pending ? "Saving…" : "Save rule"}
             </button>
@@ -300,22 +300,22 @@ export default function NotificationRules({
       <style jsx>{`
         .input {
           width: 100%;
-          background: #0b0e14;
-          border: 1px solid #232a38;
+          background: rgb(var(--c-canvas));
+          border: 1px solid rgb(var(--c-border));
           border-radius: 6px;
           padding: 6px 8px;
           font-size: 0.875rem;
-          color: #e6e9ef;
+          color: rgb(var(--c-text));
         }
         .btn {
           padding: 4px 10px;
           border-radius: 6px;
-          border: 1px solid #232a38;
+          border: 1px solid rgb(var(--c-border));
           background: transparent;
           color: inherit;
         }
         .btn:hover {
-          background: rgba(255, 255, 255, 0.05);
+          background: rgb(var(--c-text) / 0.05);
         }
       `}</style>
     </div>

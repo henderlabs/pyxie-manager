@@ -124,13 +124,13 @@ function Charts({ rows, which, loading }: { rows: RrdRow[]; which: "summary" | "
   const maxmem = Math.max(0, ...rows.map((r) => r.maxmem ?? 0));
   const cpu = (
     <MetricChart key="cpu" title="CPU usage" times={times} format={pct} loading={loading}
-      series={[{ label: "CPU", color: "#4f8cff", area: true, values: col(rows, (r) => (r.cpu != null ? r.cpu * 100 : undefined)) }]} />
+      series={[{ label: "CPU", color: "rgb(var(--c-accent))", area: true, values: col(rows, (r) => (r.cpu != null ? r.cpu * 100 : undefined)) }]} />
   );
   const mem = (
     <MetricChart key="mem" title="Memory usage" times={times} format={(v) => formatBytes(v)} fixedMax={maxmem || undefined} loading={loading}
       series={[
-        { label: "Used", color: "#4f8cff", area: true, values: col(rows, (r) => r.mem) },
-        { label: "Host", color: "#8b95a7", values: col(rows, (r) => r.memhost) },
+        { label: "Used", color: "rgb(var(--c-accent))", area: true, values: col(rows, (r) => r.mem) },
+        { label: "Host", color: "rgb(var(--c-muted))", values: col(rows, (r) => r.memhost) },
       ]} />
   );
   if (which === "summary") return <div className="space-y-4">{cpu}{mem}</div>;
@@ -141,29 +141,29 @@ function Charts({ rows, which, loading }: { rows: RrdRow[]; which: "summary" | "
       <Card>
         <MetricChart title="Network traffic" times={times} loading={loading} format={rate}
           series={[
-            { label: "In", color: "#2fbf71", area: true, values: col(rows, (r) => r.netin) },
-            { label: "Out", color: "#4f8cff", values: col(rows, (r) => r.netout) },
+            { label: "In", color: "rgb(var(--c-good))", area: true, values: col(rows, (r) => r.netin) },
+            { label: "Out", color: "rgb(var(--c-accent))", values: col(rows, (r) => r.netout) },
           ]} />
       </Card>
       <Card>
         <MetricChart title="Disk IO" times={times} loading={loading} format={rate}
           series={[
-            { label: "Read", color: "#2fbf71", area: true, values: col(rows, (r) => r.diskread) },
-            { label: "Write", color: "#4f8cff", values: col(rows, (r) => r.diskwrite) },
+            { label: "Read", color: "rgb(var(--c-good))", area: true, values: col(rows, (r) => r.diskread) },
+            { label: "Write", color: "rgb(var(--c-accent))", values: col(rows, (r) => r.diskwrite) },
           ]} />
       </Card>
       <Card>
         <MetricChart title="CPU pressure stall" times={times} loading={loading} format={(v) => `${v.toFixed(2)}%`}
           series={[
-            { label: "Some", color: "#e5a94c", area: true, values: col(rows, (r) => r.pressurecpusome) },
-            { label: "Full", color: "#e5484d", values: col(rows, (r) => r.pressurecpufull) },
+            { label: "Some", color: "rgb(var(--c-warn))", area: true, values: col(rows, (r) => r.pressurecpusome) },
+            { label: "Full", color: "rgb(var(--c-bad))", values: col(rows, (r) => r.pressurecpufull) },
           ]} />
       </Card>
       <Card>
         <MetricChart title="IO pressure stall" times={times} loading={loading} format={(v) => `${v.toFixed(2)}%`}
           series={[
-            { label: "Some", color: "#e5a94c", area: true, values: col(rows, (r) => r.pressureiosome) },
-            { label: "Full", color: "#e5484d", values: col(rows, (r) => r.pressureiofull) },
+            { label: "Some", color: "rgb(var(--c-warn))", area: true, values: col(rows, (r) => r.pressureiosome) },
+            { label: "Full", color: "rgb(var(--c-bad))", values: col(rows, (r) => r.pressureiofull) },
           ]} />
       </Card>
     </div>

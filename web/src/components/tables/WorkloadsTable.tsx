@@ -333,10 +333,10 @@ export default function WorkloadsTable({
             const m = metrics[w.id];
             if (w.type !== "vm" || !m?.ballooning) return <span className="text-muted">—</span>;
             if (m.ballooning === "off")
-              return <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-red-500/15 text-red-600 dark:text-red-400">Off</span>;
+              return <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-bad/15 text-bad">Off</span>;
             const min = m.balloon_min_mb ? `min ${formatBytes(m.balloon_min_mb * 1048576)}` : "";
             return m.ballooning === "pending" ? (
-              <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-amber-500/15 text-amber-600 dark:text-amber-400" title="Configured, not active until the VM is power-cycled through PVE">
+              <span className="rounded px-1.5 py-0.5 text-xs font-medium bg-warn/15 text-warn" title="Configured, not active until the VM is power-cycled through PVE">
                 Pending {min}
               </span>
             ) : (

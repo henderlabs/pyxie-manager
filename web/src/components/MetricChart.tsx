@@ -112,14 +112,14 @@ export default function MetricChart({
           <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img" aria-label={title}>
             {ticks.map((tv) => (
               <g key={tv}>
-                <line x1={PAD.l} x2={W - PAD.r} y1={y(tv)} y2={y(tv)} stroke="#232a38" strokeWidth="1" />
-                <text x={PAD.l - 4} y={y(tv) + 3} textAnchor="end" fontSize="9" fill="#8b95a7">
+                <line x1={PAD.l} x2={W - PAD.r} y1={y(tv)} y2={y(tv)} stroke="rgb(var(--c-border))" strokeWidth="1" />
+                <text x={PAD.l - 4} y={y(tv) + 3} textAnchor="end" fontSize="9" fill="rgb(var(--c-muted))">
                   {format(tv)}
                 </text>
               </g>
             ))}
             {xTicks.map((tt, i) => (
-              <text key={i} x={x(tt)} y={H - 6} textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"} fontSize="9" fill="#8b95a7">
+              <text key={i} x={x(tt)} y={H - 6} textAnchor={i === 0 ? "start" : i === xTicks.length - 1 ? "end" : "middle"} fontSize="9" fill="rgb(var(--c-muted))">
                 {fmtTime(tt, span)}
               </text>
             ))}
@@ -129,7 +129,7 @@ export default function MetricChart({
                 <path d={path(s, false)} fill="none" stroke={s.color} strokeWidth="1.5" strokeLinejoin="round" />
               </g>
             ))}
-            {hover != null && <line x1={x(times[hover])} x2={x(times[hover])} y1={PAD.t} y2={H - PAD.b} stroke="#8b95a7" strokeWidth="1" strokeDasharray="3 3" />}
+            {hover != null && <line x1={x(times[hover])} x2={x(times[hover])} y1={PAD.t} y2={H - PAD.b} stroke="rgb(var(--c-muted))" strokeWidth="1" strokeDasharray="3 3" />}
           </svg>
           {hover != null && (
             <div className="absolute top-0 right-2 bg-surface2 border border-border rounded px-2 py-1 text-xs pointer-events-none">
