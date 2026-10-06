@@ -226,6 +226,8 @@ type MigratePlanItem = {
 type OtherPlanItem = {
   workload_id: string; vmid: number; name: string | null;
   reasons?: string[];
+  // A stopped VM with Start at boot on: the host reboot will power it on by itself.
+  starts_on_boot?: boolean;
 };
 type OptionalPlanItem = {
   workload_id: string; vmid: number; name: string | null;
@@ -477,6 +479,14 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
           group.items.map((item) => (
             <div key={item.workload_id} className="flex items-center justify-between px-2 py-1.5 text-xs gap-2 bg-warn/5">
               <span className="text-text truncate flex-1 min-w-0">{item.name || `vmid ${item.vmid}`}</span>
+              {item.starts_on_boot && (
+                <span
+                  className="shrink-0 text-[10px] uppercase tracking-wide text-warn font-semibold border border-warn/40 rounded px-1 py-0.5"
+                  title={(item.reasons || [])[0]}
+                >
+                  starts on reboot
+                </span>
+              )}
               <span
                 className="text-muted text-right max-w-[60%] truncate"
                 title={(item.reasons || []).join("; ") || undefined}
