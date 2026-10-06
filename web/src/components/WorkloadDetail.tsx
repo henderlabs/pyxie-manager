@@ -43,8 +43,8 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 function CheckBadge({ check }: { check: WorkloadLive["check"] }) {
   if (!check) return null;
-  const label = { ok: "Live check OK", warn: "Live check: attention", info: "Live check: changed", unknown: "Live check: no answer" }[check.state];
-  const cls = { ok: "bg-good/15 text-good", warn: "bg-warn/15 text-warn", info: "bg-accent/15 text-accent", unknown: "bg-muted/15 text-muted" }[check.state];
+  const label = { ok: "Live check OK", warn: "Live check: slow", bad: "Not responding", info: "Live check: changed", unknown: "Live check: no answer" }[check.state];
+  const cls = { ok: "bg-good/15 text-good", warn: "bg-warn/15 text-warn", bad: "bg-bad/15 text-bad", info: "bg-accent/15 text-accent", unknown: "bg-muted/15 text-muted" }[check.state];
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${cls}`} title={check.detail}>
       {label}
