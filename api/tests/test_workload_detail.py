@@ -80,8 +80,10 @@ def test_status_trims_and_normalises_ha():
 def test_live_check_cases():
     assert live_check(None, "running")["state"] == "unknown"
     assert live_check({"status": "running", "qmpstatus": "running", "uptime": 9}, "running")["state"] == "ok"
-    assert live_check({"status": "running", "qmpstatus": "internal-error", "uptime": 9}, "running")["state"] == "warn"
-    assert live_check({"status": "running"}, "running")["state"] == "warn"
+    assert live_check({"status": "running", "qmpstatus": "internal-error", "uptime": 9}, "running")["state"] == "bad"
+    assert live_check({"status": "running", "uptime": 9}, "running")["state"] == "bad"  # QEMU not answering
+    assert live_check({"status": "running", "qmpstatus": "running"}, "running", elapsed=4.0)["state"] == "warn"
+    assert live_check(None, "running", error="timeout: x")["state"] == "bad"
     assert live_check({"status": "stopped", "qmpstatus": "stopped"}, "running")["state"] == "info"
     assert live_check({"status": "stopped", "qmpstatus": "stopped"}, "stopped")["state"] == "ok"
 
