@@ -86,6 +86,7 @@ export function Table<T extends { id: string }>({
   rowClassName,
   onRowClick,
   renderDetail,
+  singleExpand,
   controlledSort,
   onSortChange,
 }: {
@@ -105,6 +106,8 @@ export function Table<T extends { id: string }>({
    * null/undefined for a specific row to skip the toggle for that row
    * only (e.g. nothing more to show than the columns already have). */
   renderDetail?: (row: T) => React.ReactNode;
+  /** Opening one row's detail closes any other -- for heavy panels that fetch live data. */
+  singleExpand?: boolean;
   /** Together, these hand sorting to the parent instead of Table managing
    * it internally -- e.g. WorkloadsTable sorts its full dataset and THEN
    * paginates, so `rows` here is already sorted (and already sliced to
@@ -129,12 +132,25 @@ export function Table<T extends { id: string }>({
 
   function toggleExpanded(id: string) {
     setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
+      const next = new Set<string>(singleExpand ? [] : prev);
+      if (prev.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
   }
+
+  // A wide table scrolls sideways; keep an opened detail panel the width of what is
+  // visible and pinned to the left edge instead of stretching across every column.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [viewW, setViewW] = useState<number | null>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setViewW(el.clientWidth));
+    ro.observe(el);
+    setViewW(el.clientWidth);
+    return () => ro.disconnect();
+  }, [rows.length]);
 
   // Load persisted per-viewer prefs once on mount; reconcile against the
   // columns actually passed in (a column added/removed since last visit
@@ -280,7 +296,7 @@ export function Table<T extends { id: string }>({
       {rows.length === 0 ? (
         <div className="text-sm text-muted text-center py-10 border border-dashed border-border rounded-lg">{emptyMessage}</div>
       ) : (
-        <div className="overflow-x-auto border border-border rounded-lg">
+        <div ref={scrollRef} className="overflow-x-auto border border-border rounded-lg">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-surface2 text-left text-muted text-xs uppercase tracking-wider select-none">
@@ -381,7 +397,9 @@ export function Table<T extends { id: string }>({
                     {isExpanded && detail != null && (
                       <tr className="border-b border-border last:border-0 bg-canvas/60">
                         <td colSpan={orderedColumns.length + 1} className="px-6 py-3">
-                          {detail}
+                          <div className="sticky left-0" style={viewW ? { width: viewW - 48 } : undefined}>
+                            {detail}
+                          </div>
                         </td>
                       </tr>
                     )}
