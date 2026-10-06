@@ -221,7 +221,7 @@ type MigratePlanItem = {
   // about moving load OFF a node for good. Some workloads can stay in
   // place and just be powered down during updates, then brought back up
   // once updates/reboot are complete, without migrating at all.
-  transport?: "live" | "offline" | "shutdown_in_place";
+  transport?: "live" | "offline" | "shutdown_in_place" | "skip";
 };
 type OtherPlanItem = {
   workload_id: string; vmid: number; name: string | null;
@@ -280,7 +280,7 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
     }
   }
 
-  async function changeTransport(item: MigratePlanItem, transport: "live" | "offline" | "shutdown_in_place") {
+  async function changeTransport(item: MigratePlanItem, transport: "live" | "offline" | "shutdown_in_place" | "skip") {
     if (transport === (item.transport || "live")) return;
     setSavingId(item.workload_id);
     setSaveError(null);
@@ -387,7 +387,12 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
       <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border">
         <div className="text-xs font-medium text-text">
           {totalCount} workload{totalCount === 1 ? "" : "s"} on this host
-          {plan.length > 0 && <> — {plan.length} to move (change the destination below if you don't agree with the pick)</>}
+          {plan.length > 0 && (
+            <>
+              {" "}— {plan.filter((i) => i.transport !== "skip").length} to move (change the destination below if you don't agree with the pick)
+              {plan.some((i) => i.transport === "skip") && <>, {plan.filter((i) => i.transport === "skip").length} set to Don't move</>}
+            </>
+          )}
           {otherCount > 0 && <> — {otherCount} {otherCount === 1 ? "isn't" : "aren't"} moving, see below</>}
           {optionalItems.length > 0 && (
             <> — {optionalItems.length} not required to move{includedOptionalCount > 0 ? ` (${includedOptionalCount} opted in)` : ""}</>
@@ -412,8 +417,13 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
           a host needs to be viewable, even if that means a scrollbar. */}
       <div className="divide-y divide-border max-h-96 overflow-y-auto">
         {plan.map((item) => (
-          <div key={item.workload_id} className="flex items-center justify-between px-2 py-1.5 text-xs gap-2">
-            <span className="text-text truncate flex-1 min-w-0">{item.name || `vmid ${item.vmid}`}</span>
+          <div
+            key={item.workload_id}
+            className={`flex items-center justify-between px-2 py-1.5 text-xs gap-2 ${item.transport === "skip" ? "opacity-60" : ""}`}
+          >
+            <span className={`text-text truncate flex-1 min-w-0 ${item.transport === "skip" ? "line-through" : ""}`}>
+              {item.name || `vmid ${item.vmid}`}
+            </span>
             {item.current_storage && (
               <span
                 className="text-muted shrink-0 hidden sm:inline"
@@ -425,7 +435,7 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
             <select
               value={item.transport || "live"}
               disabled={savingId === item.workload_id || op.status !== "awaiting_approval" || !isAdmin}
-              onChange={(e) => changeTransport(item, e.target.value as "live" | "offline" | "shutdown_in_place")}
+              onChange={(e) => changeTransport(item, e.target.value as "live" | "offline" | "shutdown_in_place" | "skip")}
               title={
                 item.currently_on_shared === false
                   ? "This disk is on node-local storage -- live has to block-mirror it while the guest keeps writing; offline (shutdown, migrate, power back on) is usually faster, at the cost of downtime for the copy."
@@ -442,15 +452,18 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
               {(op.operation_type_id === "node.enter_maintenance" || op.operation_type_id === "maintenance.run") && (
                 <option value="shutdown_in_place">Shut down, restart after</option>
               )}
+              {/* Balance Load / Bulk Migrate only: every move there is optional, so
+                  any suggestion can be dropped and the rest applied. */}
+              {op.operation_type_id === "cluster.rebalance" && <option value="skip">Don't move</option>}
             </select>
             <select
-              value={item.transport === "shutdown_in_place" ? "" : item.destination_node_id}
-              disabled={savingId === item.workload_id || op.status !== "awaiting_approval" || item.transport === "shutdown_in_place" || !isAdmin}
+              value={item.transport === "shutdown_in_place" || item.transport === "skip" ? "" : item.destination_node_id}
+              disabled={savingId === item.workload_id || op.status !== "awaiting_approval" || item.transport === "shutdown_in_place" || item.transport === "skip" || !isAdmin}
               onChange={(e) => changeDestination(item, e.target.value)}
               title={item.transport === "shutdown_in_place" ? "Not moving -- stays on this host, powered off until maintenance completes." : undefined}
               className="w-52 shrink-0 bg-surface2 border border-border rounded px-1.5 py-1 text-xs text-left disabled:opacity-50"
             >
-              {item.transport === "shutdown_in_place" && <option value="">stays on this host</option>}
+              {(item.transport === "shutdown_in_place" || item.transport === "skip") && <option value="">stays on this host</option>}
               {(item.candidates || []).map((c) => (
                 <option key={c.node_id} value={c.node_id}>
                   {c.node_name}
@@ -553,6 +566,10 @@ export default function OperationCard({
   const elapsedSeconds = op.started_at ? Math.round((Date.now() - new Date(op.started_at).getTime()) / 1000) : null;
   const me = useMe();
   const isAdmin = me === undefined || me?.is_admin === true;
+  // Balance Load / Bulk Migrate with every line set to "Don't move" has nothing to run.
+  const rebalancePlan = ((op.dry_run_result as Record<string, unknown> | null)?.migrate_plan as MigratePlanItem[] | undefined) || [];
+  const nothingToMove =
+    op.operation_type_id === "cluster.rebalance" && rebalancePlan.length > 0 && rebalancePlan.every((i) => i.transport === "skip");
 
   return (
     <div className="border border-border rounded-lg p-4 bg-surface2/40">
@@ -615,7 +632,7 @@ export default function OperationCard({
           {op.status === "awaiting_approval" && isAdmin && (
             <button
               onClick={onApprove}
-              disabled={pending}
+              disabled={pending || nothingToMove}
               className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
             >
               {pending ? "Submitting…" : `Approve & Execute ${operationTypeLabel(op)}`}
