@@ -2,11 +2,10 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import type { HostMaintenanceStatus, Node, PveTask, Workload } from "@/lib/api";
 import { Card, CardTitle, PageHeader } from "@/components/Card";
-import NodeLiveStats from "@/components/NodeLiveStats";
-import PendingUpdatesRow from "@/components/PendingUpdatesRow";
+import NodeOverview from "@/components/NodeOverview";
+import { formatBytes } from "@/lib/format";
 import NodeWorkloadsTable from "@/components/tables/NodeWorkloadsTable";
 import StatusBadge from "@/components/StatusBadge";
-import { formatBytes } from "@/lib/format";
 import { ServerIcon, WrenchIcon } from "@/components/Icons";
 
 export default async function NodeDetailPage({ params }: { params: { id: string } }) {
@@ -20,7 +19,7 @@ export default async function NodeDetailPage({ params }: { params: { id: string 
   return (
     <div>
       <div className="flex items-start justify-between gap-3">
-        <PageHeader title={node.name} subtitle={`Node · Cluster ${node.cluster_id.slice(0, 8)}`} icon={<ServerIcon className="w-5 h-5" />} />
+        <PageHeader title={node.name} subtitle="Host · live status from PVE" icon={<ServerIcon className="w-5 h-5" />} />
         <Link
           href={`/operations/maintenance?node=${node.id}`}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-warn hover:bg-warn/10 shrink-0"
@@ -31,31 +30,20 @@ export default async function NodeDetailPage({ params }: { params: { id: string 
         </Link>
       </div>
 
-      <NodeLiveStats nodeId={params.id} initialNode={node} />
+      <NodeOverview nodeId={params.id} initialNode={node} rebootRequired={hostMaintenance ? hostMaintenance.reboot_required ?? null : null} />
 
-      <div className="grid grid-cols-2 gap-4 mb-4">
-        <Card>
-          <CardTitle>Identity</CardTitle>
-          <dl className="text-sm space-y-1">
-            <Row label="Kernel" value={node.kernel_version || "—"} />
-            <Row label="Memory total" value={formatBytes(node.mem_total_bytes)} />
-            <PendingUpdatesRow nodeId={params.id} initialCount={node.pending_updates ?? 0} />
-            <Row label="Last seen" value={new Date(node.last_seen).toLocaleString()} />
-          </dl>
-        </Card>
-        <Card>
-          <CardTitle>Recent Tasks</CardTitle>
-          <div className="space-y-1 text-sm">
-            {tasks.length === 0 && <div className="text-muted">No recent tasks.</div>}
-            {tasks.slice(0, 8).map((t) => (
-              <div key={t.id} className="flex justify-between">
-                <span className="text-text">{t.task_type || t.upid.split(":")[1]}</span>
-                <StatusBadge status={t.status || "unknown"} />
-              </div>
-            ))}
-          </div>
-        </Card>
-      </div>
+      <Card className="mb-4">
+        <CardTitle>Recent Tasks</CardTitle>
+        <div className="space-y-1 text-sm">
+          {tasks.length === 0 && <div className="text-muted">No recent tasks.</div>}
+          {tasks.slice(0, 8).map((t) => (
+            <div key={t.id} className="flex justify-between">
+              <span className="text-text">{t.task_type || t.upid.split(":")[1]}</span>
+              <StatusBadge status={t.status || "unknown"} />
+            </div>
+          ))}
+        </div>
+      </Card>
 
       <Card className="mb-4">
         <CardTitle>Host Maintenance</CardTitle>
