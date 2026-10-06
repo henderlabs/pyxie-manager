@@ -42,7 +42,7 @@ export default function PveTasksTable({
             const wid = t.node_id ? workloadIdByVmidNode[`${t.node_id}:${t.vmid}`] : undefined;
             const label = t.workload_name ? `${t.workload_name} (vmid ${t.vmid})` : `vmid ${t.vmid}`;
             return wid ? (
-              <Link href={`/infrastructure/workloads?workload=${wid}`} className="text-accent hover:underline">
+              <Link href={`/infrastructure/workloads/${wid}`} className="text-accent hover:underline">
                 {label}
               </Link>
             ) : (
