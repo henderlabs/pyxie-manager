@@ -220,7 +220,7 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
         <StatusBadge status={op.status} />
       </div>
       <div className="flex items-center justify-between gap-2 mt-0.5">
-        <span className="text-[11px] text-muted truncate">{subjectFor(op)}</span>
+        <span className="text-xs font-medium text-text truncate">{subjectFor(op)}</span>
         <span className="text-[11px] text-muted shrink-0">
           {relativeTime(op.completed_at || op.started_at || op.created_at)}
         </span>
@@ -295,7 +295,7 @@ function QueuedRow({ label, subject, by, since, skipped }: { label: string; subj
         )}
       </div>
       <div className="flex items-center justify-between gap-2 mt-0.5">
-        <span className="text-[11px] text-muted truncate">{subject}</span>
+        <span className="text-xs font-medium text-text truncate">{subject}</span>
         <span className="text-[11px] text-muted shrink-0">{skipped ? "set to Don't move" : "waiting on prior step"}</span>
       </div>
       {(by || since) && !skipped && (
