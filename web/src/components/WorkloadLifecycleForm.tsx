@@ -397,7 +397,7 @@ export default function WorkloadLifecycleForm({
               header: "Name",
               render: (w) => (
                 <Link
-                  href={`/infrastructure/workloads?workload=${w.id}`}
+                  href={`/infrastructure/workloads/${w.id}`}
                   onClick={(e) => e.stopPropagation()}
                   className="text-accent hover:underline"
                   title="Open on the Workloads page"
