@@ -1,14 +1,14 @@
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import type { AuditEvent, DashboardSummary, Finding, ProtectionResultRow, Recommendation } from "@/lib/api";
-import { Card, CardTitle, PageHeader, StatTile } from "@/components/Card";
+import { Card, CardTitle, PageHeader } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import RebootBanner from "@/components/RebootBanner";
 import DashboardNodesList from "@/components/DashboardNodesList";
 import { HalfGauge } from "@/components/HalfGauge";
 import { BalanceGauge, NodeBalanceStrip } from "@/components/ClusterBalance";
-import { ClusterIcon, ServerIcon, WorkloadIcon, StorageIcon, PackageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon } from "@/components/Icons";
-import { formatBytes, formatPct } from "@/lib/format";
+import { ClusterIcon, StorageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon } from "@/components/Icons";
+import { formatBytes } from "@/lib/format";
 
 export default async function DashboardPage() {
   // Deliberately only cheap DB reads here. reboot-required (RebootBanner,
@@ -25,6 +25,7 @@ export default async function DashboardPage() {
   ]);
 
   const issueCount = findings.filter((f) => f.severity === "critical" || f.severity === "warning").length;
+  const criticalCount = findings.filter((f) => f.severity === "critical").length;
   const topFindings = [...findings]
     .filter((f) => f.severity === "critical" || f.severity === "warning")
     .sort((a, b) => (a.severity === "critical" ? 0 : 1) - (b.severity === "critical" ? 0 : 1))
@@ -66,7 +67,7 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,620px),1fr))] gap-4 mb-4">
-      <Card>
+      <Card className="flex flex-col">
         <CardTitle>Cluster Resource Usage</CardTitle>
         <div className="flex flex-wrap items-center justify-around gap-4 py-1">
           <HalfGauge value={avgCpu} label="Avg CPU across nodes" icon={<CpuIcon />} />
@@ -90,33 +91,57 @@ export default async function DashboardPage() {
           />
           <BalanceGauge nodes={summary.nodes_detail} icon={<ClusterIcon />} />
         </div>
+        <div className="mt-auto pt-3 border-t border-border flex flex-wrap items-center justify-between gap-x-6 gap-y-1 text-xs text-muted">
+          <span>
+            {[
+              [summary.counts.clusters, "cluster", "clusters"],
+              [summary.counts.nodes, "node", "nodes"],
+              [summary.counts.vms, "VM", "VMs"],
+              [summary.counts.containers, "container", "containers"],
+              [summary.counts.storage, "storage pool", "storage pools"],
+            ].map(([n, one, many], i) => (
+              <span key={String(one)}>
+                {i > 0 && " · "}
+                <span className="font-medium text-text tabular-nums">{n}</span> {n === 1 ? one : many}
+              </span>
+            ))}
+          </span>
+          <span className="tabular-nums">
+            <span className="font-medium text-text">{summary.workloads_running}</span> of {summary.workloads_total} running ·{" "}
+            {summary.workloads_total - summary.workloads_running} not running
+          </span>
+        </div>
       </Card>
 
       <Card>
-        <CardTitle>Host Load</CardTitle>
+        <CardTitle>{`Host Load · ${summary.nodes_online} / ${summary.nodes_total} online`}</CardTitle>
         <NodeBalanceStrip nodes={summary.nodes_detail} />
       </Card>
       </div>
 
-      <Card className="mb-4">
-        <CardTitle>Environment Health</CardTitle>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-4">
-          <Metric label="Clusters" value={summary.counts.clusters} icon={<ClusterIcon />} />
-          <Metric label="Nodes" value={summary.counts.nodes} icon={<ServerIcon />} />
-          <Metric label="VMs" value={summary.counts.vms} icon={<WorkloadIcon />} />
-          <Metric label="Containers" value={summary.counts.containers} icon={<WorkloadIcon />} />
-          <Metric label="Storage" value={summary.counts.storage} icon={<StorageIcon />} />
+      <Card
+        className={`mb-4 ${summary.cluster_status === "critical" ? "border-bad/50" : summary.cluster_status === "warning" ? "border-warn/40" : ""}`}
+      >
+        <div className="flex flex-wrap items-center gap-x-10 gap-y-2 text-sm">
+          <div className="flex items-center gap-2">
+            <HealthIcon className="w-4 h-4 text-proxmox/70" />
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted">Health</span>
+            <StatusBadge status={summary.cluster_status} />
+          </div>
+          <Link href="/operations/maintenance" className="hover:underline">
+            <span className="text-muted">Updates </span>
+            <span className={summary.nodes_with_updates > 0 ? "font-semibold text-warn" : "font-semibold text-text"}>
+              {summary.nodes_with_updates}
+            </span>
+            <span className="text-muted text-xs"> {summary.nodes_with_updates === 1 ? "node has" : "nodes have"} updates</span>
+          </Link>
+          <Link href="/operations/health" className="hover:underline">
+            <span className="text-muted">Active findings </span>
+            <span className={`font-semibold ${criticalCount > 0 ? "text-bad" : issueCount > 0 ? "text-warn" : "text-text"}`}>{issueCount}</span>
+            <span className="text-muted text-xs"> critical + warning</span>
+          </Link>
         </div>
       </Card>
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
-        <StatTile label="Cluster Status" value={<StatusBadge status={summary.cluster_status} />} icon={<ClusterIcon />} />
-        <StatTile label="Nodes" value={`${summary.nodes_online} / ${summary.nodes_total}`} sub="Online" icon={<ServerIcon />} />
-        <StatTile label="Workloads" value={`${summary.workloads_running} / ${summary.workloads_total}`} sub={`Running · ${summary.workloads_total - summary.workloads_running} not running`} icon={<WorkloadIcon />} />
-        <StatTile label="Storage" value={formatPct(summary.storage_used_pct)} sub="Used" icon={<StorageIcon />} />
-        <StatTile label="Updates" value={summary.nodes_with_updates} sub="Nodes have updates" icon={<PackageIcon />} />
-        <StatTile label="Active Findings" value={issueCount} sub="Critical + warning" icon={<HealthIcon />} />
-      </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <Card className={topFindings.length > 0 ? "border-warn/40" : ""}>
@@ -219,18 +244,6 @@ export default async function DashboardPage() {
 
 function severityRank(s: string): number {
   return { critical: 0, warning: 1, info: 2 }[s] ?? 3;
-}
-
-function Metric({ label, value, icon }: { label: string; value: React.ReactNode; icon?: React.ReactNode }) {
-  return (
-    <div>
-      <div className="text-xs text-muted flex items-center gap-1 mb-1">
-        {icon && <span className="text-proxmox/70">{icon}</span>}
-        {label}
-      </div>
-      <div className="text-2xl font-semibold text-text">{value}</div>
-    </div>
-  );
 }
 
 function describeEvent(event: AuditEvent): string {
