@@ -181,7 +181,7 @@ function ProgressBar({ pct }: { pct: number | null | undefined }) {
 function WorkloadName({ name, workloadId }: { name: string; workloadId?: string | null }) {
   const router = useRouter();
   if (!workloadId) return <span className="text-xs font-medium text-text truncate">{name}</span>;
-  const href = `/infrastructure/workloads?workload=${workloadId}`;
+  const href = `/infrastructure/workloads/${workloadId}`;
   return (
     <span
       role="link"
