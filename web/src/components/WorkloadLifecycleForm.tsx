@@ -261,6 +261,27 @@ export default function WorkloadLifecycleForm({
     setOp(null);
   }
 
+  // Selections are for the move you are about to make, not a standing choice:
+  // once the move has gone (approved from this card OR from the Task Panel),
+  // clear the ticked rows; once a single-VM action completes, clear the picker
+  // and action too. A failed action keeps its selection so it can be retried.
+  // The finished/in-flight operation card itself stays on screen.
+  useEffect(() => {
+    if (bulkOp && !["awaiting_approval", "pending", "dry_run"].includes(bulkOp.status)) {
+      setBulkIds(new Set());
+      setBulkDestId("");
+    }
+  }, [bulkOp?.status]);
+  useEffect(() => {
+    if (op?.status === "completed") {
+      setWorkloadId("");
+      setAction("");
+      setDestNodeId("");
+      setDestStorageId("");
+      setRecommendation(null);
+    }
+  }, [op?.status]);
+
   // Arrived here via a VM name link from the Workloads page -- scroll the
   // now-preselected (and already-highlighted via rowClassName) row into
   // view instead of leaving the user to hunt for it in a scrolling table.
@@ -268,6 +289,17 @@ export default function WorkloadLifecycleForm({
   useEffect(() => {
     if (!initialWorkloadId) return;
     tableScrollRef.current?.querySelector(".pyxie-jump-target")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    // Drop ?workload= from the address bar now that it has been applied, so a
+    // page refresh starts with nothing selected instead of re-selecting it.
+    try {
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("workload")) {
+        url.searchParams.delete("workload");
+        window.history.replaceState(null, "", url.toString());
+      }
+    } catch {
+      /* address bar tidy-up only */
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
