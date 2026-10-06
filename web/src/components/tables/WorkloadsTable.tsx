@@ -16,97 +16,10 @@ import { formatBytes } from "@/lib/format";
 import { CpuIcon, MemoryIcon } from "@/components/Icons";
 import { findingWorkloadIds } from "@/lib/findings";
 import { useMe } from "@/lib/useMe";
-import { ProfileSelect, patchPlacementProfile } from "@/components/ProfileSelect";
+import { PreferredHostSelect, ProfileSelect, StoragePreferenceSelect, patchPlacementProfile } from "@/components/ProfileSelect";
 import { WorkloadRowDetail } from "@/components/WorkloadDetail";
 
 type WorkloadMetric = { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host"; ballooning?: "on" | "off" | "pending"; balloon_min_mb?: number | null };
-
-function StoragePreferenceSelect({
-  workloadId,
-  value,
-  onChanged,
-}: {
-  workloadId: string;
-  value: string | null;
-  onChanged: (v: string | null) => void;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const me = useMe();
-  const isAdmin = me === undefined || me?.is_admin === true;
-  async function change(newValue: string) {
-    const stored = newValue === "auto" ? null : newValue;
-    setSaving(true);
-    setError(null);
-    try {
-      await patchPlacementProfile(workloadId, { storage_preference: stored });
-      onChanged(stored);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <select
-      className={`bg-surface2 border rounded px-1.5 py-1 text-xs ${error ? "border-bad" : "border-border"}`}
-      value={value || "auto"}
-      disabled={saving || !isAdmin}
-      title={error || undefined}
-      onChange={(e) => change(e.target.value)}
-    >
-      <option value="auto">auto (current)</option>
-      <option value="local">local</option>
-      <option value="shared">shared</option>
-    </select>
-  );
-}
-
-function PreferredHostSelect({
-  workloadId,
-  clusterNodes,
-  value,
-  onChanged,
-}: {
-  workloadId: string;
-  clusterNodes: Node[];
-  value: string | null;
-  onChanged: (v: string | null) => void;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const me = useMe();
-  const isAdmin = me === undefined || me?.is_admin === true;
-  async function change(newValue: string) {
-    const stored = newValue === "none" ? null : newValue;
-    setSaving(true);
-    setError(null);
-    try {
-      await patchPlacementProfile(workloadId, { preferred_node_id: stored });
-      onChanged(stored);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <select
-      className={`bg-surface2 border rounded px-1.5 py-1 text-xs ${error ? "border-bad" : "border-border"}`}
-      value={value || "none"}
-      disabled={saving || !isAdmin}
-      title={error || undefined}
-      onChange={(e) => change(e.target.value)}
-    >
-      <option value="none">no preference</option>
-      {clusterNodes.map((n) => (
-        <option key={n.id} value={n.id}>
-          {n.name}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 export default function WorkloadsTable({
   workloads,
@@ -380,6 +293,7 @@ export default function WorkloadsTable({
           },
           sortValue: (w) => rightsizingByWorkload.get(w.id)?.current_memory_bytes ?? w.memory_bytes,
           optional: true,
+          defaultHidden: true,
         },
         {
           header: "Resize",
@@ -459,6 +373,7 @@ export default function WorkloadsTable({
           ),
           sortValue: (w) => sensitivity[w.id],
           optional: true,
+          defaultHidden: true,
         },
         {
           header: "Downtime Tolerance",
@@ -476,6 +391,7 @@ export default function WorkloadsTable({
           ),
           sortValue: (w) => downtimeTolerance[w.id],
           optional: true,
+          defaultHidden: true,
         },
         {
           header: "Storage Preference",
@@ -490,6 +406,7 @@ export default function WorkloadsTable({
           ),
           sortValue: (w) => storagePref[w.id] || "auto",
           optional: true,
+          defaultHidden: true,
         },
         {
           header: "Preferred Host",
@@ -505,6 +422,7 @@ export default function WorkloadsTable({
           ),
           sortValue: (w) => nodeById.get(preferredNode[w.id] || "")?.name || "",
           optional: true,
+          defaultHidden: true,
         },
         {
           header: "PyXie Notes",
@@ -558,6 +476,7 @@ export default function WorkloadsTable({
         rowClassName={(w) => (w.id === highlightWorkloadId ? "bg-accent/10 pyxie-jump-target" : "")}
         columns={columns}
         singleExpand
+        defaultsVersion={1}
         renderDetail={(w) =>
           w.is_missing ? null : (
             <WorkloadRowDetail
@@ -565,16 +484,25 @@ export default function WorkloadsTable({
                 ...w,
                 sensitivity: sensitivity[w.id] ?? w.sensitivity,
                 downtime_tolerance: downtimeTolerance[w.id] ?? w.downtime_tolerance,
+                storage_preference: storagePref[w.id] ?? null,
+                preferred_node_id: preferredNode[w.id] ?? null,
                 placement_notes: notes[w.id] ?? w.placement_notes,
               }}
               findings={(findingsByWorkload.get(w.id) || []).map((f) => ({ id: f.id, severity: f.severity, title: f.title }))}
+              clusterNodes={nodesByCluster.get(w.cluster_id) || []}
               profile={{
-                sensitivity: sensitivity[w.id] ?? w.sensitivity,
-                downtime_tolerance: downtimeTolerance[w.id] ?? w.downtime_tolerance,
-                onChange: (field, value) =>
-                  field === "sensitivity"
-                    ? setSensitivity((m) => ({ ...m, [w.id]: value }))
-                    : setDowntimeTolerance((m) => ({ ...m, [w.id]: value })),
+                values: {
+                  sensitivity: sensitivity[w.id] ?? w.sensitivity,
+                  downtime_tolerance: downtimeTolerance[w.id] ?? w.downtime_tolerance,
+                  storage_preference: storagePref[w.id] ?? null,
+                  preferred_node_id: preferredNode[w.id] ?? null,
+                },
+                onChange: (patch) => {
+                  if (patch.sensitivity !== undefined) setSensitivity((m) => ({ ...m, [w.id]: patch.sensitivity as string }));
+                  if (patch.downtime_tolerance !== undefined) setDowntimeTolerance((m) => ({ ...m, [w.id]: patch.downtime_tolerance as string }));
+                  if (patch.storage_preference !== undefined) setStoragePref((m) => ({ ...m, [w.id]: patch.storage_preference as string | null }));
+                  if (patch.preferred_node_id !== undefined) setPreferredNode((m) => ({ ...m, [w.id]: patch.preferred_node_id as string | null }));
+                },
               }}
             />
           )
