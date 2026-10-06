@@ -69,7 +69,7 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,620px),1fr))] gap-4 mb-4">
       <Card className="flex flex-col">
         <CardTitle>Cluster Resource Usage</CardTitle>
-        <div className="flex flex-wrap items-center justify-around gap-4 py-1">
+        <div className="flex-1 flex flex-wrap items-center content-center justify-around gap-4 py-1">
           <HalfGauge value={avgCpu} label="Avg CPU across nodes" icon={<CpuIcon />} />
           <HalfGauge
             value={avgMem}
