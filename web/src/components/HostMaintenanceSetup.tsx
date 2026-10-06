@@ -73,7 +73,7 @@ export default function HostMaintenanceSetup({
             <button
               onClick={() => generate(false)}
               disabled={generating}
-              className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
+              className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
             >
               {generating ? "Generating…" : "Generate Keypair"}
             </button>
@@ -92,20 +92,20 @@ export default function HostMaintenanceSetup({
               <div className="flex gap-2">
                 <button
                   onClick={downloadKit}
-                  className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-accent hover:bg-accent/10"
+                  className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10"
                 >
                   Download Provisioning Kit
                 </button>
                 <button
                   onClick={() => generate(true)}
                   disabled={generating}
-                  className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
+                  className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
                 >
                   {generating ? "Regenerating…" : "Regenerate Keypair"}
                 </button>
                 <button
                   onClick={downloadUninstallScript}
-                  className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-bad hover:bg-bad/10"
+                  className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-bad hover:bg-bad/10"
                 >
                   Download Uninstall Script
                 </button>
@@ -223,7 +223,7 @@ function NodeReadinessRow({
         <button
           onClick={probe}
           disabled={probing}
-          className="mt-1.5 px-2 py-1 rounded text-[11px] font-medium bg-black text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
+          className="mt-1.5 px-2 py-1 rounded text-[11px] font-medium bg-ink text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
         >
           {probing ? "Probing…" : "Probe Host Key"}
         </button>
@@ -240,7 +240,7 @@ function NodeReadinessRow({
             <button
               onClick={pin}
               disabled={pinning}
-              className="px-2 py-1 rounded text-[11px] font-medium bg-black text-white border border-good hover:bg-good/10 disabled:opacity-50"
+              className="px-2 py-1 rounded text-[11px] font-medium bg-ink text-white border border-good hover:bg-good/10 disabled:opacity-50"
             >
               {pinning ? "Pinning…" : "Confirms match — Pin"}
             </button>
@@ -268,7 +268,7 @@ function NodeReadinessRow({
       {pinned && !confirmingDisconnect && isAdmin && (
         <button
           onClick={() => setConfirmingDisconnect(true)}
-          className="mt-1.5 px-2 py-1 rounded text-[11px] font-medium bg-black text-white border border-bad hover:bg-bad/10"
+          className="mt-1.5 px-2 py-1 rounded text-[11px] font-medium bg-ink text-white border border-bad hover:bg-bad/10"
         >
           Disconnect
         </button>
@@ -284,7 +284,7 @@ function NodeReadinessRow({
             <button
               onClick={disconnect}
               disabled={disconnecting}
-              className="px-2 py-1 rounded text-[11px] font-medium bg-black text-white border border-bad hover:bg-bad/10 disabled:opacity-50"
+              className="px-2 py-1 rounded text-[11px] font-medium bg-ink text-white border border-bad hover:bg-bad/10 disabled:opacity-50"
             >
               {disconnecting ? "Disconnecting…" : "Confirm Disconnect"}
             </button>
