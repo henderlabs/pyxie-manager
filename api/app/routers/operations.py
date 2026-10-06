@@ -431,8 +431,8 @@ def update_migrate_plan_destination(
 ):
     if payload.destination_node_id is None and payload.transport is None:
         raise HTTPException(400, "nothing to update -- pass destination_node_id and/or transport")
-    if payload.transport is not None and payload.transport not in ("live", "offline", "shutdown_in_place"):
-        raise HTTPException(400, "transport must be 'live', 'offline', or 'shutdown_in_place'")
+    if payload.transport is not None and payload.transport not in ("live", "offline", "shutdown_in_place", "skip"):
+        raise HTTPException(400, "transport must be 'live', 'offline', 'shutdown_in_place', or 'skip'")
 
     op = db.query(Operation).filter(Operation.id == operation_id).one_or_none()
     if op is None:
@@ -442,6 +442,11 @@ def update_migrate_plan_destination(
         # node.evacuate/cluster.rebalance are about moving load OFF a node
         # for good, so there's nowhere to "restart it here" later.
         raise HTTPException(400, f"'shutdown_in_place' isn't available for {op.operation_type_id}")
+    if payload.transport == "skip" and op.operation_type_id != "cluster.rebalance":
+        # Balance Load / Bulk Migrate are optional moves, so any line can be dropped.
+        # Maintenance and evacuation exist to empty the host: every VM has to go
+        # somewhere or be shut down in place, so "don't move" would defeat them.
+        raise HTTPException(400, f"'skip' isn't available for {op.operation_type_id}")
     plan_key = _PLAN_KEY_BY_TYPE.get(op.operation_type_id)
     if plan_key is None:
         raise HTTPException(400, f"{op.operation_type_id} has no editable migration plan")

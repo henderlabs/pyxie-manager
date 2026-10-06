@@ -274,6 +274,12 @@ def dry_run_bulk_migrate(
     return enter_stage(db, op, status="awaiting_approval", stage="awaiting_approval", actor=actor)
 
 
+def plan_items_to_move(plan: list[dict]) -> list[dict]:
+    """The plan lines that will actually run: anything the operator set to
+    "Don't move" (transport == "skip") on the preview is dropped."""
+    return [item for item in plan if item.get("transport") != "skip"]
+
+
 def approve(db: Session, op: Operation, *, approved_by: str) -> Operation:
     return approve_operation(db, op, approved_by=approved_by)
 
@@ -296,7 +302,7 @@ def execute_balance(db: Session, operation_id) -> Operation:
     try:
         if op.status == "approved":
             involved_node_ids = set()
-            for item in migrate_plan:
+            for item in plan_items_to_move(migrate_plan):
                 wl = db.query(Workload).filter(Workload.id == item["workload_id"]).one_or_none()
                 if wl is not None:
                     involved_node_ids.add(wl.node_id)
@@ -313,7 +319,7 @@ def execute_balance(db: Session, operation_id) -> Operation:
             op = enter_stage(db, op, status="evacuating", stage="evacuating")
 
         if op.status == "evacuating":
-            for item in migrate_plan:
+            for item in plan_items_to_move(migrate_plan):
                 if item["workload_id"] in completed_migrations:
                     continue
                 cancelled = check_cancel_requested(db, op)
