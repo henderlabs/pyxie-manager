@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from pyxie_core.discovery import build_pve_client
 from pyxie_core.models import Cluster, Finding, Node, PveTarget, PveTask, Workload
+from pyxie_core.liveness_watch import fresh_liveness
 from pyxie_core.vm_liveness import PROBE_TIMEOUT_SECONDS, scan_vm_liveness
 from pyxie_core.workload_detail import (
     RRD_TIMEFRAMES,
@@ -263,7 +264,14 @@ def _build_liveness(db: Session) -> dict:
 
 @router.get("/liveness")
 def workloads_liveness(db: Session = Depends(get_db)):
-    """Is each running VM's QEMU answering? For the Workloads table's Live Check column; cached 60 s."""
+    """Is each running VM's QEMU answering? For the Workloads table's Live Check column.
+
+    Served from the worker's background watch (results under 3 minutes old). Only if that is not
+    running (most VMs have no fresh result) does it fall back to probing now, cached 60 s."""
+    running = db.query(Workload).filter(Workload.is_missing.is_(False), Workload.type == "vm", Workload.status == "running").count()
+    fresh = fresh_liveness(db)
+    if running == 0 or len(fresh) >= 0.5 * running:
+        return {"liveness": fresh, "generated_at": datetime.now(timezone.utc).isoformat(), "source": "watch"}
     with _liveness_lock:
         if _liveness_cache["data"] is not None and time.monotonic() - _liveness_cache["ts"] < _LIVENESS_TTL_SECONDS:
             return _liveness_cache["data"]
