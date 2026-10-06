@@ -42,14 +42,14 @@ export default function HoldDownSetting({ initial }: { initial: number }) {
           disabled={!isAdmin}
           value={minutes}
           onChange={(e) => setMinutes(e.target.value)}
-          className="w-20 bg-[#0b0e14] border border-[#232a38] rounded px-2 py-1 text-sm text-[#e6e9ef]"
+          className="w-20 bg-[rgb(var(--c-canvas))] border border-[rgb(var(--c-border))] rounded px-2 py-1 text-sm text-[rgb(var(--c-text))]"
         />
         minutes before announcing a change
         {isAdmin && (
           <button
             type="button"
             onClick={save}
-            className="ml-2 px-3 py-1 rounded text-sm border border-border hover:bg-white/5"
+            className="ml-2 px-3 py-1 rounded text-sm border border-border hover:bg-text/5"
           >
             Save
           </button>
