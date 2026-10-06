@@ -27,8 +27,8 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 function barColor(pct: number | null): string {
-  if (pct == null) return "#8b95a7";
-  return pct >= 90 ? "#e5484d" : pct >= 75 ? "#e5a94c" : "#2fbf71";
+  if (pct == null) return "rgb(var(--c-muted))";
+  return pct >= 90 ? "rgb(var(--c-bad))" : pct >= 75 ? "rgb(var(--c-warn))" : "rgb(var(--c-good))";
 }
 
 function Tile({ label, value, pct, sub }: { label: string; value: React.ReactNode; pct?: number | null; sub?: React.ReactNode }) {
@@ -203,26 +203,26 @@ export default function NodeOverview({
           <Card>
             <MetricChart title="CPU usage" times={times} loading={rrd.loading} format={(v) => `${v < 10 ? v.toFixed(1) : v.toFixed(0)}%`}
               series={[
-                { label: "CPU", color: "#4f8cff", area: true, values: col(rrd.rows, (r) => (r.cpu != null ? r.cpu * 100 : undefined)) },
-                { label: "IO delay", color: "#e5a94c", values: col(rrd.rows, (r) => (r.iowait != null ? r.iowait * 100 : undefined)) },
+                { label: "CPU", color: "rgb(var(--c-accent))", area: true, values: col(rrd.rows, (r) => (r.cpu != null ? r.cpu * 100 : undefined)) },
+                { label: "IO delay", color: "rgb(var(--c-warn))", values: col(rrd.rows, (r) => (r.iowait != null ? r.iowait * 100 : undefined)) },
               ]} />
           </Card>
           <Card>
             <MetricChart title="Server load" times={times} loading={rrd.loading} format={(v) => v.toFixed(1)}
-              series={[{ label: "Load average", color: "#4f8cff", area: true, values: col(rrd.rows, (r) => r.loadavg) }]} />
+              series={[{ label: "Load average", color: "rgb(var(--c-accent))", area: true, values: col(rrd.rows, (r) => r.loadavg) }]} />
           </Card>
           <Card>
             <MetricChart title="Memory usage" times={times} loading={rrd.loading} format={(v) => formatBytes(v)} fixedMax={memTotal || undefined}
               series={[
-                { label: "Used", color: "#4f8cff", area: true, values: col(rrd.rows, (r) => r.memused) },
-                ...(hasArc ? [{ label: "ZFS ARC", color: "#2fbf71", values: col(rrd.rows, (r) => r.arcsize) }] : []),
+                { label: "Used", color: "rgb(var(--c-accent))", area: true, values: col(rrd.rows, (r) => r.memused) },
+                ...(hasArc ? [{ label: "ZFS ARC", color: "rgb(var(--c-good))", values: col(rrd.rows, (r) => r.arcsize) }] : []),
               ]} />
           </Card>
           <Card>
             <MetricChart title="Network traffic" times={times} loading={rrd.loading} format={rate}
               series={[
-                { label: "In", color: "#2fbf71", area: true, values: col(rrd.rows, (r) => r.netin) },
-                { label: "Out", color: "#4f8cff", values: col(rrd.rows, (r) => r.netout) },
+                { label: "In", color: "rgb(var(--c-good))", area: true, values: col(rrd.rows, (r) => r.netin) },
+                { label: "Out", color: "rgb(var(--c-accent))", values: col(rrd.rows, (r) => r.netout) },
               ]} />
           </Card>
         </div>
