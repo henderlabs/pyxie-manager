@@ -22,3 +22,11 @@ body {
 ::-webkit-scrollbar-track {
   background: transparent;
 }
+
+/* Click acknowledgement while a page loads (see NavProgress). */
+@keyframes pyxie-nav-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.pyxie-nav-bar { animation: pyxie-nav-slide 1.1s ease-in-out infinite; }
+html.pyxie-navigating, html.pyxie-navigating * { cursor: progress !important; }
