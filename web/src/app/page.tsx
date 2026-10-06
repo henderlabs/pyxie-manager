@@ -5,9 +5,9 @@ import { Card, CardTitle, PageHeader, StatTile } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import RebootBanner from "@/components/RebootBanner";
 import DashboardNodesList from "@/components/DashboardNodesList";
-import { RadialGauge } from "@/components/Gauges";
+import { HalfGauge } from "@/components/HalfGauge";
 import { ClusterIcon, ServerIcon, WorkloadIcon, StorageIcon, PackageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon, ChecklistIcon } from "@/components/Icons";
-import { formatPct } from "@/lib/format";
+import { formatBytes, formatPct } from "@/lib/format";
 
 export default async function DashboardPage() {
   // Deliberately only cheap DB reads here. reboot-required (RebootBanner,
@@ -68,10 +68,31 @@ export default async function DashboardPage() {
       <Card className="mb-4">
         <CardTitle>Cluster Resource Usage</CardTitle>
         <div className="flex flex-wrap items-center justify-around gap-4 py-1">
-          <RadialGauge value={avgCpu} label="Avg CPU across nodes" icon={<CpuIcon />} />
-          <RadialGauge value={avgMem} label="Avg Memory across nodes" icon={<MemoryIcon />} />
-          <RadialGauge value={summary.storage_used_pct} label="Storage used" icon={<StorageIcon />} />
-          <RadialGauge value={workloadPct} label="Workloads running" icon={<WorkloadIcon />} />
+          <HalfGauge value={avgCpu} label="Avg CPU across nodes" icon={<CpuIcon />} />
+          <HalfGauge
+            value={avgMem}
+            label="Avg Memory across nodes"
+            icon={<MemoryIcon />}
+            detail={
+              summary.mem_total_bytes ? `${formatBytes(summary.mem_used_bytes)} of ${formatBytes(summary.mem_total_bytes)}` : null
+            }
+          />
+          <HalfGauge
+            value={summary.storage_used_pct}
+            label="Storage used"
+            icon={<StorageIcon />}
+            detail={
+              summary.storage_total_bytes
+                ? `${formatBytes(summary.storage_used_bytes)} of ${formatBytes(summary.storage_total_bytes)}`
+                : null
+            }
+          />
+          <HalfGauge
+            value={workloadPct}
+            label="Workloads running"
+            icon={<WorkloadIcon />}
+            detail={summary.workloads_total > 0 ? `${summary.workloads_running} of ${summary.workloads_total}` : null}
+          />
         </div>
       </Card>
 
