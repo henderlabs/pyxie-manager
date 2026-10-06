@@ -48,7 +48,7 @@ export default function InviteUserForm() {
           setOpen(true);
           setInviteLink(null);
         }}
-        className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-accent hover:bg-accent/10"
+        className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10"
       >
         + Invite User
       </button>
@@ -89,12 +89,12 @@ export default function InviteUserForm() {
         <style jsx>{`
           .input {
             width: 100%;
-            background: #0b0e14;
-            border: 1px solid #232a38;
+            background: rgb(var(--c-canvas));
+            border: 1px solid rgb(var(--c-border));
             border-radius: 6px;
             padding: 6px 8px;
             font-size: 0.8rem;
-            color: #e6e9ef;
+            color: rgb(var(--c-text));
           }
         `}</style>
       </div>
@@ -133,7 +133,7 @@ export default function InviteUserForm() {
         <button
           type="submit"
           disabled={pending}
-          className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           {pending ? "Creating…" : "Create invite"}
         </button>
@@ -148,12 +148,12 @@ export default function InviteUserForm() {
       <style jsx>{`
         .input {
           width: 100%;
-          background: #0b0e14;
-          border: 1px solid #232a38;
+          background: rgb(var(--c-canvas));
+          border: 1px solid rgb(var(--c-border));
           border-radius: 6px;
           padding: 6px 8px;
           font-size: 0.875rem;
-          color: #e6e9ef;
+          color: rgb(var(--c-text));
         }
       `}</style>
     </form>
