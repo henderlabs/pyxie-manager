@@ -6,9 +6,9 @@ import TaskPanel, { PANEL_WIDTH_PX } from "@/components/TaskPanel";
 
 export default function AppChrome({ children, version }: { children: React.ReactNode; version: string }) {
   const pathname = usePathname();
-  // The Tasks panel is a fixed, always-open dock on every page except the
-  // dashboard, where it is not rendered at all (no edge tab, no polling).
-  const showTasks = pathname !== "/";
+  // The Tasks panel is a fixed, always-open dock on every page, the dashboard
+  // included (TaskPanel renders nothing on /login).
+  const showTasks = pathname !== "/login";
 
   return (
     <>

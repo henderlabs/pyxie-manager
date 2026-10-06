@@ -6,7 +6,8 @@ import StatusBadge from "@/components/StatusBadge";
 import RebootBanner from "@/components/RebootBanner";
 import DashboardNodesList from "@/components/DashboardNodesList";
 import { HalfGauge } from "@/components/HalfGauge";
-import { ClusterIcon, ServerIcon, WorkloadIcon, StorageIcon, PackageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon, ChecklistIcon } from "@/components/Icons";
+import { BalanceGauge, NodeBalanceStrip } from "@/components/ClusterBalance";
+import { ClusterIcon, ServerIcon, WorkloadIcon, StorageIcon, PackageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon } from "@/components/Icons";
 import { formatBytes, formatPct } from "@/lib/format";
 
 export default async function DashboardPage() {
@@ -41,7 +42,6 @@ export default async function DashboardPage() {
   const memValues = summary.nodes_detail.map((n) => n.mem_usage_pct).filter((v): v is number => v !== null);
   const avgCpu = cpuValues.length ? cpuValues.reduce((a, b) => a + b, 0) / cpuValues.length : null;
   const avgMem = memValues.length ? memValues.reduce((a, b) => a + b, 0) / memValues.length : null;
-  const workloadPct = summary.workloads_total > 0 ? (summary.workloads_running / summary.workloads_total) * 100 : null;
   const nodesInMaintenance = summary.nodes_detail.filter((n) => n.maintenance_mode);
 
   return (
@@ -65,7 +65,8 @@ export default async function DashboardPage() {
         <RebootBanner nodes={summary.nodes_detail.map((n) => ({ id: n.id, name: n.name }))} />
       </div>
 
-      <Card className="mb-4">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,620px),1fr))] gap-4 mb-4">
+      <Card>
         <CardTitle>Cluster Resource Usage</CardTitle>
         <div className="flex flex-wrap items-center justify-around gap-4 py-1">
           <HalfGauge value={avgCpu} label="Avg CPU across nodes" icon={<CpuIcon />} />
@@ -87,14 +88,15 @@ export default async function DashboardPage() {
                 : null
             }
           />
-          <HalfGauge
-            value={workloadPct}
-            label="Workloads running"
-            icon={<WorkloadIcon />}
-            detail={summary.workloads_total > 0 ? `${summary.workloads_running} of ${summary.workloads_total}` : null}
-          />
+          <BalanceGauge nodes={summary.nodes_detail} icon={<ClusterIcon />} />
         </div>
       </Card>
+
+      <Card>
+        <CardTitle>Host Load</CardTitle>
+        <NodeBalanceStrip nodes={summary.nodes_detail} />
+      </Card>
+      </div>
 
       <Card className="mb-4">
         <CardTitle>Environment Health</CardTitle>
@@ -110,16 +112,10 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
         <StatTile label="Cluster Status" value={<StatusBadge status={summary.cluster_status} />} icon={<ClusterIcon />} />
         <StatTile label="Nodes" value={`${summary.nodes_online} / ${summary.nodes_total}`} sub="Online" icon={<ServerIcon />} />
-        <StatTile label="Workloads" value={`${summary.workloads_running} / ${summary.workloads_total}`} sub="Running" icon={<WorkloadIcon />} />
+        <StatTile label="Workloads" value={`${summary.workloads_running} / ${summary.workloads_total}`} sub={`Running · ${summary.workloads_total - summary.workloads_running} not running`} icon={<WorkloadIcon />} />
         <StatTile label="Storage" value={formatPct(summary.storage_used_pct)} sub="Used" icon={<StorageIcon />} />
         <StatTile label="Updates" value={summary.nodes_with_updates} sub="Nodes have updates" icon={<PackageIcon />} />
         <StatTile label="Active Findings" value={issueCount} sub="Critical + warning" icon={<HealthIcon />} />
-        <StatTile
-          label="Awaiting Approval"
-          value={summary.operations_awaiting_approval}
-          sub="Operations"
-          icon={<ChecklistIcon />}
-        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
