@@ -25,6 +25,7 @@ from .routers import (
     protection,
     providers,
     recommendations,
+    node_detail,
     reports,
     workload_detail,
 )
@@ -95,6 +96,7 @@ app.include_router(notifications.router)
 app.include_router(notification_rules.router)
 app.include_router(jobs.router)
 app.include_router(network.router)
+app.include_router(node_detail.router)
 app.include_router(workload_detail.router)
 
 
