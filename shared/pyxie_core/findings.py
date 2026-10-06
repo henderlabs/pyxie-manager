@@ -11,8 +11,9 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from .models import AppSettings, Cluster, Finding, Node, Notification, PlacementAffinityRule, Policy, Provider, PveTarget, PveTask, Storage, Workload
+from .models import AppSettings, Cluster, Finding, Node, Notification, PlacementAffinityRule, Policy, Provider, PveTarget, PveTask, Storage, Workload, WorkloadLiveness
 from .notifications import dispatch_event
+from .vm_liveness import finding_worthy
 
 TASK_LOOKBACK_DAYS = 7
 DEFAULT_STORAGE_WARNING_PCT = 85
@@ -321,8 +322,44 @@ def evaluate_findings(db: Session) -> dict:
 
     current.extend(_protection_findings(db))
     current.extend(_affinity_violation_findings(db))
+    current.extend(_liveness_findings(db))
 
     return _reconcile(db, current)
+
+
+def _liveness_findings(db: Session) -> list[dict]:
+    """A running VM whose QEMU has stopped answering. PVE still calls it `running`, but a live
+    migration of it hangs (VM 115 sat dead ~2 days). Raised only after two bad probes in a row and
+    only while the result is fresh, so a stopped or power-cycled VM clears on its own."""
+    now = datetime.now(timezone.utc)
+    out: list[dict] = []
+    rows = (
+        db.query(WorkloadLiveness, Workload, Node)
+        .join(Workload, Workload.id == WorkloadLiveness.workload_id)
+        .join(Node, Node.id == Workload.node_id)
+        .filter(Workload.is_missing.is_(False), WorkloadLiveness.consecutive_bad >= 2)
+        .all()
+    )
+    for r, wl, node in rows:
+        row = {"checked_at": r.checked_at, "consecutive_bad": r.consecutive_bad}
+        if not finding_worthy(row, now):
+            continue
+        out.append(
+            {
+                "dedupe_key": f"vm.not_responding:{wl.id}",
+                "object_type": "workload",
+                "object_id": wl.id,
+                "category": "liveness",
+                "severity": "critical",
+                "title": f"VM '{wl.name or wl.vmid}' ({wl.vmid}) on {node.name} is not responding",
+                "evidence": {
+                    "vmid": wl.vmid, "name": wl.name, "node": node.name, "state": r.state, "detail": r.detail,
+                    "bad_since": r.bad_since.isoformat() if r.bad_since else None, "workload_ids": [str(wl.id)],
+                    "fix": "PVE still shows it as running, but live migration and shutdown through PVE will hang. Power-cycle it from PVE.",
+                },
+            }
+        )
+    return out
 
 
 def _affinity_violation_findings(db: Session) -> list[dict]:
