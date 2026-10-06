@@ -51,7 +51,7 @@ export default function PbsTargetForm({ siteId }: { siteId: string }) {
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-accent hover:bg-accent/10">
+      <button onClick={() => setOpen(true)} className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10">
         + Add PBS Target
       </button>
     );
@@ -88,7 +88,7 @@ export default function PbsTargetForm({ siteId }: { siteId: string }) {
       </Field>
       {error && <div className="text-xs text-bad">{error}</div>}
       <div className="flex gap-2 pt-1">
-        <button type="submit" disabled={pending} className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-accent hover:bg-accent/10 disabled:opacity-50">
+        <button type="submit" disabled={pending} className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50">
           {pending ? "Saving…" : "Save target"}
         </button>
         <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded text-sm font-medium bg-surface text-muted border border-border">
@@ -96,7 +96,7 @@ export default function PbsTargetForm({ siteId }: { siteId: string }) {
         </button>
       </div>
       <style jsx>{`
-        .input { width: 100%; background: #0b0e14; border: 1px solid #232a38; border-radius: 6px; padding: 6px 8px; font-size: 0.875rem; color: #e6e9ef; }
+        .input { width: 100%; background: rgb(var(--c-canvas)); border: 1px solid rgb(var(--c-border)); border-radius: 6px; padding: 6px 8px; font-size: 0.875rem; color: rgb(var(--c-text)); }
       `}</style>
     </form>
   );
