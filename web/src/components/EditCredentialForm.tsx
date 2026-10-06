@@ -84,7 +84,7 @@ export default function EditCredentialForm({ targetId, credential }: { targetId:
         <button
           onClick={save}
           disabled={pending || !form.token_secret}
-          className="px-3 py-1.5 rounded text-sm font-medium bg-black text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           {pending ? "Saving…" : "Save"}
         </button>
@@ -103,12 +103,12 @@ export default function EditCredentialForm({ targetId, credential }: { targetId:
       <style jsx>{`
         .input {
           width: 100%;
-          background: #0b0e14;
-          border: 1px solid #232a38;
+          background: rgb(var(--c-canvas));
+          border: 1px solid rgb(var(--c-border));
           border-radius: 6px;
           padding: 6px 8px;
           font-size: 0.875rem;
-          color: #e6e9ef;
+          color: rgb(var(--c-text));
         }
       `}</style>
     </div>
