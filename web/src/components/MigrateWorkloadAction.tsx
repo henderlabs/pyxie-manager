@@ -163,7 +163,7 @@ export default function MigrateWorkloadAction({
     return (
       <button
         onClick={() => setExpanded(true)}
-        className="px-2 py-1 rounded text-xs font-medium bg-black text-white border border-proxmox hover:bg-proxmox/10"
+        className="px-2 py-1 rounded text-xs font-medium bg-ink text-white border border-proxmox hover:bg-proxmox/10"
       >
         Migrate…
       </button>
@@ -221,7 +221,7 @@ export default function MigrateWorkloadAction({
             <button
               disabled={!destNodeId || pending}
               onClick={preview}
-              className="px-2 py-1 rounded bg-black text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
+              className="px-2 py-1 rounded bg-ink text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
             >
               {pending ? "Checking…" : "Preview"}
             </button>
@@ -272,7 +272,7 @@ export default function MigrateWorkloadAction({
             <button
               disabled={pending}
               onClick={confirmApprove}
-              className="px-2 py-1 rounded bg-black text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
+              className="px-2 py-1 rounded bg-ink text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
             >
               {pending ? "Starting…" : "Confirm & Migrate"}
             </button>
