@@ -106,3 +106,67 @@ def liveness_block_reason(vmid: Any, assessment: dict | None) -> str | None:
         f"about 10 minutes and then fail. Power-cycle it first (stop and start it from PVE; a graceful "
         f"shutdown will also hang), then preview again."
     )
+
+
+# ---------------------------------------------------------------------------
+# Background watch: turning a stream of probes into "this VM is persistently not responding"
+# ---------------------------------------------------------------------------
+
+BAD_STATES = ("unresponsive", "problem")
+CONFIRM_AFTER = 2  # consecutive bad probes (each already retried once) before a finding is raised
+FRESH_SECONDS = 180  # a result older than this no longer counts (VM stopped, worker down, ...)
+NODE_WIDE_MIN_VMS = 4
+NODE_WIDE_FRACTION = 0.6
+
+
+def suppress_node_wide_failures(results: dict[int, dict], node_of: dict[int, str]) -> dict[int, dict]:
+    """If most of a host's probed VMs fail in the same pass, the host's PVE API is struggling, not
+    all those VMs at once: report those as `unknown` so no flood of 'not responding' findings.
+
+    `results` is {vmid: assessment}; `node_of` is {vmid: node name}. Returns a new dict.
+    """
+    by_node: dict[str, list[int]] = {}
+    for vmid in results:
+        by_node.setdefault(node_of.get(vmid, ""), []).append(vmid)
+    out = dict(results)
+    for node, vmids in by_node.items():
+        bad = [v for v in vmids if results[v].get("state") in BAD_STATES]
+        if len(vmids) >= NODE_WIDE_MIN_VMS and len(bad) >= NODE_WIDE_FRACTION * len(vmids):
+            for v in bad:
+                out[v] = {
+                    **results[v],
+                    "state": "unknown",
+                    "detail": f"{len(bad)} of {len(vmids)} VMs on {node} failed together: the host's PVE API is likely struggling, not these VMs",
+                }
+    return out
+
+
+def next_liveness_row(prev: dict | None, assessment: dict, now: Any) -> dict:
+    """Fold one probe into the stored row: {state, detail, elapsed, checked_at, bad_since, consecutive_bad}.
+
+    A bad probe extends the streak; a definite answer (ok/slow/stopped) ends it; `unknown`
+    (PVE could not be asked) leaves the streak as it was, so a blip does not clear a real problem.
+    """
+    prev_bad = int((prev or {}).get("consecutive_bad") or 0)
+    prev_since = (prev or {}).get("bad_since")
+    state = assessment.get("state")
+    if state in BAD_STATES:
+        bad, since = prev_bad + 1, prev_since or now
+    elif state == "unknown":
+        bad, since = prev_bad, prev_since
+    else:
+        bad, since = 0, None
+    return {
+        "state": state, "detail": assessment.get("detail"), "elapsed": assessment.get("elapsed"),
+        "checked_at": now, "bad_since": since, "consecutive_bad": bad,
+    }
+
+
+def finding_worthy(row: dict, now: Any) -> bool:
+    """True when a stored row justifies a 'VM is not responding' finding: a confirmed streak, still fresh."""
+    checked = row.get("checked_at")
+    if checked is None or int(row.get("consecutive_bad") or 0) < CONFIRM_AFTER:
+        return False
+    if checked.tzinfo is None and getattr(now, "tzinfo", None) is not None:
+        checked = checked.replace(tzinfo=now.tzinfo)
+    return (now - checked).total_seconds() <= FRESH_SECONDS
