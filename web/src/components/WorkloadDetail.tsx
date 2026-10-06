@@ -338,7 +338,7 @@ export function WorkloadDetailPanel({
         </div>
       )}
 
-      {tab === "hardware" && <Hardware cfg={cfg} lxc={lxc} />}
+      {tab === "hardware" && <Hardware cfg={cfg} lxc={lxc} loading={live === null} />}
 
       {tab === "tasks" && (
         <Card>
@@ -471,8 +471,16 @@ export default function WorkloadDetail({
   );
 }
 
-function Hardware({ cfg, lxc }: { cfg: ConfigSummary | null; lxc: boolean }) {
-  if (!cfg) return <Card><div className="text-sm text-muted">Hardware details come from PVE and could not be read right now.</div></Card>;
+function Hardware({ cfg, lxc, loading }: { cfg: ConfigSummary | null; lxc: boolean; loading: boolean }) {
+  if (!cfg) {
+    return (
+      <Card>
+        <div className="text-sm text-muted">
+          {loading ? "Loading hardware details…" : "Hardware details come from PVE and could not be read right now."}
+        </div>
+      </Card>
+    );
+  }
   return (
     <div className="space-y-4">
       <Card>
