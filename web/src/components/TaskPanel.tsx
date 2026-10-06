@@ -1,6 +1,6 @@
 "use client";
 
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, type MouseEvent } from "react";
 import type { Operation } from "@/lib/api";
 import { OPERATION_TYPE_LABELS, operationTypeLabel } from "@/components/OperationCard";
@@ -47,7 +47,7 @@ const TERMINAL_STATUSES = new Set(["completed", "failed", "blocked", "cancelled"
 // progress, even while it's still queued.
 const BATCH_PLAN_OPERATION_TYPES = new Set(["node.enter_maintenance", "maintenance.run", "node.evacuate", "cluster.rebalance"]);
 
-type QueuedItem = { key: string; label: string; subject: string; skipped?: boolean };
+type QueuedItem = { key: string; label: string; subject: string; skipped?: boolean; workloadId?: string };
 
 // node.enter_maintenance/maintenance.run/cluster.rebalance all key their
 // plan "migrate_plan" + "completed_migrations"; node.evacuate is the odd
@@ -81,15 +81,15 @@ function queuedItemsFor(op: Operation, allOps: Operation[]): QueuedItem[] {
   for (const item of migratePlan) {
     // "Don't move" lines (Balance Load / Bulk Migrate) never run: listed as Skipped, not queued.
     if (item.transport === "skip") {
-      items.push({ key: `${op.id}:skip:${item.workload_id}`, label: "Live Migration", subject: item.name || (item.vmid ? `vmid ${item.vmid}` : "?"), skipped: true });
+      items.push({ key: `${op.id}:skip:${item.workload_id}`, label: "Live Migration", subject: item.name || (item.vmid ? `vmid ${item.vmid}` : "?"), skipped: true, workloadId: item.workload_id });
       continue;
     }
     if (completedMigrations.has(item.workload_id) || hasOwnOperation(item.workload_id)) continue;
-    items.push({ key: `${op.id}:mig:${item.workload_id}`, label: "Live Migration", subject: item.name || (item.vmid ? `vmid ${item.vmid}` : "?") });
+    items.push({ key: `${op.id}:mig:${item.workload_id}`, label: "Live Migration", subject: item.name || (item.vmid ? `vmid ${item.vmid}` : "?"), workloadId: item.workload_id });
   }
   for (const item of shutdownPlan) {
     if (completedShutdowns.has(item.workload_id) || hasOwnOperation(item.workload_id)) continue;
-    items.push({ key: `${op.id}:sd:${item.workload_id}`, label: "Guest Shutdown", subject: item.name || (item.vmid ? `vmid ${item.vmid}` : "?") });
+    items.push({ key: `${op.id}:sd:${item.workload_id}`, label: "Guest Shutdown", subject: item.name || (item.vmid ? `vmid ${item.vmid}` : "?"), workloadId: item.workload_id });
   }
   return items;
 }
@@ -174,6 +174,38 @@ function ProgressBar({ pct }: { pct: number | null | undefined }) {
   );
 }
 
+// The VM/workload name in a task row: accent-coloured like every other workload link
+// in the app, and it opens that workload's own page. The row itself is already a
+// link (to the operation's page), so this is a span that navigates on click rather
+// than a nested <a>, which is invalid HTML.
+function WorkloadName({ name, workloadId }: { name: string; workloadId?: string | null }) {
+  const router = useRouter();
+  if (!workloadId) return <span className="text-xs font-medium text-text truncate">{name}</span>;
+  const href = `/infrastructure/workloads?workload=${workloadId}`;
+  return (
+    <span
+      role="link"
+      tabIndex={0}
+      title="Open this workload"
+      className="text-xs font-medium text-accent hover:underline truncate cursor-pointer"
+      onClick={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        router.push(href);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+          router.push(href);
+        }
+      }}
+    >
+      {name}
+    </span>
+  );
+}
+
 function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () => void; isAdmin: boolean }) {
   const [approving, setApproving] = useState(false);
   const [dismissing, setDismissing] = useState(false);
@@ -220,7 +252,7 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
         <StatusBadge status={op.status} />
       </div>
       <div className="flex items-center justify-between gap-2 mt-0.5">
-        <span className="text-xs font-medium text-text truncate">{subjectFor(op)}</span>
+        <WorkloadName name={subjectFor(op)} workloadId={op.workload_id} />
         <span className="text-[11px] text-muted shrink-0">
           {relativeTime(op.completed_at || op.started_at || op.created_at)}
         </span>
@@ -278,7 +310,7 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
   );
 }
 
-function QueuedRow({ label, subject, by, since, skipped }: { label: string; subject: string; by?: string | null; since?: string | null; skipped?: boolean }) {
+function QueuedRow({ label, subject, by, since, skipped, workloadId }: { label: string; subject: string; by?: string | null; since?: string | null; skipped?: boolean; workloadId?: string }) {
   // A queued step has no row of its own yet, so it inherits who asked and when
   // from the operation that owns the plan -- enough to spot one that is stuck.
   return (
@@ -295,7 +327,7 @@ function QueuedRow({ label, subject, by, since, skipped }: { label: string; subj
         )}
       </div>
       <div className="flex items-center justify-between gap-2 mt-0.5">
-        <span className="text-xs font-medium text-text truncate">{subject}</span>
+        <WorkloadName name={subject} workloadId={workloadId} />
         <span className="text-[11px] text-muted shrink-0">{skipped ? "set to Don't move" : "waiting on prior step"}</span>
       </div>
       {(by || since) && !skipped && (
@@ -473,7 +505,7 @@ export default function TaskPanel({
               extraCount={queuedCount}
               renderExtra={(op) =>
                 queuedByParentId[op.id]?.map((q) => (
-                  <QueuedRow key={q.key} label={q.label} subject={q.subject} skipped={q.skipped} by={op.initiated_by} since={op.approved_at || op.started_at || op.created_at} />
+                  <QueuedRow key={q.key} label={q.label} subject={q.subject} skipped={q.skipped} workloadId={q.workloadId} by={op.initiated_by} since={op.approved_at || op.started_at || op.created_at} />
                 ))
               }
               isAdmin={isAdmin}
