@@ -24,7 +24,7 @@ from . import lifecycle_workflow
 from .credentials import CredentialNotConfigured, HostNotAddressable, load_host_maintenance_credentials
 from .host_maintenance_client import HostMaintenanceClient, HostMaintenanceConnectionError, HostMaintenanceProtocolError
 from .locks import LockContention, acquire_lock, release_locks_for_operation
-from .maintenance import _has_pci_passthrough, _qemu_config, _quorum_after_removal, vm_lock_reason
+from .maintenance import _has_pci_passthrough, _qemu_config, _quorum_after_removal, flag_onboot, vm_lock_reason
 from .migration_workflow import (
     MigrationWorkflowError,
     approve as approve_migration,
@@ -265,10 +265,13 @@ def dry_run_enter_maintenance(db: Session, node: Node, *, actor: str, reason: st
                     })
                     continue
                 if on_shared:
-                    stopped_no_action.append({
-                        "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
-                        "reasons": ["stopped, and its disk is on shared storage -- no action needed for maintenance mode"],
-                    })
+                    stopped_no_action.append(flag_onboot(
+                        {
+                            "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
+                            "reasons": ["stopped, and its disk is on shared storage -- no action needed for maintenance mode"],
+                        },
+                        _qemu_config(client, node.name, wl),
+                    ))
                 else:
                     # Never required -- entering maintenance mode is
                     # temporary (the node stays in the cluster and comes

@@ -187,7 +187,7 @@ VINFO = [
     Col("ha_state", "HA state", hidden=True),
     Col("machine", "Machine", hidden=True),
     Col("bios", "BIOS", hidden=True),
-    Col("onboot", "Start at boot", "bool", hidden=True),
+    Col("onboot", "Start at boot", "bool"),
     Col("protection", "Protected", "bool", hidden=True),
     Col("preferred_host", "Preferred host", hidden=True),
     Col("sensitivity", "Sensitivity", hidden=True),
@@ -239,7 +239,7 @@ def build_vinfo(db: Session, scope: Scope) -> list[dict]:
                 "ha_state": w.ha_state,
                 "machine": cfg.machine if cfg else None,
                 "bios": cfg.bios if cfg else None,
-                "onboot": cfg.onboot if cfg else None,
+                "onboot": bool(cfg.onboot) if cfg else None,  # PVE stores nothing when it is off
                 "protection": cfg.protection if cfg else None,
                 "preferred_host": pref.name if pref else None,
                 "sensitivity": w.sensitivity,

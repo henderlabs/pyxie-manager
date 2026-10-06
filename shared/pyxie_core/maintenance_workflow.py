@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 
 from . import host_update_workflow, lifecycle_workflow, reboot_workflow
 from .locks import LockContention, acquire_lock, release_locks_for_operation
-from .maintenance import _quorum_after_removal, _has_pci_passthrough, _qemu_config, vm_lock_reason
+from .maintenance import _quorum_after_removal, _has_pci_passthrough, _qemu_config, flag_onboot, vm_lock_reason
 from .migration_workflow import (
     MigrationWorkflowError,
     approve as approve_migration,
@@ -226,8 +226,11 @@ def dry_run_maintenance(
                                                          "included": False})
                     continue
                 if on_shared:
-                    stopped_no_action.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
-                                               "reasons": ["stopped, and its disk is on shared storage -- no action needed for this reboot"]})
+                    stopped_no_action.append(flag_onboot(
+                        {"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
+                         "reasons": ["stopped, and its disk is on shared storage -- no action needed for this reboot"]},
+                        _qemu_config(client, node.name, wl),
+                    ))
                 else:
                     # Never required -- a stopped guest costs this node
                     # nothing either way, and for a plain temporary reboot

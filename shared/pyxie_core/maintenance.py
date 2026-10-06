@@ -89,6 +89,31 @@ def _qemu_config(client, node_name: str, wl: Workload) -> dict | None:
         return None
 
 
+def onboot_restart_reason(vmid, config: dict | None) -> str | None:
+    """Why a STOPPED VM will not stay stopped through a host reboot, or None.
+
+    A VM with Start at boot on (PVE `onboot: 1`) is powered on by the node itself when
+    the node comes back up. m502, 2026-10-06: PAW-JLeach and CRE-TMTWEBPRD1 were stopped,
+    so the maintenance plan correctly left them alone, then started by themselves after
+    the reboot. Flagging it in the preview lets the operator decide first."""
+    if not config:
+        return None
+    if str(config.get("onboot", "")).strip().lower() not in ("1", "yes", "true", "on"):
+        return None
+    return (
+        "Start at boot is on -- this stopped VM will power on by itself when the host reboots. "
+        f"If it should stay off, turn Start at boot off first (VM > Options, or `qm set {vmid} --onboot 0`) and preview again."
+    )
+
+
+def flag_onboot(item: dict, config: dict | None) -> dict:
+    """Return a plan item marked starts_on_boot (reason first) when its VM would restart on reboot."""
+    reason = onboot_restart_reason(item.get("vmid"), config)
+    if not reason:
+        return item
+    return {**item, "starts_on_boot": True, "reasons": [reason, *(item.get("reasons") or [])]}
+
+
 def vm_lock_reason(vmid, config: dict | None) -> str | None:
     """Why a VM that PVE has LOCKED cannot be migrated, or None if it is not locked.
 
