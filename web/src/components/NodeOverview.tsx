@@ -59,15 +59,16 @@ function useNodeLive(nodeId: string): NodeLive | null {
   return live;
 }
 
-function useNodeRrd(nodeId: string, timeframe: Timeframe): { rows: NodeRrdRow[]; error: string | null } {
-  const [state, setState] = useState<{ rows: NodeRrdRow[]; error: string | null }>({ rows: [], error: null });
+function useNodeRrd(nodeId: string, timeframe: Timeframe): { rows: NodeRrdRow[]; error: string | null; loading: boolean } {
+  const [state, setState] = useState<{ rows: NodeRrdRow[]; error: string | null; loading: boolean }>({ rows: [], error: null, loading: true });
   useEffect(() => {
     let cancelled = false;
+    setState({ rows: [], error: null, loading: true });
     const load = () =>
       fetch(`/api/nodes/${nodeId}/rrd?timeframe=${timeframe}`)
         .then((r) => r.json())
-        .then((d) => !cancelled && setState({ rows: d.rows || [], error: d.error || null }))
-        .catch((e) => !cancelled && setState({ rows: [], error: String(e) }));
+        .then((d) => !cancelled && setState({ rows: d.rows || [], error: d.error || null, loading: false }))
+        .catch((e) => !cancelled && setState({ rows: [], error: String(e), loading: false }));
     load();
     const iv = setInterval(() => {
       if (!document.hidden) load();
@@ -174,25 +175,25 @@ export default function NodeOverview({
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
           <Card>
-            <MetricChart title="CPU usage" times={times} format={(v) => `${v < 10 ? v.toFixed(1) : v.toFixed(0)}%`}
+            <MetricChart title="CPU usage" times={times} loading={rrd.loading} format={(v) => `${v < 10 ? v.toFixed(1) : v.toFixed(0)}%`}
               series={[
                 { label: "CPU", color: "#4f8cff", area: true, values: col(rrd.rows, (r) => (r.cpu != null ? r.cpu * 100 : undefined)) },
                 { label: "IO delay", color: "#e5a94c", values: col(rrd.rows, (r) => (r.iowait != null ? r.iowait * 100 : undefined)) },
               ]} />
           </Card>
           <Card>
-            <MetricChart title="Server load" times={times} format={(v) => v.toFixed(1)}
+            <MetricChart title="Server load" times={times} loading={rrd.loading} format={(v) => v.toFixed(1)}
               series={[{ label: "Load average", color: "#4f8cff", area: true, values: col(rrd.rows, (r) => r.loadavg) }]} />
           </Card>
           <Card>
-            <MetricChart title="Memory usage" times={times} format={(v) => formatBytes(v)} fixedMax={memTotal || undefined}
+            <MetricChart title="Memory usage" times={times} loading={rrd.loading} format={(v) => formatBytes(v)} fixedMax={memTotal || undefined}
               series={[
                 { label: "Used", color: "#4f8cff", area: true, values: col(rrd.rows, (r) => r.memused) },
                 ...(hasArc ? [{ label: "ZFS ARC", color: "#2fbf71", values: col(rrd.rows, (r) => r.arcsize) }] : []),
               ]} />
           </Card>
           <Card>
-            <MetricChart title="Network traffic" times={times} format={rate}
+            <MetricChart title="Network traffic" times={times} loading={rrd.loading} format={rate}
               series={[
                 { label: "In", color: "#2fbf71", area: true, values: col(rrd.rows, (r) => r.netin) },
                 { label: "Out", color: "#4f8cff", values: col(rrd.rows, (r) => r.netout) },
