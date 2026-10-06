@@ -14,6 +14,9 @@ export function HalfGauge({
   icon,
   width = 140,
   strokeWidth = 10,
+  ticks = [75, 90],
+  colorFor = colorForPct,
+  title,
 }: {
   value: number | null;
   label: string;
@@ -21,6 +24,11 @@ export function HalfGauge({
   icon?: React.ReactNode;
   width?: number;
   strokeWidth?: number;
+  /** Where the two threshold ticks sit on the track (default 75 and 90 -- amber, red). */
+  ticks?: number[];
+  /** Colour for a value; the default is the usage traffic light (high is bad). */
+  colorFor?: (v: number) => string;
+  title?: string;
 }) {
   const pct = value === null ? 0 : Math.min(Math.max(value, 0), 100);
   // Sweep in from empty on first paint; motion-reduce users get the value at once.
@@ -50,6 +58,7 @@ export function HalfGauge({
         className="relative"
         style={{ width, height }}
         role="meter"
+        title={title}
         aria-label={label}
         aria-valuemin={0}
         aria-valuemax={100}
@@ -61,7 +70,7 @@ export function HalfGauge({
             <path
               d={d}
               fill="none"
-              stroke={colorForPct(value)}
+              stroke={colorFor(value)}
               strokeWidth={strokeWidth}
               strokeLinecap="round"
               pathLength={100}
@@ -69,7 +78,7 @@ export function HalfGauge({
               className="transition-[stroke-dasharray] duration-500 ease-out motion-reduce:transition-none"
             />
           )}
-          {[75, 90].map((p) => {
+          {ticks.map((p) => {
             const t = tick(p);
             return <line key={p} {...t} stroke={COLOR_MUTED} strokeOpacity={0.7} strokeWidth={1.5} />;
           })}
