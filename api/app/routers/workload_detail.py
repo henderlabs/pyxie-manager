@@ -4,7 +4,10 @@ Everything here is read-only. Live data comes through the inventory client; a
 PVE failure is reported in the payload (`error`) instead of failing the request
 so the page can still render what PyXie already knows.
 """
+import threading
+import time
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -13,6 +16,7 @@ from pyxie_core.discovery import build_pve_client
 from pyxie_core.models import Cluster, Finding, Node, PveTarget, PveTask, Workload
 from pyxie_core.workload_detail import (
     RRD_TIMEFRAMES,
+    facts_from_config,
     guest_addresses,
     live_check,
     summarize_config,
@@ -150,3 +154,62 @@ def workload_tasks(workload_id: uuid.UUID, db: Session = Depends(get_db)):
         }
         for t in tasks_for_vmid(rows, w.vmid)
     ]
+
+
+_FACTS_TTL_SECONDS = 30
+_facts_cache: dict = {"ts": 0.0, "data": None}
+_facts_lock = threading.Lock()
+
+
+def _build_facts(db: Session) -> dict:
+    """Per-workload table facts: config-derived (Start at boot, agent, OS, disk) plus live
+    uptime/lock from one cluster/resources call per cluster. About 1.5 s for 130 guests,
+    which is why it is cached rather than read per request."""
+    facts: dict[str, dict] = {}
+    errors = 0
+    workloads = db.query(Workload).filter(Workload.is_missing.is_(False)).all()
+    nodes = {n.id: n for n in db.query(Node).all()}
+    by_cluster: dict = {}
+    for w in workloads:
+        by_cluster.setdefault(w.cluster_id, []).append(w)
+    for cluster_id, group in by_cluster.items():
+        cluster = db.query(Cluster).filter(Cluster.id == cluster_id).one_or_none()
+        if cluster is None:
+            continue
+        try:
+            client, _cred = _client(db, cluster)
+        except Exception:  # noqa: BLE001
+            errors += len(group)
+            continue
+        with client:
+            try:
+                resources = {r.get("vmid"): r for r in (client.cluster_resources("vm") or [])}
+            except Exception:  # noqa: BLE001
+                resources = {}
+            for w in group:
+                node = nodes.get(w.node_id)
+                res = resources.get(w.vmid, {})
+                entry = {
+                    "uptime": res.get("uptime"), "lock": res.get("lock"), "template": bool(res.get("template")),
+                    "start_at_boot": None, "agent_enabled": None, "ostype": None, "disk_bytes": None, "storages": [], "protection": None,
+                }
+                if node is not None:
+                    lxc = w.type == "lxc"
+                    try:
+                        cfg = client.lxc_config(node.name, w.vmid) if lxc else client.qemu_config(node.name, w.vmid)
+                        entry.update(facts_from_config(cfg, lxc=lxc) or {})
+                    except Exception:  # noqa: BLE001
+                        errors += 1
+                facts[str(w.id)] = entry
+    return {"facts": facts, "errors": errors, "generated_at": datetime.now(timezone.utc).isoformat()}
+
+
+@router.get("/facts")
+def workload_facts(db: Session = Depends(get_db)):
+    """Bulk per-workload facts for the Workloads table columns, cached for 30 s."""
+    with _facts_lock:
+        if _facts_cache["data"] is not None and time.monotonic() - _facts_cache["ts"] < _FACTS_TTL_SECONDS:
+            return _facts_cache["data"]
+        data = _build_facts(db)
+        _facts_cache.update(ts=time.monotonic(), data=data)
+        return data
