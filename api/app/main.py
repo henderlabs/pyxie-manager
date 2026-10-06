@@ -26,6 +26,7 @@ from .routers import (
     providers,
     recommendations,
     reports,
+    workload_detail,
 )
 from .seed import seed_defaults
 
@@ -94,6 +95,7 @@ app.include_router(notifications.router)
 app.include_router(notification_rules.router)
 app.include_router(jobs.router)
 app.include_router(network.router)
+app.include_router(workload_detail.router)
 
 
 @app.get("/api/health")

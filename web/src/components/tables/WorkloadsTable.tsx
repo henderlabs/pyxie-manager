@@ -16,72 +16,10 @@ import { formatBytes } from "@/lib/format";
 import { CpuIcon, MemoryIcon } from "@/components/Icons";
 import { findingWorkloadIds } from "@/lib/findings";
 import { useMe } from "@/lib/useMe";
+import { ProfileSelect, patchPlacementProfile } from "@/components/ProfileSelect";
+import { WorkloadRowDetail } from "@/components/WorkloadDetail";
 
 type WorkloadMetric = { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host"; ballooning?: "on" | "off" | "pending"; balloon_min_mb?: number | null };
-
-/** Throws on a failed save instead of resolving silently -- every select
- * below (and the Notes cell) relies on this to know a PATCH didn't
- * actually take, rather than optimistically assuming success -- a failed
- * save used to look
- * identical to a successful one until the next page refresh. */
-async function patchPlacementProfile(workloadId: string, body: Record<string, unknown>): Promise<void> {
-  const res = await fetch(`/api/workloads/${workloadId}/placement-profile`, {
-    method: "PATCH",
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `Save failed (${res.status})`);
-  }
-}
-
-function ProfileSelect({
-  workloadId,
-  field,
-  value,
-  options,
-  highlightWhen,
-  onChanged,
-}: {
-  workloadId: string;
-  field: "sensitivity" | "downtime_tolerance";
-  value: string;
-  options: string[];
-  highlightWhen: string;
-  onChanged: (v: string) => void;
-}) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const me = useMe();
-  const isAdmin = me === undefined || me?.is_admin === true;
-  async function change(newValue: string) {
-    setSaving(true);
-    setError(null);
-    try {
-      await patchPlacementProfile(workloadId, { [field]: newValue });
-      onChanged(newValue);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <select
-      className={`bg-surface2 border rounded px-1.5 py-1 text-xs ${error ? "border-bad" : "border-border"} ${value === highlightWhen ? "text-warn" : ""}`}
-      value={value}
-      disabled={saving || !isAdmin}
-      title={error || undefined}
-      onChange={(e) => change(e.target.value)}
-    >
-      {options.map((o) => (
-        <option key={o} value={o}>
-          {o}
-        </option>
-      ))}
-    </select>
-  );
-}
 
 function StoragePreferenceSelect({
   workloadId,
@@ -306,7 +244,7 @@ export default function WorkloadsTable({
             const wFindings = findingsByWorkload.get(w.id);
             return (
               <span className="inline-flex items-center gap-1.5">
-                <Link href={`/operations/maintenance?workload=${w.id}`} className="text-accent hover:underline" title="Open on the Maintenance page">
+                <Link href={`/infrastructure/workloads/${w.id}`} className="text-accent hover:underline" title="Open this workload">
                   {w.name || "—"}
                 </Link>
                 {wFindings && wFindings.length > 0 && (
@@ -619,6 +557,28 @@ export default function WorkloadsTable({
         storageKey="infrastructure-workloads"
         rowClassName={(w) => (w.id === highlightWorkloadId ? "bg-accent/10 pyxie-jump-target" : "")}
         columns={columns}
+        singleExpand
+        renderDetail={(w) =>
+          w.is_missing ? null : (
+            <WorkloadRowDetail
+              workload={{
+                ...w,
+                sensitivity: sensitivity[w.id] ?? w.sensitivity,
+                downtime_tolerance: downtimeTolerance[w.id] ?? w.downtime_tolerance,
+                placement_notes: notes[w.id] ?? w.placement_notes,
+              }}
+              findings={(findingsByWorkload.get(w.id) || []).map((f) => ({ id: f.id, severity: f.severity, title: f.title }))}
+              profile={{
+                sensitivity: sensitivity[w.id] ?? w.sensitivity,
+                downtime_tolerance: downtimeTolerance[w.id] ?? w.downtime_tolerance,
+                onChange: (field, value) =>
+                  field === "sensitivity"
+                    ? setSensitivity((m) => ({ ...m, [w.id]: value }))
+                    : setDowntimeTolerance((m) => ({ ...m, [w.id]: value })),
+              }}
+            />
+          )
+        }
       />
       {sortedSearchedWorkloads.length > 0 && (
         <div className="flex items-center justify-between mt-2 text-xs text-muted">

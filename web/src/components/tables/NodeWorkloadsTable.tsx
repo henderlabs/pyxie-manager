@@ -19,7 +19,7 @@ export default function NodeWorkloadsTable({ workloads }: { workloads: Workload[
           header: "Name",
           render: (w) =>
             w.name ? (
-              <Link href={`/infrastructure/workloads?workload=${w.id}`} className="text-accent hover:underline" title="Open on the Workloads page">
+              <Link href={`/infrastructure/workloads/${w.id}`} className="text-accent hover:underline" title="Open this workload">
                 {w.name}
               </Link>
             ) : (
