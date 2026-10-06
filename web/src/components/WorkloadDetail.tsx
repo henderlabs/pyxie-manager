@@ -80,7 +80,7 @@ function useRrd(workloadId: string, timeframe: Timeframe, enabled: boolean): { r
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    setState((s) => ({ ...s, loading: true }));
+    setState({ rows: [], error: null, loading: true });
     const load = () =>
       fetch(`/api/workloads/${workloadId}/rrd?timeframe=${timeframe}`)
         .then((r) => r.json())
@@ -119,15 +119,15 @@ const pct = (v: number) => `${v < 10 ? v.toFixed(1) : v.toFixed(0)}%`;
 const rate = (v: number) => `${formatBytes(v)}/s`;
 const col = (rows: RrdRow[], f: (r: RrdRow) => number | undefined) => rows.map((r) => f(r) ?? null);
 
-function Charts({ rows, which }: { rows: RrdRow[]; which: "summary" | "all" }) {
+function Charts({ rows, which, loading }: { rows: RrdRow[]; which: "summary" | "all"; loading: boolean }) {
   const times = rows.map((r) => r.time as number);
   const maxmem = Math.max(0, ...rows.map((r) => r.maxmem ?? 0));
   const cpu = (
-    <MetricChart key="cpu" title="CPU usage" times={times} format={pct} fixedMax={undefined}
+    <MetricChart key="cpu" title="CPU usage" times={times} format={pct} loading={loading}
       series={[{ label: "CPU", color: "#4f8cff", area: true, values: col(rows, (r) => (r.cpu != null ? r.cpu * 100 : undefined)) }]} />
   );
   const mem = (
-    <MetricChart key="mem" title="Memory usage" times={times} format={(v) => formatBytes(v)} fixedMax={maxmem || undefined}
+    <MetricChart key="mem" title="Memory usage" times={times} format={(v) => formatBytes(v)} fixedMax={maxmem || undefined} loading={loading}
       series={[
         { label: "Used", color: "#4f8cff", area: true, values: col(rows, (r) => r.mem) },
         { label: "Host", color: "#8b95a7", values: col(rows, (r) => r.memhost) },
@@ -139,28 +139,28 @@ function Charts({ rows, which }: { rows: RrdRow[]; which: "summary" | "all" }) {
       <Card>{cpu}</Card>
       <Card>{mem}</Card>
       <Card>
-        <MetricChart title="Network traffic" times={times} format={rate}
+        <MetricChart title="Network traffic" times={times} loading={loading} format={rate}
           series={[
             { label: "In", color: "#2fbf71", area: true, values: col(rows, (r) => r.netin) },
             { label: "Out", color: "#4f8cff", values: col(rows, (r) => r.netout) },
           ]} />
       </Card>
       <Card>
-        <MetricChart title="Disk IO" times={times} format={rate}
+        <MetricChart title="Disk IO" times={times} loading={loading} format={rate}
           series={[
             { label: "Read", color: "#2fbf71", area: true, values: col(rows, (r) => r.diskread) },
             { label: "Write", color: "#4f8cff", values: col(rows, (r) => r.diskwrite) },
           ]} />
       </Card>
       <Card>
-        <MetricChart title="CPU pressure stall" times={times} format={(v) => `${v.toFixed(2)}%`}
+        <MetricChart title="CPU pressure stall" times={times} loading={loading} format={(v) => `${v.toFixed(2)}%`}
           series={[
             { label: "Some", color: "#e5a94c", area: true, values: col(rows, (r) => r.pressurecpusome) },
             { label: "Full", color: "#e5484d", values: col(rows, (r) => r.pressurecpufull) },
           ]} />
       </Card>
       <Card>
-        <MetricChart title="IO pressure stall" times={times} format={(v) => `${v.toFixed(2)}%`}
+        <MetricChart title="IO pressure stall" times={times} loading={loading} format={(v) => `${v.toFixed(2)}%`}
           series={[
             { label: "Some", color: "#e5a94c", area: true, values: col(rows, (r) => r.pressureiosome) },
             { label: "Full", color: "#e5484d", values: col(rows, (r) => r.pressureiofull) },
@@ -330,7 +330,7 @@ export function WorkloadDetailPanel({
               <CardTitle>Last hour</CardTitle>
               <button type="button" onClick={() => onTabChange("statistics")} className="text-xs text-accent hover:underline">All statistics</button>
             </div>
-            {rrdSummary.error ? <div className="text-sm text-warn">Could not load PVE graphs: {rrdSummary.error}</div> : <Charts rows={rrdSummary.rows} which="summary" />}
+            {rrdSummary.error ? <div className="text-sm text-warn">Could not load PVE graphs: {rrdSummary.error}</div> : <Charts rows={rrdSummary.rows} which="summary" loading={rrdSummary.loading} />}
           </Card>
         </div>
       )}
@@ -346,7 +346,7 @@ export function WorkloadDetailPanel({
               </select>
             </label>
           </div>
-          {rrdStats.error ? <div className="text-sm text-warn">Could not load PVE graphs: {rrdStats.error}</div> : <Charts rows={rrdStats.rows} which="all" />}
+          {rrdStats.error ? <div className="text-sm text-warn">Could not load PVE graphs: {rrdStats.error}</div> : <Charts rows={rrdStats.rows} which="all" loading={rrdStats.loading} />}
         </div>
       )}
 
