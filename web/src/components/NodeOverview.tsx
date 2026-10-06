@@ -12,6 +12,10 @@ import { onOperationsChanged } from "@/lib/operationsBus";
 import { WrenchIcon } from "@/components/Icons";
 import { TIMEFRAMES, type Timeframe } from "@/lib/workloadDetail";
 import type { NodeLive, NodeRrdRow } from "@/lib/nodeDetail";
+import { LIVENESS_CLASS, LIVENESS_LABEL } from "@/lib/liveness";
+import type { Liveness } from "@/lib/workloadDetail";
+
+type NodeLiveness = { checked: number; vms: (Liveness & { workload_id: string; vmid: number; name: string | null })[]; error: string | null };
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -81,6 +85,27 @@ function useNodeRrd(nodeId: string, timeframe: Timeframe): { rows: NodeRrdRow[];
   return state;
 }
 
+function useNodeLiveness(nodeId: string): NodeLiveness | null {
+  const [data, setData] = useState<NodeLiveness | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const load = () =>
+      fetch(`/api/nodes/${nodeId}/liveness`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: NodeLiveness | null) => d && !cancelled && setData(d))
+        .catch(() => {});
+    load();
+    const iv = setInterval(() => {
+      if (!document.hidden) load();
+    }, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [nodeId]);
+  return data;
+}
+
 const col = (rows: NodeRrdRow[], f: (r: NodeRrdRow) => number | undefined) => rows.map((r) => f(r) ?? null);
 const rate = (v: number) => `${formatBytes(v)}/s`;
 
@@ -99,6 +124,7 @@ export default function NodeOverview({
   const [timeframe, setTimeframe] = useState<Timeframe>("hour");
   const live = useNodeLive(nodeId);
   const rrd = useNodeRrd(nodeId, timeframe);
+  const responsiveness = useNodeLiveness(nodeId);
   const s = live?.status ?? null;
 
   useEffect(() => {
@@ -247,6 +273,44 @@ export default function NodeOverview({
           )}
         </Card>
       </div>
+
+      <Card className="mb-4">
+        <CardTitle>VM responsiveness</CardTitle>
+        {responsiveness == null ? (
+          <div className="text-sm text-muted">Checking the running VMs on this host…</div>
+        ) : responsiveness.error ? (
+          <div className="text-sm text-warn">Could not check: {responsiveness.error}</div>
+        ) : (
+          (() => {
+            const attention = responsiveness.vms.filter((v) => v.state !== "ok" && v.state !== "stopped");
+            const slowest = Math.max(0, ...responsiveness.vms.map((v) => v.elapsed));
+            if (attention.length === 0) {
+              return (
+                <div className="text-sm">
+                  <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium mr-2 ${LIVENESS_CLASS.ok}`}>OK</span>
+                  All {responsiveness.checked} running VMs answered normally (slowest {slowest.toFixed(2)} s).
+                </div>
+              );
+            }
+            return (
+              <div className="text-sm">
+                <div className="text-bad mb-2">
+                  {attention.length} of {responsiveness.checked} running VMs {attention.length === 1 ? "is" : "are"} not answering normally. A live migration of {attention.length === 1 ? "it" : "them"} would hang; power-cycle from PVE first.
+                </div>
+                <ul className="space-y-1">
+                  {attention.map((v) => (
+                    <li key={v.workload_id} className="flex items-center gap-2">
+                      <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${LIVENESS_CLASS[v.state]}`}>{LIVENESS_LABEL[v.state]}</span>
+                      <Link href={`/infrastructure/workloads/${v.workload_id}`} className="text-accent hover:underline">{v.name || `VM ${v.vmid}`}</Link>
+                      <span className="text-muted text-xs">{v.detail}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()
+        )}
+      </Card>
     </div>
   );
 }
