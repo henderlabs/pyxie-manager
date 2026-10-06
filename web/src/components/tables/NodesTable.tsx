@@ -92,44 +92,10 @@ function TierSelect({
   );
 }
 
-function CanaryToggle({ nodeId, checked, onChanged }: { nodeId: string; checked: boolean; onChanged: (v: boolean) => void }) {
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const me = useMe();
-  const isAdmin = me === undefined || me?.is_admin === true;
-
-  async function change(v: boolean) {
-    setSaving(true);
-    setError(null);
-    try {
-      await putPolicy({ scope_type: "node", scope_id: nodeId, key: "rollout.canary", value: v });
-      onChanged(v);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <label className="inline-flex items-center gap-1.5 cursor-pointer" title={error || undefined}>
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={saving || !isAdmin}
-        onChange={(e) => change(e.target.checked)}
-        className={`accent-proxmox ${error ? "outline outline-1 outline-bad" : ""}`}
-      />
-      {checked && <span className="text-[10px] uppercase tracking-wide text-proxmox font-semibold">canary</span>}
-    </label>
-  );
-}
-
 export default function NodesTable({
   nodes: initialNodes,
   clusterId,
   tierSuggestions,
-  canaryByNode,
   storage,
   defaultStorageByNode,
 }: {
@@ -143,7 +109,6 @@ export default function NodesTable({
    * a second cluster exists (found in passing 2026-09-15, fixed now). */
   clusterId: string;
   tierSuggestions: Record<string, TierSuggestion>;
-  canaryByNode: Record<string, boolean>;
   storage: StorageItem[];
   defaultStorageByNode: Record<string, string | null>;
 }) {
@@ -183,7 +148,6 @@ export default function NodesTable({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const [canary, setCanary] = useState<Record<string, boolean>>(canaryByNode);
   const [tiers, setTiers] = useState<Record<string, { performance: string; trust: string }>>(
     Object.fromEntries(
       nodes.map((n) => [
@@ -252,11 +216,6 @@ export default function NodesTable({
               <Link href={`/infrastructure/nodes/${n.id}`} className="text-accent hover:underline">
                 {n.name}
               </Link>
-              {canary[n.id] && (
-                <span className="text-[10px] uppercase tracking-wide text-proxmox font-semibold border border-proxmox/40 rounded px-1 py-0.5">
-                  canary
-                </span>
-              )}
               {n.maintenance_mode && (
                 <span
                   className="text-[10px] uppercase tracking-wide text-warn font-semibold border border-warn/40 rounded px-1 py-0.5"
@@ -276,19 +235,6 @@ export default function NodesTable({
             </div>
           ),
           sortValue: (n) => n.name,
-        },
-        {
-          header: "Canary",
-          tooltip:
-            "Mark this node for staged rollout -- validate maintenance/patching here FIRST before running it against the rest of the cluster. PyXie-only, never synced to/from PVE.",
-          render: (n) => (
-            <CanaryToggle
-              nodeId={n.id}
-              checked={!!canary[n.id]}
-              onChanged={(v) => setCanary((c) => ({ ...c, [n.id]: v }))}
-            />
-          ),
-          sortValue: (n) => (canary[n.id] ? 1 : 0),
         },
         {
           header: "Status",
