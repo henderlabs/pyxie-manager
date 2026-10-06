@@ -208,7 +208,7 @@ function NicVlanEditor({ row }: { row: Row }) {
             <button
               disabled={busy}
               onClick={confirm}
-              className="px-2 py-1 rounded text-[11px] bg-black text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
+              className="px-2 py-1 rounded text-[11px] bg-ink text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
             >
               {busy ? "Applying…" : "Confirm & Apply"}
             </button>
