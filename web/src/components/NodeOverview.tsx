@@ -302,7 +302,7 @@ export default function NodeOverview({
                     <li key={v.workload_id} className="flex items-center gap-2">
                       <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium ${LIVENESS_CLASS[v.state]}`}>{LIVENESS_LABEL[v.state]}</span>
                       <Link href={`/infrastructure/workloads/${v.workload_id}`} className="text-accent hover:underline">{v.name || `VM ${v.vmid}`}</Link>
-                      <span className="text-muted text-xs">{v.detail}</span>
+                      <span className="text-muted text-xs">{v.detail}{v.since ? ` Since ${new Date(v.since).toLocaleString()}.` : ""}</span>
                     </li>
                   ))}
                 </ul>
