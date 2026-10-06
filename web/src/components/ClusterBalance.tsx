@@ -11,10 +11,6 @@ type NodeLoad = {
   maintenance_mode: boolean;
 };
 
-const COLOR_GOOD = "#2fbf71";
-const COLOR_WARN = "#e5a94c";
-const COLOR_BAD = "#e5484d";
-
 // Balance = 100 minus the gap, in percentage points, between the busiest and the quietest
 // node. Memory always counts (it is what limits where a VM can move); CPU only counts once
 // the busiest node is past 50%, because a 0%-to-20% CPU spread on an idle cluster is noise.
@@ -45,8 +41,6 @@ export function computeBalance(nodes: NodeLoad[]) {
   };
 }
 
-const balanceColor = (v: number) => (v >= 80 ? COLOR_GOOD : v >= 60 ? COLOR_WARN : COLOR_BAD);
-
 export function BalanceGauge({ nodes, icon }: { nodes: NodeLoad[]; icon?: React.ReactNode }) {
   const b = computeBalance(nodes);
   return (
@@ -55,7 +49,7 @@ export function BalanceGauge({ nodes, icon }: { nodes: NodeLoad[]; icon?: React.
       label="Cluster balance"
       icon={icon}
       ticks={[60, 80]}
-      colorFor={balanceColor}
+      scale="balance"
       detail={b ? `${b.word} · memory ${Math.round(b.memMin)}–${Math.round(b.memMax)}%` : null}
       title="100 minus the gap between the busiest and quietest node (memory, plus CPU once a node passes 50%). Nodes in maintenance or offline are left out."
     />
