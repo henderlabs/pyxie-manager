@@ -56,39 +56,48 @@ export function BalanceGauge({ nodes, icon }: { nodes: NodeLoad[]; icon?: React.
   );
 }
 
-function BarRow({ title, nodes, pick, avg }: { title: string; nodes: NodeLoad[]; pick: (n: NodeLoad) => number | null; avg: number | null }) {
-  const H = 56;
-  return (
-    <div>
-      <div className="flex items-baseline justify-between mb-1.5">
-        <span className="text-[11px] uppercase tracking-wider text-muted font-semibold">{title}</span>
-        {avg !== null && <span className="text-[11px] text-muted tabular-nums">cluster avg {Math.round(avg)}%</span>}
-      </div>
-      <div className="relative flex items-end justify-between gap-1.5" style={{ height: H + 16 }}>
-        {avg !== null && (
-          <div
-            className="absolute left-0 right-0 border-t border-dashed border-muted/60 pointer-events-none"
-            style={{ bottom: 16 + (H * avg) / 100 }}
-          />
+// One half-moon per host: memory on the outer arc, CPU on the inner one. The grid wraps, so
+// the card keeps working as hosts are added. Hosts in maintenance or offline are dimmed and
+// tagged, and (like the balance score) not counted in the cluster averages.
+function HostGauge({ n }: { n: NodeLoad }) {
+  const w = 132;
+  const h = 76;
+  const cx = w / 2;
+  const cy = 68;
+  const out = n.status !== "online" || n.maintenance_mode;
+  const mem = n.mem_usage_pct;
+  const cpu = n.cpu_usage_pct;
+  const arc = (r: number, sw: number, v: number | null) => {
+    const d = `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`;
+    return (
+      <>
+        <path d={d} fill="none" stroke={COLOR_TRACK} strokeWidth={sw} strokeLinecap="round" />
+        {v !== null && v > 0 && (
+          <path d={d} fill="none" stroke={colorForPct(v)} strokeWidth={sw} strokeLinecap="round" pathLength={100} strokeDasharray={`${Math.min(v, 100)} 100`} />
         )}
-        {nodes.map((n) => {
-          const v = pick(n);
-          const out = n.status !== "online" || n.maintenance_mode;
-          return (
-            <div
-              key={n.id}
-              className={`flex-1 flex flex-col items-center ${out ? "opacity-40" : ""}`}
-              title={`${n.name}: ${v === null ? "no data" : Math.round(v) + "%"}${out ? (n.maintenance_mode ? " (maintenance, not counted)" : " (offline)") : ""}`}
-            >
-              <div className="w-full max-w-[26px] rounded-sm overflow-hidden flex items-end" style={{ height: H, background: COLOR_TRACK }}>
-                {v !== null && <div className="w-full" style={{ height: `${Math.min(Math.max(v, 0), 100)}%`, background: colorForPct(v) }} />}
-              </div>
-              <div className="text-[10px] text-muted mt-1 leading-none">{n.name.replace(/^pve-slc-/, "")}</div>
-            </div>
-          );
-        })}
+      </>
+    );
+  };
+  const tag = n.maintenance_mode ? "maintenance" : n.status !== "online" ? n.status : null;
+  return (
+    <Link
+      href={`/infrastructure/nodes/${n.id}`}
+      className={`flex flex-col items-center rounded hover:bg-surface2/60 px-1 py-1 ${out ? "opacity-50" : ""}`}
+      title={`${n.name}: memory ${mem === null ? "no data" : Math.round(mem) + "%"}, CPU ${cpu === null ? "no data" : Math.round(cpu) + "%"}${tag ? ` (${tag}, not counted in the balance)` : ""}`}
+    >
+      <div className="relative" style={{ width: w, height: h }}>
+        <svg width={w} height={h} aria-hidden="true">
+          {arc(56, 8, mem)}
+          {arc(42, 8, cpu)}
+        </svg>
+        <div className="absolute inset-x-0 bottom-0 text-center leading-tight">
+          <div className="text-[17px] font-semibold text-text">{mem === null ? "—" : `${Math.round(mem)}%`}</div>
+          <div className="text-[11px] text-muted tabular-nums">cpu {cpu === null ? "—" : `${Math.round(cpu)}%`}</div>
+        </div>
       </div>
-    </div>
+      <div className="text-xs font-medium text-text mt-1">{n.name.replace(/^pve-slc-/, "")}</div>
+      {tag && <div className="text-[10px] uppercase tracking-wide text-warn">{tag}</div>}
+    </Link>
   );
 }
 
@@ -97,12 +106,22 @@ export function NodeBalanceStrip({ nodes }: { nodes: NodeLoad[] }) {
   const sorted = [...nodes].sort((a, c) => a.name.localeCompare(c.name));
   return (
     <div>
-      <div className="flex flex-col gap-4">
-        <BarRow title="Memory by node" nodes={sorted} pick={(n) => n.mem_usage_pct} avg={b ? b.memAvg : null} />
-        <BarRow title="CPU by node" nodes={sorted} pick={(n) => n.cpu_usage_pct} avg={b ? b.cpuAvg : null} />
+      <div className="grid gap-x-2 gap-y-3 justify-items-center" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(128px, 1fr))" }}>
+        {sorted.map((n) => (
+          <HostGauge key={n.id} n={n} />
+        ))}
       </div>
-      <div className="mt-3 text-right">
-        <Link href="/operations/maintenance" className="text-[11px] text-accent hover:underline">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted">
+        <span>
+          outer arc memory · inner arc CPU
+          {b && (
+            <>
+              {" "}
+              · cluster avg memory {Math.round(b.memAvg)}%, CPU {Math.round(b.cpuAvg)}%
+            </>
+          )}
+        </span>
+        <Link href="/operations/maintenance" className="text-accent hover:underline">
           Balance Load →
         </Link>
       </div>
