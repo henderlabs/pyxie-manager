@@ -6,6 +6,7 @@ import StatusBadge from "@/components/StatusBadge";
 import RebootBanner from "@/components/RebootBanner";
 import DashboardNodesList from "@/components/DashboardNodesList";
 import { HalfGauge } from "@/components/HalfGauge";
+import { BalanceGauge, NodeBalanceStrip } from "@/components/ClusterBalance";
 import { ClusterIcon, ServerIcon, WorkloadIcon, StorageIcon, PackageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon, ChecklistIcon } from "@/components/Icons";
 import { formatBytes, formatPct } from "@/lib/format";
 
@@ -41,7 +42,6 @@ export default async function DashboardPage() {
   const memValues = summary.nodes_detail.map((n) => n.mem_usage_pct).filter((v): v is number => v !== null);
   const avgCpu = cpuValues.length ? cpuValues.reduce((a, b) => a + b, 0) / cpuValues.length : null;
   const avgMem = memValues.length ? memValues.reduce((a, b) => a + b, 0) / memValues.length : null;
-  const workloadPct = summary.workloads_total > 0 ? (summary.workloads_running / summary.workloads_total) * 100 : null;
   const nodesInMaintenance = summary.nodes_detail.filter((n) => n.maintenance_mode);
 
   return (
@@ -87,13 +87,9 @@ export default async function DashboardPage() {
                 : null
             }
           />
-          <HalfGauge
-            value={workloadPct}
-            label="Workloads running"
-            icon={<WorkloadIcon />}
-            detail={summary.workloads_total > 0 ? `${summary.workloads_running} of ${summary.workloads_total}` : null}
-          />
+          <BalanceGauge nodes={summary.nodes_detail} icon={<ClusterIcon />} />
         </div>
+        <NodeBalanceStrip nodes={summary.nodes_detail} />
       </Card>
 
       <Card className="mb-4">
@@ -110,7 +106,7 @@ export default async function DashboardPage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
         <StatTile label="Cluster Status" value={<StatusBadge status={summary.cluster_status} />} icon={<ClusterIcon />} />
         <StatTile label="Nodes" value={`${summary.nodes_online} / ${summary.nodes_total}`} sub="Online" icon={<ServerIcon />} />
-        <StatTile label="Workloads" value={`${summary.workloads_running} / ${summary.workloads_total}`} sub="Running" icon={<WorkloadIcon />} />
+        <StatTile label="Workloads" value={`${summary.workloads_running} / ${summary.workloads_total}`} sub={`Running · ${summary.workloads_total - summary.workloads_running} not running`} icon={<WorkloadIcon />} />
         <StatTile label="Storage" value={formatPct(summary.storage_used_pct)} sub="Used" icon={<StorageIcon />} />
         <StatTile label="Updates" value={summary.nodes_with_updates} sub="Nodes have updates" icon={<PackageIcon />} />
         <StatTile label="Active Findings" value={issueCount} sub="Critical + warning" icon={<HealthIcon />} />
