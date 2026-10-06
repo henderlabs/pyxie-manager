@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
+from .vm_liveness import assess_liveness
+
 RRD_TIMEFRAMES = ("hour", "day", "week", "month", "year")
 
 # rrddata keys the page charts. Anything else PVE returns is dropped so the
@@ -184,25 +186,29 @@ def summarize_status(status: dict | None) -> dict | None:
     return out
 
 
-def live_check(status: dict | None, expected_status: str | None) -> dict:
-    """A conservative liveness read from one status/current answer.
+def live_check(status: dict | None, expected_status: str | None, elapsed: float = 0.0, error: str | None = None, *, lxc: bool = False) -> dict:
+    """The workload page's liveness badge: {state: ok|warn|bad|info|unknown, detail}.
 
-    Only what a single answer can prove: PVE answered, its own status and the
-    QMP status agree, and the figures are present. A hung QMP socket is not yet
-    detectable from here (see the E4 follow-up), so this never claims 'ok' for
-    a VM it could not reach.
-    """
-    if status is None:
-        return {"state": "unknown", "detail": "PVE did not return live status"}
-    st = status.get("status")
-    qmp = status.get("qmpstatus")
-    if st == "running" and qmp not in (None, "running", "paused", "prelaunch"):
-        return {"state": "warn", "detail": f"PVE says running but QEMU reports '{qmp}'"}
-    if st == "running" and qmp is None and "pid" not in status and "uptime" not in status:
-        return {"state": "warn", "detail": "PVE says running but returned no QEMU details"}
-    if expected_status and st and expected_status != st:
-        return {"state": "info", "detail": f"PyXie last saw '{expected_status}', PVE now says '{st}'"}
-    return {"state": "ok", "detail": f"PVE status '{st}'"}
+    `bad` = QEMU is not answering (or reports a fault); see pyxie_core.vm_liveness."""
+    if lxc:  # a container has no QEMU control socket to probe
+        if status is None:
+            return {"state": "unknown", "detail": f"Could not ask PVE: {(error or 'no status')[:120]}"}
+        pve_status = status.get("status")
+        if expected_status and pve_status and expected_status != pve_status:
+            return {"state": "info", "detail": f"PyXie last saw '{expected_status}', PVE now says '{pve_status}'"}
+        return {"state": "ok", "detail": f"PVE status '{pve_status}'"}
+    a = assess_liveness(status, elapsed, error)
+    state = a["state"]
+    if state == "unknown":
+        return {"state": "unknown", "detail": a["detail"]}
+    if state in ("unresponsive", "problem"):
+        return {"state": "bad", "detail": a["detail"]}
+    if state == "slow":
+        return {"state": "warn", "detail": a["detail"]}
+    pve_status = (status or {}).get("status")
+    if expected_status and pve_status and expected_status != pve_status:
+        return {"state": "info", "detail": f"PyXie last saw '{expected_status}', PVE now says '{pve_status}'"}
+    return {"state": "ok", "detail": a["detail"]}
 
 
 def trim_rrd(rows: Iterable[dict] | None) -> list[dict]:

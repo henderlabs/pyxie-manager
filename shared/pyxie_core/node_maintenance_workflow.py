@@ -24,6 +24,7 @@ from . import lifecycle_workflow
 from .credentials import CredentialNotConfigured, HostNotAddressable, load_host_maintenance_credentials
 from .host_maintenance_client import HostMaintenanceClient, HostMaintenanceConnectionError, HostMaintenanceProtocolError
 from .locks import LockContention, acquire_lock, release_locks_for_operation
+from .vm_liveness import liveness_block_reason, scan_vm_liveness
 from .maintenance import _has_pci_passthrough, _qemu_config, _quorum_after_removal, flag_onboot, vm_lock_reason
 from .migration_workflow import (
     MigrationWorkflowError,
@@ -152,15 +153,17 @@ def dry_run_enter_maintenance(db: Session, node: Node, *, actor: str, reason: st
             )
             nodes_by_id = {n.id: n for n in candidates_all}
             simulated_added_bytes: dict = {}
+            # One timed status call per running VM: a VM whose QEMU does not answer would hang its migration.
+            liveness = scan_vm_liveness(client, [(node.name, w.vmid) for w in running_vms])
             for wl in running_vms:
                 config = _qemu_config(client, node.name, wl)
                 if _has_pci_passthrough(config):
                     blocked_workloads.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
                                                "reasons": ["PCI/device passthrough -- no safe automated path"]})
                     continue
-                lock_reason = vm_lock_reason(wl.vmid, config)
-                if lock_reason:
-                    blocked_workloads.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "reasons": [lock_reason]})
+                block_reasons = [r for r in (vm_lock_reason(wl.vmid, config), liveness_block_reason(wl.vmid, liveness.get(wl.vmid))) if r]
+                if block_reasons:
+                    blocked_workloads.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "reasons": block_reasons})
                     continue
                 ranked = recommend_destinations(db, client, wl, candidates_all, simulated_added_bytes=simulated_added_bytes)
                 ranked = rank_with_simulated_load(ranked, nodes_by_id, simulated_added_bytes)

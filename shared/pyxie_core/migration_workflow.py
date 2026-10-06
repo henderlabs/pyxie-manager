@@ -48,6 +48,7 @@ def _migration_timeout_seconds(ctx: dict) -> float:
 from .credentials import load_pve_credentials
 from .discovery import build_pve_client
 from .locks import LockContention, acquire_lock, release_locks_for_operation
+from .vm_liveness import liveness_block_reason, probe_vm
 from .maintenance import (
     _has_pci_passthrough,
     _qemu_config,
@@ -128,6 +129,13 @@ def _evaluate_migration_hard_blocks(
     elif transport == "offline" and workload.status not in ("running", "stopped"):
         reasons.append(f"workload status is '{workload.status}' -- not safe to migrate right now")
         blocking_rules.append("SAFE-MIGRATE-001")
+
+    # A running VM whose QEMU does not answer would hang the move (live) or its shutdown (offline).
+    if client and was_running:
+        live_reason = liveness_block_reason(workload.vmid, probe_vm(client, source_node.name, workload.vmid))
+        if live_reason:
+            reasons.append(live_reason)
+            blocking_rules.append("SAFE-MIGRATE-001")
 
     # Mirrors workload.resize's own SAFE-DOWNTIME-001 check -- offline
     # transport powers a running guest off for the duration of the disk

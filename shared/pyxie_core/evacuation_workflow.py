@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from .locks import LockContention, acquire_lock, release_locks_for_operation
+from .vm_liveness import liveness_block_reason, scan_vm_liveness
 from .maintenance import _qemu_config, _quorum_after_removal, vm_lock_reason
 from .migration_workflow import (
     MigrationWorkflowError,
@@ -101,10 +102,13 @@ def dry_run_evacuation(db: Session, node: Node, *, actor: str) -> Operation:
             )
             nodes_by_id = {n.id: n for n in candidates_all}
             simulated_added_bytes: dict = {}
+            liveness = scan_vm_liveness(client, [(node.name, w.vmid) for w in running_vms])
             for wl in running_vms:
-                lock_reason = vm_lock_reason(wl.vmid, _qemu_config(client, node.name, wl))
-                if lock_reason:
-                    unmigratable.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "reasons": [lock_reason]})
+                block_reasons = [
+                    r for r in (vm_lock_reason(wl.vmid, _qemu_config(client, node.name, wl)), liveness_block_reason(wl.vmid, liveness.get(wl.vmid))) if r
+                ]
+                if block_reasons:
+                    unmigratable.append({"workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "reasons": block_reasons})
                     continue
                 ranked = recommend_destinations(db, client, wl, candidates_all, simulated_added_bytes=simulated_added_bytes)
                 ranked = rank_with_simulated_load(ranked, nodes_by_id, simulated_added_bytes)

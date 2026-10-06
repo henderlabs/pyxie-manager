@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from pyxie_core.discovery import build_pve_client
 from pyxie_core.models import Cluster, Finding, Node, PveTarget, PveTask, Workload
+from pyxie_core.vm_liveness import PROBE_TIMEOUT_SECONDS, scan_vm_liveness
 from pyxie_core.workload_detail import (
     RRD_TIMEFRAMES,
     facts_from_config,
@@ -78,22 +79,32 @@ def workload_live(workload_id: uuid.UUID, db: Session = Depends(get_db)):
     try:
         client, _cred = _client(db, cluster)
         with client:
-            status = config = None
+            status = config = status_error = None
             errors = []
+            t0 = time.monotonic()
             try:
-                status = client.lxc_status_current(node.name, w.vmid) if lxc else client.qemu_status_current(node.name, w.vmid)
+                # A short timeout and no retry: a VM whose QEMU is hung must show up as "not answering",
+                # not stall the page for the client's default 25 s.
+                status = (
+                    client.lxc_status_current(node.name, w.vmid)
+                    if lxc
+                    else client.qemu_status_current(node.name, w.vmid, timeout=PROBE_TIMEOUT_SECONDS, retries=0)
+                )
             except Exception as e:  # noqa: BLE001 -- surfaced to the page, not hidden
-                errors.append(f"status: {e}")
+                status_error = str(e)
+                if not status_error.lower().lstrip().startswith("timeout"):
+                    errors.append(f"status: {e}")
+            elapsed = time.monotonic() - t0
             try:
                 config = client.lxc_config(node.name, w.vmid) if lxc else client.qemu_config(node.name, w.vmid)
             except Exception as e:  # noqa: BLE001
                 errors.append(f"config: {e}")
             out["status"] = summarize_status(status)
             out["config"] = summarize_config(config, lxc=lxc)
-            out["check"] = live_check(status, w.status)
+            out["check"] = live_check(status, w.status, elapsed, status_error, lxc=lxc)
             out["error"] = "; ".join(errors) or None
     except Exception as e:  # noqa: BLE001
-        out["check"] = live_check(None, w.status)
+        out["check"] = live_check(None, w.status, 0.0, str(e), lxc=lxc)
         out["error"] = str(e)
     return out
 
@@ -212,4 +223,50 @@ def workload_facts(db: Session = Depends(get_db)):
             return _facts_cache["data"]
         data = _build_facts(db)
         _facts_cache.update(ts=time.monotonic(), data=data)
+        return data
+
+
+_LIVENESS_TTL_SECONDS = 60
+_liveness_cache: dict = {"ts": 0.0, "data": None}
+_liveness_lock = threading.Lock()
+
+
+def _build_liveness(db: Session) -> dict:
+    """One timed status call per running VM, cluster by cluster. About 0.06 s each when healthy
+    (6 s for the 116 VMs on CRE), which is why it is cached."""
+    out: dict[str, dict] = {}
+    workloads = (
+        db.query(Workload)
+        .filter(Workload.is_missing.is_(False), Workload.type == "vm", Workload.status == "running")
+        .all()
+    )
+    nodes = {n.id: n for n in db.query(Node).all()}
+    by_cluster: dict = {}
+    for w in workloads:
+        by_cluster.setdefault(w.cluster_id, []).append(w)
+    for cluster_id, group in by_cluster.items():
+        cluster = db.query(Cluster).filter(Cluster.id == cluster_id).one_or_none()
+        if cluster is None:
+            continue
+        try:
+            client, _cred = _client(db, cluster)
+        except Exception:  # noqa: BLE001
+            continue
+        guests = [(nodes[w.node_id].name, w.vmid) for w in group if w.node_id in nodes]
+        with client:
+            results = scan_vm_liveness(client, guests)
+        for w in group:
+            if w.vmid in results:
+                out[str(w.id)] = results[w.vmid]
+    return {"liveness": out, "generated_at": datetime.now(timezone.utc).isoformat()}
+
+
+@router.get("/liveness")
+def workloads_liveness(db: Session = Depends(get_db)):
+    """Is each running VM's QEMU answering? For the Workloads table's Live Check column; cached 60 s."""
+    with _liveness_lock:
+        if _liveness_cache["data"] is not None and time.monotonic() - _liveness_cache["ts"] < _LIVENESS_TTL_SECONDS:
+            return _liveness_cache["data"]
+        data = _build_liveness(db)
+        _liveness_cache.update(ts=time.monotonic(), data=data)
         return data
