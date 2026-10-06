@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Operation } from "@/lib/api";
+import { isTerminal } from "@/lib/operationStatus";
 import { isInFlight } from "@/lib/operationStatus";
 
 /** Polls GET /api/operations/{id} every 2s while the operation is in flight,
@@ -13,11 +14,13 @@ export function useOperationPolling(initial: Operation | null): [Operation | nul
   const [op, setOp] = useState<Operation | null>(initial);
 
   useEffect(() => {
-    if (!op || !isInFlight(op.status)) return;
+    if (!op || isTerminal(op.status)) return;
+    // Still waiting on approval: poll slowly so an approval made from the Task
+    // Panel (or another tab) shows up here too, not just ones made in this card.
     const interval = setInterval(async () => {
       const res = await fetch(`/api/operations/${op.id}`);
       if (res.ok) setOp(await res.json());
-    }, 2000);
+    }, isInFlight(op.status) ? 2000 : 5000);
     return () => clearInterval(interval);
   }, [op]);
 
