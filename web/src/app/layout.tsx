@@ -20,9 +20,15 @@ function readVersion(): string {
   }
 }
 
+// Runs before the page paints: the saved choice (light / dark / match this computer); with none saved, dark.
+const THEME_SCRIPT = `(function(){try{var p=localStorage.getItem("pyxie:theme");var t=p==="light"||p==="dark"?p:(p==="system"&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark");document.documentElement.setAttribute("data-theme",t);}catch(e){document.documentElement.setAttribute("data-theme","dark");}})();`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="flex bg-canvas text-text min-h-screen">
         <AppChrome version={readVersion()}>{children}</AppChrome>
       </body>
