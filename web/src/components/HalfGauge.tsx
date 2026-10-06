@@ -15,7 +15,7 @@ export function HalfGauge({
   width = 140,
   strokeWidth = 10,
   ticks = [75, 90],
-  colorFor = colorForPct,
+  scale = "usage",
   title,
 }: {
   value: number | null;
@@ -26,8 +26,10 @@ export function HalfGauge({
   strokeWidth?: number;
   /** Where the two threshold ticks sit on the track (default 75 and 90 -- amber, red). */
   ticks?: number[];
-  /** Colour for a value; the default is the usage traffic light (high is bad). */
-  colorFor?: (v: number) => string;
+  /** "usage": high is bad (green below 75, amber from 75, red from 90). "balance": high is good
+   *  (green from 80, amber from 60, red below). A name, not a function, because this component is
+   *  rendered from server pages and functions cannot cross that boundary. */
+  scale?: "usage" | "balance";
   title?: string;
 }) {
   const pct = value === null ? 0 : Math.min(Math.max(value, 0), 100);
@@ -70,7 +72,7 @@ export function HalfGauge({
             <path
               d={d}
               fill="none"
-              stroke={colorFor(value)}
+              stroke={scale === "balance" ? (value >= 80 ? "#2fbf71" : value >= 60 ? "#e5a94c" : "#e5484d") : colorForPct(value)}
               strokeWidth={strokeWidth}
               strokeLinecap="round"
               pathLength={100}
