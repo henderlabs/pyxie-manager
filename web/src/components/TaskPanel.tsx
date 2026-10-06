@@ -47,7 +47,7 @@ const TERMINAL_STATUSES = new Set(["completed", "failed", "blocked", "cancelled"
 // progress, even while it's still queued.
 const BATCH_PLAN_OPERATION_TYPES = new Set(["node.enter_maintenance", "maintenance.run", "node.evacuate", "cluster.rebalance"]);
 
-type QueuedItem = { key: string; label: string; subject: string };
+type QueuedItem = { key: string; label: string; subject: string; skipped?: boolean };
 
 // node.enter_maintenance/maintenance.run/cluster.rebalance all key their
 // plan "migrate_plan" + "completed_migrations"; node.evacuate is the odd
@@ -79,8 +79,11 @@ function queuedItemsFor(op: Operation, allOps: Operation[]): QueuedItem[] {
 
   const items: QueuedItem[] = [];
   for (const item of migratePlan) {
-    // "Don't move" lines (Balance Load / Bulk Migrate) never run, so they are not queued.
-    if (item.transport === "skip") continue;
+    // "Don't move" lines (Balance Load / Bulk Migrate) never run: listed as Skipped, not queued.
+    if (item.transport === "skip") {
+      items.push({ key: `${op.id}:skip:${item.workload_id}`, label: "Live Migration", subject: item.name || (item.vmid ? `vmid ${item.vmid}` : "?"), skipped: true });
+      continue;
+    }
     if (completedMigrations.has(item.workload_id) || hasOwnOperation(item.workload_id)) continue;
     items.push({ key: `${op.id}:mig:${item.workload_id}`, label: "Live Migration", subject: item.name || (item.vmid ? `vmid ${item.vmid}` : "?") });
   }
@@ -275,7 +278,7 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
   );
 }
 
-function QueuedRow({ label, subject, by, since }: { label: string; subject: string; by?: string | null; since?: string | null }) {
+function QueuedRow({ label, subject, by, since, skipped }: { label: string; subject: string; by?: string | null; since?: string | null; skipped?: boolean }) {
   // A queued step has no row of its own yet, so it inherits who asked and when
   // from the operation that owns the plan -- enough to spot one that is stuck.
   return (
@@ -285,13 +288,17 @@ function QueuedRow({ label, subject, by, since }: { label: string; subject: stri
     >
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-text truncate">{label}</span>
-        <StatusBadge status="queued" />
+        {skipped ? (
+          <span className="text-[10px] uppercase tracking-wide text-muted font-semibold border border-border rounded px-1.5 py-0.5">Skipped</span>
+        ) : (
+          <StatusBadge status="queued" />
+        )}
       </div>
       <div className="flex items-center justify-between gap-2 mt-0.5">
         <span className="text-[11px] text-muted truncate">{subject}</span>
-        <span className="text-[11px] text-muted shrink-0">waiting on prior step</span>
+        <span className="text-[11px] text-muted shrink-0">{skipped ? "set to Don't move" : "waiting on prior step"}</span>
       </div>
-      {(by || since) && (
+      {(by || since) && !skipped && (
         <div className="flex items-center justify-between gap-2 mt-0.5">
           <span className="text-[11px] text-muted truncate">{by ? `by ${by}` : ""}</span>
           <span className="text-[11px] text-muted shrink-0 tabular-nums">{since ? `queued ${startTimeText(since)}` : ""}</span>
@@ -396,7 +403,7 @@ export default function TaskPanel({
     const items = queuedItemsFor(op, operations);
     if (items.length) {
       queuedByParentId[op.id] = items;
-      queuedCount += items.length;
+      queuedCount += items.filter((q) => !q.skipped).length;
     }
   }
 
@@ -466,7 +473,7 @@ export default function TaskPanel({
               extraCount={queuedCount}
               renderExtra={(op) =>
                 queuedByParentId[op.id]?.map((q) => (
-                  <QueuedRow key={q.key} label={q.label} subject={q.subject} by={op.initiated_by} since={op.approved_at || op.started_at || op.created_at} />
+                  <QueuedRow key={q.key} label={q.label} subject={q.subject} skipped={q.skipped} by={op.initiated_by} since={op.approved_at || op.started_at || op.created_at} />
                 ))
               }
               isAdmin={isAdmin}
