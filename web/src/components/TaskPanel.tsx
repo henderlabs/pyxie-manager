@@ -79,6 +79,8 @@ function queuedItemsFor(op: Operation, allOps: Operation[]): QueuedItem[] {
 
   const items: QueuedItem[] = [];
   for (const item of migratePlan) {
+    // "Don't move" lines (Balance Load / Bulk Migrate) never run, so they are not queued.
+    if (item.transport === "skip") continue;
     if (completedMigrations.has(item.workload_id) || hasOwnOperation(item.workload_id)) continue;
     items.push({ key: `${op.id}:mig:${item.workload_id}`, label: "Live Migration", subject: item.name || (item.vmid ? `vmid ${item.vmid}` : "?") });
   }
@@ -122,7 +124,7 @@ function subjectFor(op: Operation): string {
   }
   if (op.operation_type_id === "cluster.rebalance") {
     // Not tied to one node -- dry_run_result.node is always null here.
-    const count = (r?.migrate_plan as unknown[] | undefined)?.length ?? 0;
+    const count = ((r?.migrate_plan as { transport?: string }[] | undefined) || []).filter((i) => i.transport !== "skip").length;
     return `${count} workload${count === 1 ? "" : "s"}`;
   }
   if (op.operation_type_id === "protection.backup_membership") {
