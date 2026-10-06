@@ -33,6 +33,7 @@ CATEGORIES = [
     {"key": "task", "label": "Failed tasks", "description": "The latest run of a PVE task failed."},
     {"key": "protection", "label": "Backup protection", "description": "A workload has no confirmed backup protection."},
     {"key": "placement", "label": "Placement & affinity", "description": "An affinity rule is violated."},
+    {"key": "liveness", "label": "VM not responding", "description": "A running VM's QEMU has stopped answering: PVE still shows it as running, but live migration of it will hang."},
     {"key": "connectivity", "label": "Proxmox connectivity", "description": "PyXie cannot reach a Proxmox target, or has had to fall back to another cluster member."},
 ]
 CATEGORY_KEYS = {c["key"] for c in CATEGORIES}

@@ -250,7 +250,7 @@ export default function WorkloadsTable({
             const l = liveness[w.id];
             if (w.status !== "running" || !l) return <span className="text-muted">—</span>;
             return (
-              <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${LIVENESS_CLASS[l.state]}`} title={l.detail}>
+              <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${LIVENESS_CLASS[l.state]}`} title={l.since ? `${l.detail}. Not responding since ${new Date(l.since).toLocaleString()}.` : l.detail}>
                 {LIVENESS_LABEL[l.state]}
               </span>
             );

@@ -97,10 +97,38 @@ def live_memory_loop():
         time.sleep(INTERVAL_SECONDS)
 
 
+def liveness_loop():
+    """Probes every running VM's QEMU about once a minute so a hung VM is noticed within minutes,
+    not when a live migration hangs. Its own thread and table, like the live-memory refresher; a
+    failure only means results go stale (findings and readers ignore stale rows)."""
+    from pyxie_core.liveness_watch import INTERVAL_SECONDS, refresh_liveness
+
+    _wait_for_db()
+    log.info("liveness watcher started (every %ss)", INTERVAL_SECONDS)
+    failures = 0
+    while True:
+        started = time.monotonic()
+        db = SessionLocal()
+        try:
+            result = refresh_liveness(db)
+            failures = 0
+            if result.get("bad"):
+                log.warning("liveness: %s of %s running VMs not answering normally", result["bad"], result["probed"])
+        except Exception:
+            db.rollback()
+            failures += 1
+            if failures in (1, 10) or failures % 60 == 0:
+                log.exception("liveness refresh failed (%s in a row)", failures)
+        finally:
+            db.close()
+        time.sleep(max(5.0, INTERVAL_SECONDS - (time.monotonic() - started)))
+
+
 def main():
     t = threading.Thread(target=scheduler_loop, daemon=True)
     t.start()
     threading.Thread(target=live_memory_loop, daemon=True).start()
+    threading.Thread(target=liveness_loop, daemon=True).start()
 
     try:
         from worker.jobs import resume_inflight_operations

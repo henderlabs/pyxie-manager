@@ -593,6 +593,22 @@ class WorkloadLiveMem(Base):
     sampled_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class WorkloadLiveness(Base):
+    """Latest QEMU-responsiveness result per running VM, upserted about once a minute by the
+    worker's liveness loop (migration 0040). `consecutive_bad` is the streak of bad probes;
+    findings raise "VM is not responding" once it reaches 2. See pyxie_core.vm_liveness."""
+
+    __tablename__ = "workload_liveness"
+
+    workload_id = Column(UUID(as_uuid=True), ForeignKey("workloads.id", ondelete="CASCADE"), primary_key=True)
+    state = Column(String, nullable=False)
+    detail = Column(String, nullable=True)
+    elapsed = Column(Float, nullable=True)
+    checked_at = Column(DateTime(timezone=True), nullable=False)
+    bad_since = Column(DateTime(timezone=True), nullable=True)
+    consecutive_bad = Column(Integer, nullable=False, default=0, server_default="0")
+
+
 class MemPressureSample(Base):
     """One reading of a VM's guest memory counters (from PVE's ballooninfo), every
     ~5 minutes. The counters are cumulative since the guest booted, so what matters

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from pyxie_core.discovery import build_pve_client
 from pyxie_core.models import Cluster, Node, PveTarget, Workload
 from pyxie_core.node_detail import summarize_node_status, summarize_storage, trim_node_rrd
+from pyxie_core.liveness_watch import fresh_liveness
 from pyxie_core.vm_liveness import scan_vm_liveness
 from pyxie_core.workload_detail import RRD_TIMEFRAMES
 
@@ -96,10 +97,15 @@ def node_liveness(node_id: uuid.UUID, db: Session = Depends(get_db)):
             .all()
         )
         out: dict = {"checked": 0, "vms": [], "error": None}
+        fresh = fresh_liveness(db)
         try:
-            client, _cred = _client(db, cluster)
-            with client:
-                results = scan_vm_liveness(client, [(node.name, w.vmid) for w in guests])
+            if guests and all(str(w.id) in fresh for w in guests):
+                # The worker's background watch already has a recent answer for every VM here.
+                results = {w.vmid: fresh[str(w.id)] for w in guests}
+            else:
+                client, _cred = _client(db, cluster)
+                with client:
+                    results = scan_vm_liveness(client, [(node.name, w.vmid) for w in guests])
             rows = [
                 {"workload_id": str(w.id), "vmid": w.vmid, "name": w.name, **results[w.vmid]}
                 for w in guests if w.vmid in results
