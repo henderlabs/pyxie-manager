@@ -257,3 +257,36 @@ def guest_addresses(ifaces: Iterable[dict] | None) -> list[dict]:
             if addr and not str(addr).lower().startswith("fe80"):
                 out.append({"iface": name, "address": addr, "mac": mac})
     return out
+
+
+_SIZE_UNITS = {"K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+
+
+def parse_size_bytes(text: Any) -> int | None:
+    """PVE disk sizes: '32G', '528K', '4M', '1T'; a bare number is bytes."""
+    t = str(text or "").strip().upper()
+    if not t:
+        return None
+    try:
+        if t[-1] in _SIZE_UNITS:
+            return int(float(t[:-1]) * _SIZE_UNITS[t[-1]])
+        return int(float(t))
+    except ValueError:
+        return None
+
+
+def facts_from_config(config: dict | None, *, lxc: bool = False) -> dict | None:
+    """The per-VM facts the Workloads table columns need, from one guest config."""
+    summary = summarize_config(config, lxc=lxc)
+    if summary is None:
+        return None
+    disks = [d for d in summary["disks"] if d["kind"] == "disk" and not d["empty"]]
+    sizes = [parse_size_bytes(d["size"]) for d in disks]
+    return {
+        "start_at_boot": summary["start_at_boot"],
+        "agent_enabled": None if lxc else summary.get("agent_enabled"),
+        "ostype": summary["ostype"],
+        "disk_bytes": sum(x for x in sizes if x) if any(sizes) else None,
+        "storages": sorted({d["storage"] for d in disks if d["storage"]}),
+        "protection": summary["protection"],
+    }

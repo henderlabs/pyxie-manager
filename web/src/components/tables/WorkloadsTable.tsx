@@ -12,12 +12,23 @@ import ApplyRightsizingForm from "@/components/ApplyRightsizingForm";
 import WorkloadLifecycleButtons from "@/components/WorkloadLifecycleButtons";
 import MigrateWorkloadAction from "@/components/MigrateWorkloadAction";
 import { Meter } from "@/components/Gauges";
-import { formatBytes } from "@/lib/format";
+import { formatBytes, formatUptime } from "@/lib/format";
 import { CpuIcon, MemoryIcon } from "@/components/Icons";
 import { findingWorkloadIds } from "@/lib/findings";
 import { useMe } from "@/lib/useMe";
 import { PreferredHostSelect, ProfileSelect, StoragePreferenceSelect, patchPlacementProfile } from "@/components/ProfileSelect";
 import { WorkloadRowDetail } from "@/components/WorkloadDetail";
+
+type WorkloadFacts = {
+  uptime: number | null;
+  lock: string | null;
+  template: boolean;
+  start_at_boot: boolean | null;
+  agent_enabled: boolean | null;
+  ostype: string | null;
+  disk_bytes: number | null;
+  storages: string[];
+};
 
 type WorkloadMetric = { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host"; ballooning?: "on" | "off" | "pending"; balloon_min_mb?: number | null };
 
@@ -149,6 +160,25 @@ export default function WorkloadsTable({
     return () => clearInterval(interval);
   }, []);
 
+  // Config-derived facts (Start at boot, agent, OS, disk) and live uptime/lock for every guest:
+  // one cached server call, so the table renders at once and these fill in a moment later.
+  const [facts, setFacts] = useState<Record<string, WorkloadFacts>>({});
+  useEffect(() => {
+    let cancelled = false;
+    function refresh() {
+      fetch("/api/workloads/facts")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => data?.facts && !cancelled && setFacts(data.facts))
+        .catch(() => {});
+    }
+    refresh();
+    const interval = setInterval(refresh, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   const columns: Column<Workload>[] = [
         { header: "VMID", render: (w) => w.vmid, sortValue: (w) => w.vmid },
         {
@@ -190,6 +220,28 @@ export default function WorkloadsTable({
           header: "Status",
           render: (w) => <StatusBadge status={w.is_missing ? "unknown" : w.status} />,
           sortValue: (w) => (w.is_missing ? "unknown" : w.status),
+        },
+        {
+          header: "Uptime",
+          tooltip: "How long this guest has been running, from PVE. Blank while stopped.",
+          render: (w) => <span className="text-muted whitespace-nowrap">{w.status === "running" ? formatUptime(facts[w.id]?.uptime) : "—"}</span>,
+          sortValue: (w) => (w.status === "running" ? facts[w.id]?.uptime ?? null : null),
+          optional: true,
+        },
+        {
+          header: "Start at boot",
+          tooltip:
+            "PVE's 'Start at boot' option: the host powers this guest on by itself whenever it boots. Shown in amber on a stopped guest, because it will start by itself after a host reboot.",
+          render: (w) => {
+            const f = facts[w.id]?.start_at_boot;
+            if (f == null) return <span className="text-muted">—</span>;
+            if (f && w.status !== "running") {
+              return <span className="text-warn" title="Stopped now, but it will power on by itself after a host reboot">Yes</span>;
+            }
+            return f ? "Yes" : <span className="text-muted">No</span>;
+          },
+          sortValue: (w) => (facts[w.id]?.start_at_boot == null ? null : facts[w.id]?.start_at_boot ? 1 : 0),
+          optional: true,
         },
         {
           header: "Power",
@@ -356,6 +408,49 @@ export default function WorkloadsTable({
           render: (w) => (w.tags && w.tags.length ? w.tags.join(", ") : "—"),
           sortValue: (w) => (w.tags && w.tags.length ? w.tags.join(", ") : ""),
           optional: true,
+        },
+        {
+          header: "Guest Agent",
+          tooltip: "Whether the QEMU guest agent is enabled in the VM's PVE config (it can still be enabled but not running inside the guest).",
+          render: (w) => {
+            const a = facts[w.id]?.agent_enabled;
+            return a == null ? <span className="text-muted">—</span> : a ? "Enabled" : <span className="text-muted">Off</span>;
+          },
+          sortValue: (w) => (facts[w.id]?.agent_enabled == null ? null : facts[w.id]?.agent_enabled ? 1 : 0),
+          optional: true,
+          defaultHidden: true,
+        },
+        {
+          header: "OS Type",
+          tooltip: "The OS type set in the guest's PVE config (l26 = Linux 2.6+, win11, win10, ...).",
+          render: (w) => <span className="text-muted">{facts[w.id]?.ostype || "—"}</span>,
+          sortValue: (w) => facts[w.id]?.ostype ?? null,
+          optional: true,
+          defaultHidden: true,
+        },
+        {
+          header: "Disk",
+          tooltip: "Total size of the guest's data disks (EFI/TPM state and empty CD-ROMs excluded) and the storage(s) they sit on.",
+          render: (w) => {
+            const f = facts[w.id];
+            if (!f || f.disk_bytes == null) return <span className="text-muted">—</span>;
+            return (
+              <span className="whitespace-nowrap">
+                {formatBytes(f.disk_bytes)} <span className="text-muted">{f.storages.join(", ")}</span>
+              </span>
+            );
+          },
+          sortValue: (w) => facts[w.id]?.disk_bytes ?? null,
+          optional: true,
+          defaultHidden: true,
+        },
+        {
+          header: "Lock",
+          tooltip: "A PVE lock on the guest (backup, migrate, snapshot, ...). A lock that never clears usually means a task died part-way.",
+          render: (w) => (facts[w.id]?.lock ? <span className="text-warn">{facts[w.id]?.lock}</span> : <span className="text-muted">—</span>),
+          sortValue: (w) => facts[w.id]?.lock ?? null,
+          optional: true,
+          defaultHidden: true,
         },
         {
           header: "Sensitivity",

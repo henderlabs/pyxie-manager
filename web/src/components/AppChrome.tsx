@@ -1,6 +1,8 @@
 "use client";
 
+import { Suspense } from "react";
 import { usePathname } from "next/navigation";
+import NavProgress from "@/components/NavProgress";
 import Sidebar from "@/components/Sidebar";
 import TaskPanel, { PANEL_WIDTH_PX } from "@/components/TaskPanel";
 
@@ -12,6 +14,9 @@ export default function AppChrome({ children, version }: { children: React.React
 
   return (
     <>
+      <Suspense fallback={null}>
+        <NavProgress />
+      </Suspense>
       <Sidebar version={version} />
       <main
         className="flex-1 min-w-0 p-6 transition-[margin-right] duration-200 ease-out"

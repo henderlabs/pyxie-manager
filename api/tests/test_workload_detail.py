@@ -7,6 +7,8 @@ from types import SimpleNamespace
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 
 from pyxie_core.workload_detail import (
+    facts_from_config,
+    parse_size_bytes,
     guest_addresses,
     is_noise_iface,
     live_check,
@@ -113,3 +115,23 @@ def test_guest_addresses_drop_loopback_docker_bridge_and_linklocal():
     assert guest_addresses(lxc) == [{"iface": "eth0", "address": "10.1.2.3", "mac": "aa"}]
     assert guest_addresses(None) == []
     assert is_noise_iface("Docker0") and not is_noise_iface("ens192") and not is_noise_iface("bridge0")
+
+
+def test_parse_size_bytes():
+    assert parse_size_bytes("32G") == 32 * 1024**3 and parse_size_bytes("528K") == 528 * 1024
+    assert parse_size_bytes("1.5T") == int(1.5 * 1024**4) and parse_size_bytes("4096") == 4096
+    assert parse_size_bytes("") is None and parse_size_bytes(None) is None and parse_size_bytes("abc") is None
+
+
+def test_facts_from_config_counts_only_real_disks():
+    f = facts_from_config(VM104)
+    assert f["start_at_boot"] is True and f["agent_enabled"] is True and f["protection"] is False
+    assert f["disk_bytes"] == 32 * 1024**3  # scsi0 only: not the EFI disk, TPM state or empty CD-ROM
+    assert f["storages"] == ["VMW-NFS01"]
+    two = facts_from_config({"scsi0": "a:x,size=10G", "scsi1": "b:y,size=20G", "memory": "1024"})
+    assert two["disk_bytes"] == 30 * 1024**3 and two["storages"] == ["a", "b"] and two["start_at_boot"] is False
+    nodisk = facts_from_config({"memory": "512", "ide2": "none,media=cdrom"})
+    assert nodisk["disk_bytes"] is None and nodisk["storages"] == []
+    ct = facts_from_config({"rootfs": "local-lvm:vm-9-disk-0,size=8G", "onboot": 1}, lxc=True)
+    assert ct["agent_enabled"] is None and ct["start_at_boot"] is True and ct["disk_bytes"] == 8 * 1024**3
+    assert facts_from_config(None) is None

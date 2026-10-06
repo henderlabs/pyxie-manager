@@ -167,11 +167,21 @@ export function Table<T extends { id: string }>({
     const validHeaders = new Set(columns.map((c) => c.header));
     if (prefs.order) {
       const kept = prefs.order.filter((h) => validHeaders.has(h));
-      const missing = columns.map((c) => c.header).filter((h) => !kept.includes(h));
-      setOrder([...kept, ...missing]);
+      // A column the viewer has never seen goes right after the column that precedes it in the
+      // default layout, not at the far end of a wide table.
+      const merged = [...kept];
+      const defaults = columns.map((c) => c.header);
+      for (const h of defaults.filter((x) => !kept.includes(x))) {
+        const before = defaults.slice(0, defaults.indexOf(h)).reverse().find((x) => merged.includes(x));
+        merged.splice(before ? merged.indexOf(before) + 1 : 0, 0, h);
+      }
+      setOrder(merged);
     }
     if (prefs.hidden) {
       const kept = new Set(prefs.hidden.filter((h) => validHeaders.has(h)));
+      // Columns added since this viewer last saved their layout start hidden if they are meant to.
+      const seen = new Set(prefs.order || []);
+      if (prefs.order) for (const c of columns) if (c.defaultHidden && !seen.has(c.header)) kept.add(c.header);
       if (defaultsVersion && prefs.defaultsVersion !== defaultsVersion) {
         for (const c of columns) if (c.defaultHidden) kept.add(c.header);
         savePrefs(storageKey, { ...prefs, hidden: Array.from(kept), defaultsVersion });
