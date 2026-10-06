@@ -57,6 +57,7 @@ type StoredPrefs = {
   hidden?: string[];
   sort?: SortState;
   widths?: Record<string, number>;
+  defaultsVersion?: number;
 };
 
 const MIN_COLUMN_WIDTH = 60;
@@ -87,6 +88,7 @@ export function Table<T extends { id: string }>({
   onRowClick,
   renderDetail,
   singleExpand,
+  defaultsVersion,
   controlledSort,
   onSortChange,
 }: {
@@ -108,6 +110,11 @@ export function Table<T extends { id: string }>({
   renderDetail?: (row: T) => React.ReactNode;
   /** Opening one row's detail closes any other -- for heavy panels that fetch live data. */
   singleExpand?: boolean;
+  /** Bump when `defaultHidden` changes. A viewer who already saved column choices has those
+   * honoured, but once per bump the new defaults are folded in (columns hidden by default
+   * get hidden again), so a de-cluttering change reaches existing users too. Choices made
+   * afterwards stick. */
+  defaultsVersion?: number;
   /** Together, these hand sorting to the parent instead of Table managing
    * it internally -- e.g. WorkloadsTable sorts its full dataset and THEN
    * paginates, so `rows` here is already sorted (and already sliced to
@@ -164,7 +171,12 @@ export function Table<T extends { id: string }>({
       setOrder([...kept, ...missing]);
     }
     if (prefs.hidden) {
-      setHidden(new Set(prefs.hidden.filter((h) => validHeaders.has(h))));
+      const kept = new Set(prefs.hidden.filter((h) => validHeaders.has(h)));
+      if (defaultsVersion && prefs.defaultsVersion !== defaultsVersion) {
+        for (const c of columns) if (c.defaultHidden) kept.add(c.header);
+        savePrefs(storageKey, { ...prefs, hidden: Array.from(kept), defaultsVersion });
+      }
+      setHidden(kept);
     }
     if (prefs.sort && validHeaders.has(prefs.sort.header) && !onSortChange) {
       setInternalSort(prefs.sort);
@@ -180,7 +192,7 @@ export function Table<T extends { id: string }>({
   }, [storageKey]);
 
   function persist(next: Partial<StoredPrefs>) {
-    const prefs = { order, hidden: Array.from(hidden), sort: internalSort, widths, ...next };
+    const prefs = { order, hidden: Array.from(hidden), sort: internalSort, widths, defaultsVersion, ...next };
     savePrefs(storageKey, prefs);
   }
 
