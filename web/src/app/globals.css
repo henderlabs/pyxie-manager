@@ -2,21 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root,
+:root[data-theme="dark"] {
   color-scheme: dark;
+  --c-canvas: 11 14 20;
+  --c-surface: 17 21 29;
+  --c-surface2: 22 27 38;
+  --c-border: 35 42 56;
+  --c-text: 230 233 239;
+  --c-muted: 139 149 167;
+  --c-accent: 79 140 255;
+  --c-good: 47 191 113;
+  --c-warn: 229 169 76;
+  --c-bad: 229 72 77;
+  --c-proxmox: 229 112 0;
+  --c-ink: 0 0 0;
+}
+
+/* Light palette: accents are a shade deeper than the dark ones so text and thin lines keep their contrast on white. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --c-canvas: 243 245 249;
+  --c-surface: 255 255 255;
+  --c-surface2: 238 241 246;
+  --c-border: 216 222 233;
+  --c-text: 26 34 48;
+  --c-muted: 90 101 120;
+  --c-accent: 37 99 235;
+  --c-good: 21 128 75;
+  --c-warn: 169 106 11;
+  --c-bad: 204 52 58;
+  --c-proxmox: 214 100 0;
+  --c-ink: 26 34 48;
 }
 
 body {
-  background-color: #0b0e14;
-  color: #e6e9ef;
+  background-color: rgb(var(--c-canvas));
+  color: rgb(var(--c-text));
 }
+
+/* The logo is white text on transparent, so the light theme uses a dark-text copy. */
+.logo-for-light { display: none; }
+:root[data-theme="light"] .logo-for-dark { display: none; }
+:root[data-theme="light"] .logo-for-light { display: inline-block; }
 
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: #232a38;
+  background: rgb(var(--c-border));
   border-radius: 6px;
 }
 ::-webkit-scrollbar-track {
