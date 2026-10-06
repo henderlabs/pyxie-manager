@@ -83,7 +83,7 @@ const SECTIONS: NavSection[] = [
   },
 ];
 
-export default function Sidebar({ version }: { version: string }) {
+export default function Sidebar({ version, instance }: { version: string; instance: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const [me, setMe] = useState<{ email: string; display_name: string | null; is_admin: boolean } | null>(null);
@@ -246,7 +246,7 @@ export default function Sidebar({ version }: { version: string }) {
         )}
       </div>
       <div className="px-4 py-1.5 flex items-center justify-between text-xs text-muted/70 tracking-wide">
-        <span>v{version}</span>
+        <span className="truncate min-w-0" title={`${instance} v${version}`}>{instance} v{version}</span>
         {lastRefreshed && (
           <button
             onClick={refreshNow}
