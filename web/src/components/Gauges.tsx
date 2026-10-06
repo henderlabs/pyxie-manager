@@ -1,10 +1,10 @@
 const COLOR_GOOD = "#2fbf71";
 const COLOR_WARN = "#e5a94c";
 const COLOR_BAD = "#e5484d";
-const COLOR_MUTED = "#8b95a7";
-const COLOR_TRACK = "#232a38";
+export const COLOR_MUTED = "#8b95a7";
+export const COLOR_TRACK = "#232a38";
 
-function colorForPct(value: number | null): string {
+export function colorForPct(value: number | null): string {
   if (value === null) return COLOR_MUTED;
   if (value >= 90) return COLOR_BAD;
   if (value >= 75) return COLOR_WARN;

@@ -740,6 +740,11 @@ def dashboard_summary(db: Session = Depends(get_db)):
     total_used = sum((s.used_bytes or 0) for s in storage)
     storage_pct = round(total_used / total_capacity * 100, 1) if total_capacity else None
 
+    # Totals behind the memory gauge's detail line: physical RAM across nodes, and the
+    # part in use (each node's reported percentage applied to its own total).
+    mem_total = sum((n.mem_total_bytes or 0) for n in nodes)
+    mem_used = sum((n.mem_total_bytes or 0) * (n.mem_usage_pct or 0) / 100 for n in nodes)
+
     cluster_status = "healthy"
     for c in clusters:
         if c.quorate is False:
@@ -762,6 +767,10 @@ def dashboard_summary(db: Session = Depends(get_db)):
         "workloads_running": workloads_running,
         "workloads_total": len(workloads),
         "storage_used_pct": storage_pct,
+        "storage_used_bytes": total_used if total_capacity else None,
+        "storage_total_bytes": total_capacity or None,
+        "mem_used_bytes": round(mem_used) if mem_total else None,
+        "mem_total_bytes": mem_total or None,
         "nodes_with_updates": nodes_with_updates,
         "nodes_in_maintenance": nodes_in_maintenance,
         "operations_awaiting_approval": operations_awaiting_approval,

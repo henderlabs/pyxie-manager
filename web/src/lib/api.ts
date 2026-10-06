@@ -311,6 +311,11 @@ export type DashboardSummary = {
   workloads_running: number;
   workloads_total: number;
   storage_used_pct: number | null;
+  // Totals behind the dashboard gauges (null/absent when PVE has not reported them yet).
+  storage_used_bytes?: number | null;
+  storage_total_bytes?: number | null;
+  mem_used_bytes?: number | null;
+  mem_total_bytes?: number | null;
   nodes_with_updates: number;
   nodes_in_maintenance: number;
   operations_awaiting_approval: number;
