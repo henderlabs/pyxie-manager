@@ -92,9 +92,6 @@ async function ClusterOverview({ clusterId }: { clusterId?: string }) {
   const allocatedVcpu = presentWorkloads.reduce((sum, w) => sum + (w.cpu_cores ?? 0), 0);
   const allocatedMemBytes = presentWorkloads.reduce((sum, w) => sum + (w.memory_bytes ?? 0), 0);
 
-  const canaryByNode = Object.fromEntries(
-    nodePolicies.filter((p) => p.key === "rollout.canary").map((p) => [p.scope_id, Boolean(p.value)])
-  );
   const defaultStorageByNode = Object.fromEntries(
     nodePolicies.filter((p) => p.key === "placement.default_storage_id").map((p) => [p.scope_id, (p.value as string | null) || null])
   );
@@ -143,7 +140,6 @@ async function ClusterOverview({ clusterId }: { clusterId?: string }) {
         nodes={clusterNodes}
         clusterId={cluster.id}
         tierSuggestions={tierSuggestions}
-        canaryByNode={canaryByNode}
         storage={storage}
         defaultStorageByNode={defaultStorageByNode}
       />
