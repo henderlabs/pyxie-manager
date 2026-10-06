@@ -65,7 +65,7 @@ export function BalanceGauge({ nodes, icon }: { nodes: NodeLoad[]; icon?: React.
 function BarRow({ title, nodes, pick, avg }: { title: string; nodes: NodeLoad[]; pick: (n: NodeLoad) => number | null; avg: number | null }) {
   const H = 56;
   return (
-    <div className="flex-1 min-w-[260px]">
+    <div>
       <div className="flex items-baseline justify-between mb-1.5">
         <span className="text-[11px] uppercase tracking-wider text-muted font-semibold">{title}</span>
         {avg !== null && <span className="text-[11px] text-muted tabular-nums">cluster avg {Math.round(avg)}%</span>}
@@ -102,12 +102,12 @@ export function NodeBalanceStrip({ nodes }: { nodes: NodeLoad[] }) {
   const b = computeBalance(nodes);
   const sorted = [...nodes].sort((a, c) => a.name.localeCompare(c.name));
   return (
-    <div className="mt-4 pt-3 border-t border-border">
-      <div className="flex flex-wrap gap-x-8 gap-y-3">
+    <div>
+      <div className="flex flex-col gap-4">
         <BarRow title="Memory by node" nodes={sorted} pick={(n) => n.mem_usage_pct} avg={b ? b.memAvg : null} />
         <BarRow title="CPU by node" nodes={sorted} pick={(n) => n.cpu_usage_pct} avg={b ? b.cpuAvg : null} />
       </div>
-      <div className="mt-2 text-right">
+      <div className="mt-3 text-right">
         <Link href="/operations/maintenance" className="text-[11px] text-accent hover:underline">
           Balance Load →
         </Link>
