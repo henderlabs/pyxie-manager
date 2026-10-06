@@ -58,7 +58,10 @@ export type LiveStatus = {
   ha?: { managed: boolean; state: string | null; group: string | null };
 };
 
-export type LiveCheck = { state: "ok" | "warn" | "info" | "unknown"; detail: string };
+export type LiveCheck = { state: "ok" | "warn" | "bad" | "info" | "unknown"; detail: string };
+
+/** One VM's answer to "is your QEMU responding?" (see api/pyxie_core/vm_liveness.py). */
+export type Liveness = { state: "ok" | "slow" | "unresponsive" | "problem" | "stopped" | "unknown"; detail: string; elapsed: number };
 
 export type WorkloadLive = { status: LiveStatus | null; config: ConfigSummary | null; check: LiveCheck | null; error: string | null };
 
