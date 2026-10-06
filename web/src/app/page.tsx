@@ -65,7 +65,8 @@ export default async function DashboardPage() {
         <RebootBanner nodes={summary.nodes_detail.map((n) => ({ id: n.id, name: n.name }))} />
       </div>
 
-      <Card className="mb-4">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-4">
+      <Card>
         <CardTitle>Cluster Resource Usage</CardTitle>
         <div className="flex flex-wrap items-center justify-around gap-4 py-1">
           <HalfGauge value={avgCpu} label="Avg CPU across nodes" icon={<CpuIcon />} />
@@ -89,8 +90,13 @@ export default async function DashboardPage() {
           />
           <BalanceGauge nodes={summary.nodes_detail} icon={<ClusterIcon />} />
         </div>
+      </Card>
+
+      <Card>
+        <CardTitle>Host Load</CardTitle>
         <NodeBalanceStrip nodes={summary.nodes_detail} />
       </Card>
+      </div>
 
       <Card className="mb-4">
         <CardTitle>Environment Health</CardTitle>
