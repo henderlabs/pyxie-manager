@@ -13,6 +13,8 @@ import WorkloadLifecycleButtons from "@/components/WorkloadLifecycleButtons";
 import MigrateWorkloadAction from "@/components/MigrateWorkloadAction";
 import { Meter } from "@/components/Gauges";
 import { formatBytes, formatUptime } from "@/lib/format";
+import { LIVENESS_CLASS, LIVENESS_LABEL, LIVENESS_RANK } from "@/lib/liveness";
+import type { Liveness } from "@/lib/workloadDetail";
 import { CpuIcon, MemoryIcon } from "@/components/Icons";
 import { findingWorkloadIds } from "@/lib/findings";
 import { useMe } from "@/lib/useMe";
@@ -179,6 +181,25 @@ export default function WorkloadsTable({
     };
   }, []);
 
+  // Is each running VM's QEMU answering? One cached server scan (about 6 s cold for 116 VMs), so the
+  // table renders at once and this column fills in afterwards.
+  const [liveness, setLiveness] = useState<Record<string, Liveness>>({});
+  useEffect(() => {
+    let cancelled = false;
+    function refresh() {
+      fetch("/api/workloads/liveness")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => data?.liveness && !cancelled && setLiveness(data.liveness))
+        .catch(() => {});
+    }
+    refresh();
+    const interval = setInterval(refresh, 60000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   const columns: Column<Workload>[] = [
         { header: "VMID", render: (w) => w.vmid, sortValue: (w) => w.vmid },
         {
@@ -220,6 +241,22 @@ export default function WorkloadsTable({
           header: "Status",
           render: (w) => <StatusBadge status={w.is_missing ? "unknown" : w.status} />,
           sortValue: (w) => (w.is_missing ? "unknown" : w.status),
+        },
+        {
+          header: "Live Check",
+          tooltip:
+            "Asks PVE whether each running VM's QEMU is answering. PVE calls a VM 'running' from its process alone, so a VM whose QEMU control socket is hung still looks fine -- but a live migration of it hangs for about 10 minutes and fails. 'Not responding' means power-cycle it from PVE before moving it. Hover a badge for the detail.",
+          render: (w) => {
+            const l = liveness[w.id];
+            if (w.status !== "running" || !l) return <span className="text-muted">—</span>;
+            return (
+              <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${LIVENESS_CLASS[l.state]}`} title={l.detail}>
+                {LIVENESS_LABEL[l.state]}
+              </span>
+            );
+          },
+          sortValue: (w) => (w.status === "running" && liveness[w.id] ? LIVENESS_RANK[liveness[w.id].state] : 9),
+          optional: true,
         },
         {
           header: "Uptime",
