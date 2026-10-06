@@ -85,8 +85,8 @@ function HostGauge({ n }: { n: NodeLoad }) {
       className={`flex flex-col items-center rounded hover:bg-surface2/60 px-1 py-1 ${out ? "opacity-50" : ""}`}
       title={`${n.name}: memory ${mem === null ? "no data" : Math.round(mem) + "%"}, CPU ${cpu === null ? "no data" : Math.round(cpu) + "%"}${tag ? ` (${tag}, not counted in the balance)` : ""}`}
     >
-      <div className="relative" style={{ width: w, height: h }}>
-        <svg width={w} height={h} aria-hidden="true">
+      <div className="relative w-full mx-auto" style={{ maxWidth: w }}>
+        <svg viewBox={`0 0 ${w} ${h}`} width="100%" aria-hidden="true" className="block">
           {arc(56, 8, mem)}
           {arc(42, 8, cpu)}
         </svg>
@@ -104,9 +104,12 @@ function HostGauge({ n }: { n: NodeLoad }) {
 export function NodeBalanceStrip({ nodes }: { nodes: NodeLoad[] }) {
   const b = computeBalance(nodes);
   const sorted = [...nodes].sort((a, c) => a.name.localeCompare(c.name));
+  // At most four to a row, and rows kept even: 8 hosts -> 4 x 2, 9 -> 3 x 3, 5 -> 3 + 2, never 7 + 1.
+  const rows = Math.max(1, Math.ceil(sorted.length / 4));
+  const cols = Math.max(1, Math.ceil(sorted.length / rows));
   return (
     <div>
-      <div className="grid gap-x-2 gap-y-3 justify-items-center" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(128px, 1fr))" }}>
+      <div className="grid gap-x-2 gap-y-3 justify-items-center" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
         {sorted.map((n) => (
           <HostGauge key={n.id} n={n} />
         ))}
