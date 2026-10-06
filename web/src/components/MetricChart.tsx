@@ -36,6 +36,7 @@ export default function MetricChart({
   series,
   format,
   fixedMax,
+  loading,
 }: {
   title: string;
   times: number[];
@@ -44,6 +45,8 @@ export default function MetricChart({
   format: (v: number) => string;
   /** Pin the y axis top (e.g. total memory). Otherwise it autoscales. */
   fixedMax?: number;
+  /** True while the first fetch for this period is in flight. */
+  loading?: boolean;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const n = times.length;
@@ -103,7 +106,7 @@ export default function MetricChart({
         </div>
       </div>
       {n === 0 ? (
-        <div className="text-sm text-muted py-8 text-center">No data for this period.</div>
+        <div className="text-sm text-muted py-8 text-center">{loading ? "Loading…" : "No data for this period."}</div>
       ) : (
         <div className="relative">
           <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" onMouseMove={onMove} onMouseLeave={() => setHover(null)} role="img" aria-label={title}>
