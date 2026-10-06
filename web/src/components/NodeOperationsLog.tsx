@@ -186,7 +186,7 @@ export default function NodeOperationsLog({ initialOperations }: { initialOperat
                     <button
                       onClick={() => approve(op)}
                       disabled={approving === op.id}
-                      className="px-2 py-1 rounded text-xs font-medium bg-black text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
+                      className="px-2 py-1 rounded text-xs font-medium bg-ink text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
                     >
                       {approving === op.id ? "Submitting…" : "Approve & Execute"}
                     </button>
