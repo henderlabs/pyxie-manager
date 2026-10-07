@@ -104,25 +104,11 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
   const showProgress = data.state.state != null && !waiting;
   const rb = data.rollback;
 
-  return (
-    <div className="space-y-4">
-      {offline && (
-        <div className="px-3 py-2 rounded border border-warn/40 bg-warn/10 text-warn text-sm">
-          The site is restarting. This page reconnects by itself.
-        </div>
-      )}
-      {error && <div className="px-3 py-2 rounded border border-bad/40 bg-bad/10 text-bad text-sm">{error}</div>}
-
-      {!data.installed && (
-        <Card>
-          <CardTitle>Updater not installed</CardTitle>
-          <div className="text-sm text-muted">
-            This server does not have the update helper yet. On the server, run <code>bash ops/docker/install-updater.sh</code> (see docs/updates.md); this page then shows release status here.
-          </div>
-        </Card>
-      )}
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+  // Layout: Version beside the live progress (so an update is visible without scrolling past the release
+  // notes); the release notes move below it, beside the log. With nothing in progress, Version sits beside
+  // the release notes as before.
+  const progressVisible = showProgress || waiting;
+  const versionCard = (
         <Card>
           <CardTitle>Version</CardTitle>
           <dl className="text-sm space-y-1">
@@ -179,7 +165,8 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
             </div>
           )}
         </Card>
-
+  );
+  const whatsNewCard = (
         <Card>
           <CardTitle>{s.update_available ? `What's new (since v${data.current})` : "Recent releases"}</CardTitle>
           {s.update_available && s.releases && s.releases.length > 0 ? (
@@ -195,9 +182,8 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
             <div className="text-sm text-muted">You are on the latest release.</div>
           )}
         </Card>
-      </div>
-
-      {waiting && (
+  );
+  const waitingCard = (
         <Card>
           <CardTitle>
             {waitAction === "rollback" ? "Restoring" : "Updating"}{waitVersion ? ` to v${waitVersion}` : ""}{" "}
@@ -209,15 +195,8 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
           </div>
           <p className="mt-2 text-xs text-muted">The updater checks for requests every couple of seconds; the first step appears here as soon as it begins. You can leave this page open.</p>
         </Card>
-      )}
-      {askedStale && (
-        <div className="px-3 py-2 rounded border border-warn/40 bg-warn/10 text-warn text-sm">
-          The updater has not started the request after 3 minutes. Check that its cron job is installed (docs/updates.md) and look at update/update.log on the server.
-        </div>
-      )}
-
-      {showProgress && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+  );
+  const progressCard = (
           <Card>
             <CardTitle>
               {data.state.action === "rollback" ? "Restoring" : "Updating"} v{data.state.from} → v{data.state.to}
@@ -237,12 +216,50 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
             )}
             {data.state.backup && <div className="mt-1 text-xs text-muted">Database backup: <code>{data.state.backup}</code></div>}
           </Card>
+
+  );
+  const logCard = (
           <Card>
             <CardTitle>Live log</CardTitle>
             <div ref={logRef} className="max-h-72 overflow-y-auto bg-canvas border border-border rounded p-2 font-mono text-[11px] leading-5 text-muted whitespace-pre-wrap">
               {data.log.length ? data.log.join("\n") : "Nothing yet."}
             </div>
           </Card>
+
+  );
+
+  return (
+    <div className="space-y-4">
+      {offline && (
+        <div className="px-3 py-2 rounded border border-warn/40 bg-warn/10 text-warn text-sm">
+          The site is restarting. This page reconnects by itself.
+        </div>
+      )}
+      {error && <div className="px-3 py-2 rounded border border-bad/40 bg-bad/10 text-bad text-sm">{error}</div>}
+
+      {!data.installed && (
+        <Card>
+          <CardTitle>Updater not installed</CardTitle>
+          <div className="text-sm text-muted">
+            This server does not have the update helper yet. On the server, run <code>bash ops/docker/install-updater.sh</code> (see docs/updates.md); this page then shows release status here.
+          </div>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+        {versionCard}
+        {progressVisible ? (waiting ? waitingCard : progressCard) : whatsNewCard}
+      </div>
+      {askedStale && (
+        <div className="px-3 py-2 rounded border border-warn/40 bg-warn/10 text-warn text-sm">
+          The updater has not started the request after 3 minutes. Check that its cron job is installed (docs/updates.md) and look at update/update.log on the server.
+        </div>
+      )}
+
+      {progressVisible && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
+          {whatsNewCard}
+          {logCard}
         </div>
       )}
 
