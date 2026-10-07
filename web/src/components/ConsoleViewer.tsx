@@ -211,7 +211,7 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
           <>
             <button type="button" onClick={() => disconnect("Console closed.")} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Disconnect</button>
             <button type="button" disabled={state !== "connected"} onClick={() => rfbRef.current?.sendCtrlAltDel()} className="px-2.5 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-50">Ctrl-Alt-Del</button>
-            <button type="button" onClick={() => setShowClip((v) => !v)} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Clipboard</button>
+            <button type="button" onClick={() => setShowClip((v) => !v)} aria-expanded={showClip} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Clipboard {showClip ? "▾" : "▸"}</button>
             <span className="inline-flex rounded border border-border overflow-hidden" role="group" aria-label="Console size">
               {SIZES.map((z) => (
                 <button key={z.key} type="button" onClick={() => pickSize(z.key)}
@@ -234,24 +234,29 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
       {!canEmbed && info && EMBEDDED_HINT[info.embedded] && <p className="text-xs text-muted">{EMBEDDED_HINT[info.embedded]}</p>}
       {message && <p className="text-xs text-bad">{message}</p>}
       {live && showClip && (
-        <div className="rounded border border-border p-2 space-y-2 text-sm">
-          <div className="text-xs text-muted">Paste into the guest</div>
-          <textarea
-            value={outText}
-            onChange={(e) => setOutText(e.target.value)}
-            rows={3}
-            placeholder="Paste or type text here, then send it to the guest"
-            className="input w-full font-mono text-xs"
-          />
-          <div className="flex gap-2 flex-wrap">
-            <button type="button" disabled={state !== "connected" || !outText} onClick={typeIntoGuest} className="px-2.5 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-50">Type it in</button>
-            <button type="button" disabled={state !== "connected" || !outText} onClick={sendToGuestClipboard} className="px-2.5 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-50">Send to guest clipboard</button>
+        <div className="rounded border border-border px-2 py-1.5 text-sm">
+          <div className="flex items-stretch gap-2">
+            <textarea
+              value={outText}
+              onChange={(e) => setOutText(e.target.value)}
+              rows={1}
+              aria-label="Text to send to the guest"
+              placeholder="Paste or type text for the guest"
+              className="input flex-1 min-w-0 font-mono text-xs resize-y max-h-32"
+            />
+            <button type="button" disabled={state !== "connected" || !outText} onClick={typeIntoGuest} className="px-2.5 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-50 whitespace-nowrap">Type it in</button>
+            <button type="button" disabled={state !== "connected" || !outText} onClick={sendToGuestClipboard} className="px-2.5 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-50 whitespace-nowrap">Send to guest clipboard</button>
+            <button type="button" onClick={() => setShowClip(false)} aria-label="Hide clipboard" className="px-2 py-1 rounded border border-border text-muted hover:text-text">✕</button>
           </div>
-          <div className="text-xs text-muted pt-1">Copied from the guest</div>
-          <textarea readOnly value={fromGuest} rows={2} placeholder="Text copied inside the guest appears here (needs a clipboard agent in the guest)" className="input w-full font-mono text-xs" />
-          <button type="button" disabled={!fromGuest} onClick={copyFromGuest} className="px-2.5 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-50">Copy to my clipboard</button>
-          {clipNote && <p className="text-xs text-muted">{clipNote}</p>}
-          <p className="text-[11px] text-muted">Clipboard text passes through PyXie to the guest and is not stored or logged. Type it in works on any guest (it sends keystrokes, up to {MAX_TYPED_CHARS} characters); avoid pasting secrets into a guest you do not trust.</p>
+          {fromGuest && (
+            <div className="flex items-stretch gap-2 mt-1.5">
+              <textarea readOnly value={fromGuest} rows={1} aria-label="Text copied in the guest" className="input flex-1 min-w-0 font-mono text-xs resize-y max-h-32" />
+              <button type="button" onClick={copyFromGuest} className="px-2.5 py-1 rounded border border-border hover:bg-surface2 whitespace-nowrap">Copy to my clipboard</button>
+            </div>
+          )}
+          <p className="text-[11px] text-muted mt-1">
+            {clipNote ?? `Type it in sends keystrokes and works on any guest (up to ${MAX_TYPED_CHARS} characters). Send to guest clipboard and copy-back need a clipboard agent in the guest. Nothing is stored or logged.`}
+          </p>
         </div>
       )}
       <div
@@ -262,7 +267,7 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
         style={live ? (isFs ? { flex: "1 1 0", minHeight: 240 } : { height: SIZES.find((z) => z.key === size)?.height, minHeight: 240, minWidth: 320, maxWidth: "100%", resize: "both" }) : undefined}
         className={live ? "w-full bg-black rounded border border-border overflow-hidden" : "hidden"}
       />
-      <p className="text-[11px] text-muted">
+      <p className={isFs ? "hidden" : "text-[11px] text-muted"}>
         Drag the bottom-right corner to resize freely. The console shows the guest's own screen with full keyboard and mouse control. Opening and closing it is recorded in the audit log.
       </p>
     </div>
