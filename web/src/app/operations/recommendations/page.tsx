@@ -1,29 +1,32 @@
 import { apiFetch } from "@/lib/api";
 import type { Node, Recommendation, RightsizingAssessment } from "@/lib/api";
-import { Card, CardTitle, PageHeader } from "@/components/Card";
-import RecommendationsList from "@/components/RecommendationsList";
-import RightsizingTable from "@/components/tables/RightsizingTable";
-import RecomputeRightsizingButton from "@/components/RecomputeRightsizingButton";
+import { PageHeader } from "@/components/Card";
+import RightsizingView, { type RightsizingTab } from "@/components/RightsizingView";
 import { LightbulbIcon } from "@/components/Icons";
 
-// Narrowed to VM/CT right-sizing only -- the cluster/
-// node-level categories (updates, capacity, load-balancing) moved to the
-// Maintenance page's own Recommendations column, since those are
-// maintenance actions, not per-workload sizing ones.
+// Narrowed to VM/CT right-sizing only -- the cluster/node-level categories (updates, capacity, load-balancing) live on
+// the Maintenance page's own Recommendations column.
 //
-// Table first, details second: the table is now the
-// primary scan-and-act surface -- its Suggestion column IS the apply
-// action (click the suggestion itself). The cards below stay for
-// full context (benefit/impact/severity) and Acknowledge/Dismiss only;
-// they no longer render their own Apply button for rightsizing, since
-// that would just duplicate the table's.
-export default async function RecommendationsPage() {
-  const [recommendations, rightsizing, nodes, status] = await Promise.all([
-    apiFetch<Recommendation[]>("/api/recommendations?category=rightsizing"),
+// Table first, details second: the table is the primary scan-and-act surface -- its Suggestion column IS the apply
+// action. The cards below stay for full context (benefit/impact/severity). Acknowledge / Dismiss work like Health;
+// tabs All (default) / Open / Acknowledged / Dismissed / Resolved.
+export default async function RecommendationsPage({ searchParams }: { searchParams: { view?: string } }) {
+  const tab: RightsizingTab = (["all", "open", "acknowledged", "dismissed", "resolved"] as const).find((v) => v === searchParams.view) ?? "all";
+  const [recommendations, resolved, rightsizing, nodes, status] = await Promise.all([
+    apiFetch<Recommendation[]>("/api/recommendations?category=rightsizing&status=any"),
+    tab === "resolved" ? apiFetch<Recommendation[]>("/api/recommendations?category=rightsizing&status=resolved") : Promise.resolve([] as Recommendation[]),
     apiFetch<RightsizingAssessment[]>("/api/rightsizing"),
     apiFetch<Node[]>("/api/nodes"),
     apiFetch<{ computed_at: string | null }>("/api/rightsizing/status"),
   ]);
+  const count = (s: (r: Recommendation) => boolean) => recommendations.filter(s).length;
+  const chips: { key: RightsizingTab; label: string }[] = [
+    { key: "all", label: `All (${recommendations.length})` },
+    { key: "open", label: `Open (${count((r) => r.lifecycle_state === "open")})` },
+    { key: "acknowledged", label: `Acknowledged (${count((r) => r.lifecycle_state === "acknowledged")})` },
+    { key: "dismissed", label: `Dismissed (${count((r) => r.lifecycle_state === "dismissed" || r.lifecycle_state === "snoozed")})` },
+    { key: "resolved", label: "Resolved" },
+  ];
 
   return (
     <div>
@@ -37,21 +40,15 @@ export default async function RecommendationsPage() {
         background (or on demand below). Not live like the Workloads page&apos;s usage meters; see there for
         real-time CPU/RAM.
       </p>
-
-      <Card className="mb-4">
-        <div className="flex items-center justify-between mb-2">
-          <CardTitle>Rightsizing -- per-workload observation status</CardTitle>
-          <RecomputeRightsizingButton computedAt={status.computed_at} />
-        </div>
-        <RightsizingTable rightsizing={rightsizing} nodes={nodes} recommendations={recommendations} />
-      </Card>
-
-      <Card>
-        <RecommendationsList
-          recommendations={recommendations}
-          emptyMessage="No open rightsizing suggestions. Either everything looks fine, or there isn't enough history yet -- see the table above."
-        />
-      </Card>
+      <div className="flex gap-2 mb-4 text-sm flex-wrap">
+        {chips.map((c) => (
+          <a key={c.key} href={c.key === "all" ? "/operations/recommendations" : `/operations/recommendations?view=${c.key}`}
+            className={`px-3 py-1 rounded border ${tab === c.key ? "border-accent text-accent bg-accent/10" : "border-border text-muted"}`}>
+            {c.label}
+          </a>
+        ))}
+      </div>
+      <RightsizingView tab={tab} rightsizing={rightsizing} nodes={nodes} recommendations={recommendations} resolved={resolved} computedAt={status.computed_at} />
     </div>
   );
 }

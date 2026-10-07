@@ -2,13 +2,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from pyxie_core.audit import write_audit_event
 from pyxie_core.capacity import compute_capacity
 from pyxie_core.models import Recommendation, RightsizingCache, Workload
-from pyxie_core.recommendations import _placement_recommendations, generate_recommendations
+from pyxie_core.recommendations import _placement_recommendations, apply_triage, generate_recommendations
 from pyxie_core.rightsizing import refresh_rightsizing_cache
 
 from ..auth_deps import get_current_user, require_admin
@@ -34,6 +34,10 @@ def _serialize(r: Recommendation) -> dict:
         "generated_at": r.generated_at.isoformat(),
         "lifecycle_state": r.lifecycle_state,
         "snoozed_until": r.snoozed_until.isoformat() if r.snoozed_until else None,
+        "acknowledged_at": r.acknowledged_at.isoformat() if r.acknowledged_at else None,
+        "acknowledged_by": r.acknowledged_by,
+        "dismissed_at": r.dismissed_at.isoformat() if r.dismissed_at else None,
+        "dismissed_by": r.dismissed_by,
     }
 
 
@@ -42,14 +46,26 @@ def list_recommendations(
     db: Session = Depends(get_db),
     category: str | None = None,
     lifecycle_state: str | None = None,
+    status: str | None = None,
 ):
+    """`status`: open | acknowledged | dismissed | resolved | any (any = everything not resolved). With neither
+    `status` nor `lifecycle_state` it is `open`, so every list and count in the app leaves out acknowledged and
+    dismissed suggestions."""
     q = db.query(Recommendation)
     if category:
         q = q.filter(Recommendation.category == category)
     if lifecycle_state:
         q = q.filter(Recommendation.lifecycle_state == lifecycle_state)
     else:
-        q = q.filter(Recommendation.lifecycle_state != "resolved")
+        status = status or "open"
+        if status == "any":
+            q = q.filter(Recommendation.lifecycle_state != "resolved")
+        elif status == "dismissed":
+            q = q.filter(Recommendation.lifecycle_state.in_(["dismissed", "snoozed"]))
+        elif status in ("open", "acknowledged", "resolved"):
+            q = q.filter(Recommendation.lifecycle_state == status)
+        else:
+            raise HTTPException(422, "invalid status")
     rows = q.order_by(Recommendation.generated_at.desc()).limit(500).all()
     return [_serialize(r) for r in rows]
 
@@ -112,11 +128,15 @@ def update_lifecycle(rec_id: uuid.UUID, payload: LifecycleUpdate, db: Session = 
         raise HTTPException(422, "invalid lifecycle_state")
 
     before = rec.lifecycle_state
-    rec.lifecycle_state = payload.lifecycle_state
-    if payload.lifecycle_state == "snoozed":
-        rec.snoozed_until = datetime.now(timezone.utc) + timedelta(days=payload.snooze_days or 7)
-    if payload.lifecycle_state == "resolved":
-        rec.resolved_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    if payload.lifecycle_state in ("acknowledged", "dismissed", "open"):
+        apply_triage(rec, {"acknowledged": "acknowledge", "dismissed": "dismiss", "open": "reopen"}[payload.lifecycle_state], user.email, now)
+    else:
+        rec.lifecycle_state = payload.lifecycle_state
+        if payload.lifecycle_state == "snoozed":
+            rec.snoozed_until = now + timedelta(days=payload.snooze_days or 7)
+        if payload.lifecycle_state == "resolved":
+            rec.resolved_at = now
     db.commit()
 
     write_audit_event(
@@ -169,3 +189,40 @@ def recompute_rightsizing(db: Session = Depends(get_db), user=Depends(get_curren
 @router.get("/capacity")
 def capacity(db: Session = Depends(get_db)):
     return compute_capacity(db)
+
+
+class TriageRequest(BaseModel):
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    action: str  # acknowledge | dismiss | reopen
+
+
+@router.post("/recommendations/triage", dependencies=[Depends(require_admin)])
+def triage_recommendations(payload: TriageRequest, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """Acknowledge, dismiss or reopen recommendations (one or many). Resolved ones are skipped: they came and went."""
+    if payload.action not in ("acknowledge", "dismiss", "reopen"):
+        raise HTTPException(422, "invalid action")
+    now = datetime.now(timezone.utc)
+    rows = db.query(Recommendation).filter(Recommendation.id.in_(payload.ids)).all()
+    changed = skipped = 0
+    for r in rows:
+        if r.lifecycle_state == "resolved":
+            skipped += 1
+            continue
+        before = r.lifecycle_state
+        apply_triage(r, payload.action, user.email, now)
+        if r.lifecycle_state == before:
+            continue
+        changed += 1
+        write_audit_event(
+            db,
+            event_category="recommendation",
+            event_type="recommendation.lifecycle_changed",
+            actor=user.email,
+            actor_type="user",
+            state_before={"lifecycle_state": before},
+            state_after={"lifecycle_state": r.lifecycle_state},
+            metadata={"recommendation_id": str(r.id), "title": r.title, "category": r.category},
+            commit=False,
+        )
+    db.commit()
+    return {"changed": changed, "skipped": skipped, "missing": len(payload.ids) - len(rows)}

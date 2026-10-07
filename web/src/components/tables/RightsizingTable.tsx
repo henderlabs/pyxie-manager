@@ -32,14 +32,26 @@ function StaleHistorical({ stats, status }: { stats: ObservationStats; status: s
   );
 }
 
+export type RightsizingTriage = {
+  canTriage: boolean;
+  pending: boolean;
+  selected: Set<string>; // recommendation ids
+  toggle: (recId: string) => void;
+  act: (recIds: string[], action: "acknowledge" | "dismiss" | "reopen") => void;
+};
+
 export default function RightsizingTable({
   rightsizing,
   nodes,
   recommendations,
+  triage,
+  emptyMessage = "No workloads discovered yet.",
 }: {
   rightsizing: RightsizingAssessment[];
   nodes: Node[];
   recommendations: Recommendation[];
+  triage?: RightsizingTriage;
+  emptyMessage?: string;
 }) {
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
 
@@ -65,12 +77,65 @@ export default function RightsizingTable({
     recommendations.filter((r) => r.object_id).map((r) => [r.object_id as string, r.id])
   );
 
+  const recByWorkload = new Map(recommendations.filter((r) => r.object_id).map((r) => [r.object_id as string, r]));
+  const btn = "px-2 py-1 rounded bg-surface2 border border-border text-xs hover:bg-surface2/70";
+  const triageColumns = triage?.canTriage
+    ? [
+        {
+          header: "",
+          render: (a: RightsizingAssessment) => {
+            const rid = recByWorkload.get(a.workload_id)?.id;
+            return rid ? (
+              <input type="checkbox" checked={triage.selected.has(rid)} onChange={() => triage.toggle(rid)} aria-label={`Select ${a.name || a.vmid}`} />
+            ) : null;
+          },
+        },
+      ]
+    : [];
+  const triageActions = triage
+    ? [
+        {
+          header: "Review",
+          render: (a: RightsizingAssessment) => {
+            const rec = recByWorkload.get(a.workload_id);
+            if (!rec) return null;
+            const st = rec.lifecycle_state === "snoozed" ? "dismissed" : rec.lifecycle_state;
+            return (
+              <div className="flex gap-1.5 items-center whitespace-nowrap">
+                {st !== "open" && <span className="text-xs text-muted">{st}</span>}
+                {triage.canTriage && st === "open" && (
+                  <>
+                    <button disabled={triage.pending} className={`${btn} text-text`} onClick={() => triage.act([rec.id], "acknowledge")}>Acknowledge</button>
+                    <button disabled={triage.pending} className={`${btn} text-muted`} onClick={() => triage.act([rec.id], "dismiss")}>Dismiss</button>
+                  </>
+                )}
+                {triage.canTriage && st === "acknowledged" && (
+                  <>
+                    <button disabled={triage.pending} className={`${btn} text-muted`} onClick={() => triage.act([rec.id], "dismiss")}>Dismiss</button>
+                    <button disabled={triage.pending} className={`${btn} text-text`} onClick={() => triage.act([rec.id], "reopen")}>Un-acknowledge</button>
+                  </>
+                )}
+                {triage.canTriage && st === "dismissed" && (
+                  <button disabled={triage.pending} className={`${btn} text-text`} onClick={() => triage.act([rec.id], "reopen")}>Restore</button>
+                )}
+              </div>
+            );
+          },
+        },
+      ]
+    : [];
+
   return (
     <Table
+      rowClassName={(a) => {
+        const st = recByWorkload.get(a.workload_id)?.lifecycle_state;
+        return st && st !== "open" ? "opacity-70" : "";
+      }}
       rows={rightsizing.map((a) => ({ ...a, id: a.workload_id }))}
-      emptyMessage="No workloads discovered yet."
+      emptyMessage={emptyMessage}
       storageKey="operations-rightsizing"
       columns={[
+        ...triageColumns,
         { header: "VMID", render: (a) => a.vmid, sortValue: (a) => a.vmid },
         { header: "Name", render: (a) => a.name || "—", sortValue: (a) => a.name },
         {
@@ -167,6 +232,7 @@ export default function RightsizingTable({
             );
           },
         },
+        ...triageActions,
       ]}
     />
   );

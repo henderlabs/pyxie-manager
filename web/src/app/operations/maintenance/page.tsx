@@ -30,7 +30,7 @@ export default async function MaintenancePage({
       apiFetch<Record<string, { cpu_pct?: number; mem_pct?: number; mem_source?: "guest" | "host" }>>("/api/workloads/latest-metrics"),
       apiFetch<Record<string, { name: string; scope: string | null }>>("/api/workloads/current-storage"),
       apiFetch<StorageItem[]>("/api/storage"),
-      apiFetch<Recommendation[]>("/api/recommendations"),
+      apiFetch<Recommendation[]>("/api/recommendations?status=any"),
       apiFetch<PolicyRow[]>("/api/policies?scope_type=node"),
     ]);
 

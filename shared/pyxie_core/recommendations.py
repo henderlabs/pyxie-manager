@@ -24,7 +24,46 @@ from .placement import (
 )
 from .rightsizing import assess_all_workloads, refresh_rightsizing_cache
 
-USER_OWNED_STATES = {"dismissed"}
+TRIAGED_STATES = ("acknowledged", "dismissed", "snoozed")
+SEVERITY_RANK = {"info": 0, "unknown": 0, "warning": 1, "critical": 2}
+
+
+def triage_fingerprint(category: str, evidence: dict | None) -> str | None:
+    """What the operator was looking at when they acknowledged or dismissed. A rightsizing suggestion is its suggested
+    size; when that changes, the earlier decision no longer applies. Other categories have no fingerprint, so their
+    triage ends only when they resolve and come back, or get more severe."""
+    if category != "rightsizing" or not evidence:
+        return None
+    cpu = (evidence.get("cpu_suggestion") or {}).get("suggested")
+    mem = (evidence.get("memory_suggestion") or {}).get("suggested_bytes")
+    return f"cpu={cpu};mem={mem}"
+
+
+def clear_triage(r: Recommendation) -> None:
+    r.acknowledged_at = r.acknowledged_by = r.dismissed_at = r.dismissed_by = r.triage_fingerprint = None
+    r.snoozed_until = None
+
+
+def apply_triage(r: Recommendation, action: str, who: str, now: datetime) -> None:
+    """action: acknowledge | dismiss | reopen."""
+    clear_triage(r)
+    if action == "reopen":
+        r.lifecycle_state = "open"
+        return
+    r.lifecycle_state = "acknowledged" if action == "acknowledge" else "dismissed"
+    if action == "acknowledge":
+        r.acknowledged_at, r.acknowledged_by = now, who
+    else:
+        r.dismissed_at, r.dismissed_by = now, who
+    r.triage_fingerprint = triage_fingerprint(r.category, r.evidence)
+
+
+def _triage_ended(existing: Recommendation, rec: dict) -> bool:
+    """The suggestion changed (fingerprint) or got more severe since the operator looked."""
+    fp = existing.triage_fingerprint
+    if fp is not None and triage_fingerprint(rec["category"], rec.get("evidence")) != fp:
+        return True
+    return SEVERITY_RANK.get(rec.get("severity", "info"), 0) > SEVERITY_RANK.get(existing.severity, 0)
 
 # How much better a candidate node's score has to be before it's worth
 # proactively suggesting a move -- roughly one performance/trust tier step,
@@ -58,14 +97,15 @@ def _upsert(db: Session, rec: dict):
         )
         return "created"
 
-    if existing.lifecycle_state in USER_OWNED_STATES:
+    if existing.lifecycle_state in TRIAGED_STATES and _triage_ended(existing, rec):
+        existing.lifecycle_state = "open"
+        clear_triage(existing)
+
+    if existing.lifecycle_state in ("dismissed", "snoozed"):
         # respect the user's decision; just refresh evidence for reference
         existing.evidence = rec.get("evidence")
         existing.generated_at = now
         return "left_dismissed"
-
-    if existing.lifecycle_state == "snoozed" and existing.snoozed_until and existing.snoozed_until <= now:
-        existing.lifecycle_state = "open"
 
     existing.title = rec["title"]
     existing.evidence = rec.get("evidence")
@@ -76,8 +116,9 @@ def _upsert(db: Session, rec: dict):
     existing.observation_window_days = rec.get("observation_window_days")
     existing.generated_at = now
     if existing.lifecycle_state == "resolved":
-        existing.lifecycle_state = "open"
+        existing.lifecycle_state = "open"  # it came back: a new occurrence, earlier triage does not carry over
         existing.resolved_at = None
+        clear_triage(existing)
     return "updated"
 
 
@@ -111,7 +152,7 @@ def generate_recommendations(db: Session) -> dict:
     now = datetime.now(timezone.utc)
     resolvable = (
         db.query(Recommendation)
-        .filter(Recommendation.lifecycle_state.in_(["open", "acknowledged"]))
+        .filter(Recommendation.lifecycle_state.in_(["open", *TRIAGED_STATES]))
     )
     if seen_keys:
         resolvable = resolvable.filter(~Recommendation.dedupe_key.in_(seen_keys))
@@ -119,6 +160,7 @@ def generate_recommendations(db: Session) -> dict:
     for r in to_resolve:
         r.lifecycle_state = "resolved"
         r.resolved_at = now
+        clear_triage(r)
 
     db.commit()
     counts["resolved"] = len(to_resolve)
