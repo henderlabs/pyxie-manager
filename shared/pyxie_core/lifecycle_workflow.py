@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from .credentials import load_pve_credentials
 from .discovery import build_pve_client
+from .labels import already_in_desired_state, vm_label
 from .locks import LockContention, acquire_lock, release_locks_for_operation
 from .models import Cluster, Node, Operation, PveTarget, Workload
 from .operations_engine import (
@@ -170,7 +171,14 @@ def execute_lifecycle_action(db: Session, operation_id) -> Operation:
             live = next((v for v in live_vms if int(v.get("vmid", -1)) == workload.vmid), None)
             if live is None:
                 release_locks_for_operation(db, op.id)
-                return fail_operation(db, op, error=f"VM {workload.vmid} is no longer listed on {node.name}")
+                return fail_operation(db, op, error=f"{vm_label(workload)} is no longer listed on {node.name}")
+            if already_in_desired_state(op.operation_type_id, live.get("status")):
+                # Something else already put it there (typically an earlier step of the same maintenance run, or a plan
+                # built from inventory that was a minute stale). Nothing to do: that is success, not a blocker.
+                op.verification_result = {"vm_state": live, "note": "already in the requested state; nothing to do"}
+                db.commit()
+                release_locks_for_operation(db, op.id)
+                return enter_stage(db, op, status="completed", stage="audit", rollback_classification=rollback.AUTO_REVERSIBLE)
             expected_before = "running" if op.operation_type_id in ("workload.shutdown", "workload.force_stop", "workload.reboot") else "stopped"
             if live.get("status") != expected_before:
                 release_locks_for_operation(db, op.id)

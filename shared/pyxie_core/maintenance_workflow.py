@@ -38,6 +38,7 @@ from .migration_workflow import (
     execute_migration,
 )
 from .models import Cluster, Node, Operation, PveTarget, Workload, now_utc
+from .labels import child_reason, vm_label
 from .operations_engine import (
     TERMINAL_STATUSES,
     OperationError,
@@ -426,7 +427,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
                     child = lifecycle_workflow.execute_lifecycle_action(db, child.id)
                     if child.status != "completed":
                         release_locks_for_operation(db, op.id)
-                        return fail_operation(db, op, error=f"graceful shutdown for vmid {item['vmid']} did not complete (status={child.status}): {child.error}")
+                        return fail_operation(db, op, error=f"graceful shutdown for {vm_label(item)} did not complete (status={child.status}): {child_reason(child)}")
                     completed_shutdowns.append(item["workload_id"])
                     save_progress()
                     continue
@@ -447,7 +448,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
                     )
                 except MigrationWorkflowError as exc:
                     release_locks_for_operation(db, op.id)
-                    return fail_operation(db, op, error=f"could not plan migration for vmid {item['vmid']}: {exc}")
+                    return fail_operation(db, op, error=f"could not plan migration for {vm_label(item)}: {exc}")
                 if child.status == "blocked":
                     release_locks_for_operation(db, op.id)
                     return block_operation(db, op, blocking_safety_rules=(child.blocking_safety_rules or []) + ["SAFE-ROLLBACK-001"], actor="system")
@@ -455,7 +456,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
                 child = execute_migration(db, child.id)
                 if child.status != "completed":
                     release_locks_for_operation(db, op.id)
-                    return fail_operation(db, op, error=f"migration for vmid {item['vmid']} did not complete (status={child.status}): {child.error}")
+                    return fail_operation(db, op, error=f"migration for {vm_label(item)} did not complete (status={child.status}): {child_reason(child)}")
                 completed_migrations.append(item["workload_id"])
                 save_progress()
 
@@ -497,7 +498,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
                         )
                     except MigrationWorkflowError as exc:
                         release_locks_for_operation(db, op.id)
-                        return fail_operation(db, op, error=f"could not plan migration for vmid {item['vmid']}: {exc}")
+                        return fail_operation(db, op, error=f"could not plan migration for {vm_label(item)}: {exc}")
                     if child.status == "blocked":
                         release_locks_for_operation(db, op.id)
                         return block_operation(db, op, blocking_safety_rules=(child.blocking_safety_rules or []) + ["SAFE-ROLLBACK-001"], actor="system")
@@ -505,7 +506,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
                     child = execute_migration(db, child.id)
                     if child.status != "completed":
                         release_locks_for_operation(db, op.id)
-                        return fail_operation(db, op, error=f"migration for vmid {item['vmid']} did not complete (status={child.status}): {child.error}")
+                        return fail_operation(db, op, error=f"migration for {vm_label(item)} did not complete (status={child.status}): {child_reason(child)}")
                     completed_shutdowns.append(item["workload_id"])
                     save_progress()
                     continue
@@ -521,7 +522,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
                 child = lifecycle_workflow.execute_lifecycle_action(db, child.id)
                 if child.status != "completed":
                     release_locks_for_operation(db, op.id)
-                    return fail_operation(db, op, error=f"graceful shutdown for vmid {item['vmid']} did not complete (status={child.status}): {child.error}")
+                    return fail_operation(db, op, error=f"graceful shutdown for {vm_label(item)} did not complete (status={child.status}): {child_reason(child)}")
                 completed_shutdowns.append(item["workload_id"])
                 save_progress()
 
@@ -548,7 +549,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
                 destination_node = db.query(Node).filter(Node.id == item["destination_node_id"]).one_or_none()
                 if destination_node is None:
                     release_locks_for_operation(db, op.id)
-                    return fail_operation(db, op, error=f"destination node for stopped vmid {item['vmid']} disappeared from inventory")
+                    return fail_operation(db, op, error=f"destination node for stopped {vm_label(item)} disappeared from inventory")
                 from .models import Storage
                 destination_storage = db.query(Storage).filter(Storage.id == item["destination_storage_id"]).one_or_none() if item.get("destination_storage_id") else None
 
@@ -568,7 +569,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
                     release_locks_for_operation(db, op.id)
                     if existing_child.status == "blocked":
                         return block_operation(db, op, blocking_safety_rules=(existing_child.blocking_safety_rules or []) + ["SAFE-ROLLBACK-001"], actor="system")
-                    return fail_operation(db, op, error=f"relocation for stopped vmid {item['vmid']} (operation {existing_child.id}) previously failed: {existing_child.error}")
+                    return fail_operation(db, op, error=f"relocation for stopped {vm_label(item)} (operation {existing_child.id}) previously failed: {existing_child.error}")
                 elif existing_child is not None:
                     child = existing_child
                     if child.status == "awaiting_approval":
@@ -585,7 +586,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
                         )
                     except MigrationWorkflowError as exc:
                         release_locks_for_operation(db, op.id)
-                        return fail_operation(db, op, error=f"could not plan relocation for stopped vmid {item['vmid']}: {exc}")
+                        return fail_operation(db, op, error=f"could not plan relocation for stopped {vm_label(item)}: {exc}")
                     if child.status == "blocked":
                         release_locks_for_operation(db, op.id)
                         return block_operation(db, op, blocking_safety_rules=(child.blocking_safety_rules or []) + ["SAFE-ROLLBACK-001"], actor="system")
@@ -594,7 +595,7 @@ def execute_maintenance(db: Session, operation_id) -> Operation:
 
                 if child.status != "completed":
                     release_locks_for_operation(db, op.id)
-                    return fail_operation(db, op, error=f"relocation for stopped vmid {item['vmid']} did not complete (status={child.status}): {child.error}")
+                    return fail_operation(db, op, error=f"relocation for stopped {vm_label(item)} did not complete (status={child.status}): {child_reason(child)}")
                 completed_stopped.append(item["workload_id"])
                 save_progress()
 

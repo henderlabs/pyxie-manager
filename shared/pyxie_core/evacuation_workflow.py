@@ -30,6 +30,7 @@ from .migration_workflow import (
     execute_migration,
 )
 from .models import Cluster, Node, Operation, PveTarget, Storage, Workload
+from .labels import child_reason, vm_label
 from .operations_engine import (
     TERMINAL_STATUSES,
     OperationError,
@@ -347,7 +348,7 @@ def execute_evacuation(db: Session, operation_id) -> Operation:
                     release_locks_for_operation(db, op.id)
                     return fail_operation(
                         db, op,
-                        error=f"destination node for vmid {item['vmid']} disappeared from inventory mid-evacuation "
+                        error=f"destination node for {vm_label(item)} disappeared from inventory mid-evacuation "
                               f"({len(completed)}/{len(plan)} completed before this)",
                     )
                 destination_storage = None
@@ -397,7 +398,7 @@ def execute_evacuation(db: Session, operation_id) -> Operation:
                         )
                     return fail_operation(
                         db, op,
-                        error=f"migration for vmid {item['vmid']} (operation {existing_child.id}) previously "
+                        error=f"migration for {vm_label(item)} (operation {existing_child.id}) previously "
                               f"failed: {existing_child.error} -- {len(completed)}/{len(plan)} completed before "
                               f"this, not retried automatically",
                     )
@@ -426,7 +427,7 @@ def execute_evacuation(db: Session, operation_id) -> Operation:
                         release_locks_for_operation(db, op.id)
                         return fail_operation(
                             db, op,
-                            error=f"could not plan migration for vmid {item['vmid']}: {exc} "
+                            error=f"could not plan migration for {vm_label(item)}: {exc} "
                                   f"({len(completed)}/{len(plan)} completed before this)",
                         )
 
@@ -445,8 +446,8 @@ def execute_evacuation(db: Session, operation_id) -> Operation:
                     release_locks_for_operation(db, op.id)
                     return fail_operation(
                         db, op,
-                        error=f"migration for vmid {item['vmid']} did not complete (status={child.status}, "
-                              f"error={child.error}) -- {len(completed)}/{len(plan)} completed before this, "
+                        error=f"migration for {vm_label(item)} did not complete (status={child.status}, "
+                              f"error={child_reason(child)}) -- {len(completed)}/{len(plan)} completed before this, "
                               f"evacuation stopped rather than continuing past a failure",
                     )
 
@@ -484,7 +485,7 @@ def execute_evacuation(db: Session, operation_id) -> Operation:
                     release_locks_for_operation(db, op.id)
                     return fail_operation(
                         db, op,
-                        error=f"destination node for stopped vmid {item['vmid']} disappeared from inventory mid-evacuation",
+                        error=f"destination node for stopped {vm_label(item)} disappeared from inventory mid-evacuation",
                     )
                 destination_storage = None
                 if item.get("destination_storage_id"):
@@ -513,7 +514,7 @@ def execute_evacuation(db: Session, operation_id) -> Operation:
                         )
                     return fail_operation(
                         db, op,
-                        error=f"relocation for stopped vmid {item['vmid']} (operation {existing_child.id}) previously "
+                        error=f"relocation for stopped {vm_label(item)} (operation {existing_child.id}) previously "
                               f"failed: {existing_child.error}",
                     )
                 elif existing_child is not None:
@@ -532,7 +533,7 @@ def execute_evacuation(db: Session, operation_id) -> Operation:
                         )
                     except MigrationWorkflowError as exc:
                         release_locks_for_operation(db, op.id)
-                        return fail_operation(db, op, error=f"could not plan relocation for stopped vmid {item['vmid']}: {exc}")
+                        return fail_operation(db, op, error=f"could not plan relocation for stopped {vm_label(item)}: {exc}")
 
                     if child.status == "blocked":
                         release_locks_for_operation(db, op.id)
@@ -549,8 +550,8 @@ def execute_evacuation(db: Session, operation_id) -> Operation:
                     release_locks_for_operation(db, op.id)
                     return fail_operation(
                         db, op,
-                        error=f"relocation for stopped vmid {item['vmid']} did not complete (status={child.status}, "
-                              f"error={child.error})",
+                        error=f"relocation for stopped {vm_label(item)} did not complete (status={child.status}, "
+                              f"error={child_reason(child)})",
                     )
 
                 completed_stopped.append(item["workload_id"])

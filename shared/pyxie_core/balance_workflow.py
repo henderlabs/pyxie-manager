@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from .locks import LockContention, acquire_lock, release_locks_for_operation
 from .migration_workflow import MigrationWorkflowError, approve as approve_migration, dry_run_migration, execute_migration
 from .models import Node, Operation, Storage, Workload
+from .labels import child_reason, vm_label
 from .operations_engine import (
     OperationError,
     approve_operation,
@@ -344,7 +345,7 @@ def execute_balance(db: Session, operation_id) -> Operation:
                     )
                 except MigrationWorkflowError as exc:
                     release_locks_for_operation(db, op.id)
-                    return fail_operation(db, op, error=f"could not plan migration for vmid {item['vmid']}: {exc}")
+                    return fail_operation(db, op, error=f"could not plan migration for {vm_label(item)}: {exc}")
                 if child.status == "blocked":
                     release_locks_for_operation(db, op.id)
                     return block_operation(db, op, blocking_safety_rules=(child.blocking_safety_rules or []) + ["SAFE-ROLLBACK-001"], actor="system")
@@ -352,7 +353,7 @@ def execute_balance(db: Session, operation_id) -> Operation:
                 child = execute_migration(db, child.id)
                 if child.status != "completed":
                     release_locks_for_operation(db, op.id)
-                    return fail_operation(db, op, error=f"migration for vmid {item['vmid']} did not complete (status={child.status}): {child.error}")
+                    return fail_operation(db, op, error=f"migration for {vm_label(item)} did not complete (status={child.status}): {child_reason(child)}")
                 completed_migrations.append(item["workload_id"])
                 save_progress()
 
