@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
 
-from pyxie_core.setup_status import build_steps, progress
+from pyxie_core.setup_status import build_steps, progress, server_checks
 
 
 def by_key(steps):
@@ -117,3 +117,30 @@ def test_hosts_all_three_done_is_done():
     s = by_key(build_steps({"sites": 1, "targets": [t], "nodes": [{"name": "n1", "pinned": True, "wrapper_version": "1.1.0"}],
                             "hostmaint": [{"target_id": "t", "has_cred": True}], "expected_wrapper": "1.1.0", "settings": {}}))
     assert s["hosts"]["state"] == "done" and all(x["state"] == "done" for x in s["hosts"]["substeps"])
+
+
+def _sc(**kw):
+    base = dict(cpus=4, mem_total_mb=8000, mem_avail_mb=6000, disk_total_gb=80, disk_free_gb=50, db_mb=600, objects=30)
+    base.update(kw)
+    return {c["label"]: c for c in server_checks(**base)}
+
+
+def test_server_checks_healthy_server_is_all_ok():
+    c = _sc()
+    assert all(x["status"] == "ok" for x in c.values())
+
+
+def test_server_checks_flag_small_cpu_and_memory():
+    assert _sc(cpus=1)["CPU"]["status"] == "warn"
+    assert _sc(mem_total_mb=2000)["Memory"]["status"] == "warn"
+    assert _sc(mem_total_mb=3600)["Memory"]["status"] == "ok"
+
+
+def test_server_checks_disk_levels():
+    assert _sc(disk_free_gb=30, disk_total_gb=48)["Disk"]["status"] == "ok"
+    assert _sc(disk_free_gb=8, disk_total_gb=48)["Disk"]["status"] == "warn"
+    assert _sc(disk_free_gb=6, disk_total_gb=100)["Disk"]["status"] == "warn"
+    assert _sc(disk_free_gb=3, disk_total_gb=48)["Disk"]["status"] == "fail"
+    assert _sc(disk_free_gb=4, disk_total_gb=100)["Disk"]["status"] == "fail"  # under 5 GB and 4%
+    assert _sc(disk_free_gb=5, disk_total_gb=100)["Disk"]["status"] == "warn"
+    assert "about 40 GB" in _sc(objects=100)["Disk"]["detail"]  # 30 + 0.1 x 100

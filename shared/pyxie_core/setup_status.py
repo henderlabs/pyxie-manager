@@ -145,3 +145,29 @@ def build_steps(inp: dict) -> list[dict]:
 def progress(steps: list[dict]) -> dict:
     countable = [s for s in steps if s["key"] != "check"]
     return {"done": sum(1 for s in countable if s["state"] == "done"), "total": len(countable)}
+
+
+def server_checks(*, cpus: int, mem_total_mb: int, mem_avail_mb: int, disk_total_gb: float, disk_free_gb: float, db_mb: float, objects: int) -> list[dict]:
+    """How this server compares with the suggested sizing (see Prerequisites.tsx). Plain data in, check rows out."""
+    g = "This server"
+    out = []
+
+    def row(label, status, detail, fix=""):
+        out.append({"group": g, "label": label, "status": status, "detail": detail, "fix": fix})
+
+    row("CPU", "ok" if cpus >= 2 else "warn", f"{cpus} vCPU." + ("" if cpus >= 2 else " Updates build a new version beside the running one and will be slow."),
+        "" if cpus >= 2 else "Give the VM at least 2 vCPU.")
+    gb = mem_total_mb / 1024
+    row("Memory", "ok" if mem_total_mb >= 3500 else "warn", f"{gb:.1f} GB total, {mem_avail_mb / 1024:.1f} GB available.",
+        "" if mem_total_mb >= 3500 else "Give the VM at least 4 GB; updates build images and need the headroom.")
+    pct_free = 100 * disk_free_gb / disk_total_gb if disk_total_gb else 0
+    need = 30 + 0.1 * objects
+    if disk_free_gb < 5 or pct_free < 5:
+        st, fix = "fail", "Free space or grow the disk now: updates and backups will start failing."
+    elif disk_free_gb < 10 or pct_free < 15:
+        st, fix = "warn", "Getting low. Clear Docker build cache (docker builder prune) or grow the disk."
+    else:
+        st, fix = "ok", ""
+    row("Disk", st, f"{disk_free_gb:.0f} GB free of {disk_total_gb:.0f} GB ({pct_free:.0f}% free). Suggested for {objects} nodes and guests: about {need:.0f} GB in total.", fix)
+    row("Database", "ok", f"{db_mb:.0f} MB.")
+    return out

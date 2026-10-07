@@ -2,6 +2,7 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { Card, CardTitle, PageHeader } from "@/components/Card";
 import { LightbulbIcon } from "@/components/Icons";
+import Prerequisites from "@/components/Prerequisites";
 import type { SetupStatus } from "@/components/SetupGuide";
 
 const PRIVS: [string, string][] = [
@@ -49,6 +50,11 @@ export default async function QuickStartPage() {
             Open the setup guide
           </Link>
         </div>
+      </Card>
+
+      <Card className="mb-4">
+        <CardTitle>Before you start</CardTitle>
+        <Prerequisites />
       </Card>
 
       <div className="grid md:grid-cols-2 gap-4 mb-4">

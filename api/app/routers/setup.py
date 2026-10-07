@@ -11,11 +11,11 @@ from sqlalchemy.orm import Session
 from pyxie_core import host_kit
 from pyxie_core.credentials import CredentialNotConfigured, load_pve_credentials, resolve_pve_endpoints
 from pyxie_core.models import (
-    AppSettings, Cluster, HostMaintenanceCredential, Node, NotificationRule, PveCredential, PveTarget, Site,
+    AppSettings, Cluster, HostMaintenanceCredential, Node, NotificationRule, PveCredential, PveTarget, Site, Workload,
 )
 from pyxie_core.pve_client import PveClient
 from pyxie_core.pve_write_client import PveMaintenanceClient
-from pyxie_core.setup_status import build_steps, progress
+from pyxie_core.setup_status import build_steps, progress, server_checks
 
 from ..auth_deps import get_current_user, require_admin
 from ..deps import get_db
@@ -165,6 +165,21 @@ def run_check(db: Session = Depends(get_db)):
             out.append(_chk(g, "Host wrapper", "warn", f"Version {st.get('wrapper_version')}; {expected} is available. Updates work; live host output needs the new one.", "Run the host script from the builder on this node."))
         else:
             out.append(_chk(g, "Host wrapper", "ok", f"Version {st.get('wrapper_version')}, reachable, host key pinned."))
+
+    try:
+        import shutil
+
+        from sqlalchemy import text as _text
+
+        disk = shutil.disk_usage("/update" if os.path.isdir("/update") else "/")
+        meminfo = {l.split(":")[0]: int(l.split()[1]) for l in open("/proc/meminfo").read().splitlines() if ":" in l and len(l.split()) > 1}
+        db_bytes = db.execute(_text("select pg_database_size(current_database())")).scalar() or 0
+        out.extend(server_checks(
+            cpus=os.cpu_count() or 1, mem_total_mb=meminfo.get("MemTotal", 0) // 1024, mem_avail_mb=meminfo.get("MemAvailable", 0) // 1024,
+            disk_total_gb=disk.total / 1e9, disk_free_gb=disk.free / 1e9, db_mb=db_bytes / 1e6, objects=len(nodes_q) + db.query(Workload).filter(Workload.is_missing.is_(False)).count(),
+        ))
+    except Exception as exc:  # noqa: BLE001
+        out.append(_chk("This server", "CPU, memory and disk", "info", f"Could not read: {str(exc)[:100]}"))
 
     out.append(_chk("Settings", "Writes to Proxmox", "ok" if s["pve_mutations_enabled"] else "info",
                     "On." if s["pve_mutations_enabled"] else "Off: previews work, nothing is changed until you switch it on in Settings."))
