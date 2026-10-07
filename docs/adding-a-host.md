@@ -32,19 +32,22 @@ directly.
 | User | Realm | Purpose |
 |---|---|---|
 | `pyxie-ro` | Proxmox VE authentication server (`pve`) | inventory (read-only) |
-| `pyxie-maint` | `pve` | maintenance (write-capable) |
+| `pyxie-admin` | `pve` | maintenance (admin, write-capable) |
 
-Only create `pyxie-maint` when you're actually going to configure that
+Only create `pyxie-admin` when you're actually going to configure that
 credential -- an unused user with no role grant has zero privilege, so
 there's no harm creating it ahead of time, but there's also no need to
 rush it.
+
+> Naming (v0.27.2): new deployments use `pyxie-ro` and `pyxie-admin` with the role `PyXieAdmin`. Deployments set up
+> earlier with `pyxie-manager@pve` / `PyXieMaintenanceW1` keep working unchanged; the names are only labels in PVE.
 
 ## 2. Create the maintenance role, if you haven't already **[manual]**
 
 `inventory` uses PVE's own built-in **`PVEAuditor`** role -- nothing to
 create. `maintenance` needs a custom role that doesn't exist by default:
 
-**Datacenter -> Permissions -> Roles -> Add**, name `PyXieMaintenanceW1`,
+**Datacenter -> Permissions -> Roles -> Add**, name `PyXieAdmin`,
 privileges (check all 11):
 
 ```
@@ -76,7 +79,7 @@ once for the **token** (Privilege Separation means the token needs its
 own grant, separate from the user's):
 
 - `pyxie-ro@pve` and `pyxie-ro@pve!inventory` -> `PVEAuditor`
-- `pyxie-maint@pve` and `pyxie-maint@pve!maintenance` -> `PyXieMaintenanceW1`
+- `pyxie-admin@pve` and `pyxie-admin@pve!maintenance` -> `PyXieAdmin`
 
 **Known, accepted risk:** the `maintenance` role is scoped at `/` (root),
 not per-resource -- see README.md's Safety Contract section for why.
@@ -108,7 +111,7 @@ minute depending on cluster size -- large clusters (dozens of nodes,
 ## 6. Add the maintenance credential (optional, when you're ready for write features)
 
 Platform -> Credentials -> **+ Add Credential Purpose** on the target ->
-`maintenance`, using the `pyxie-maint` token from step 3. Click **Test
+`maintenance` (shown as "maintenance (admin)"), using the `pyxie-admin` token from step 3. Click **Test
 Connection** on that specific credential row afterward -- the
 target-level Test Connection only ever validates the `inventory` slot,
 so this is the only way to confirm `maintenance` actually works.

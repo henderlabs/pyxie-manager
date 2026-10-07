@@ -70,7 +70,7 @@ export default function AddCredentialForm({ targetId, existingSlots }: { targetI
         >
           {available.map((s) => (
             <option key={s} value={s}>
-              {s}
+              {s === "maintenance" ? "maintenance (admin)" : s}
             </option>
           ))}
         </select>
