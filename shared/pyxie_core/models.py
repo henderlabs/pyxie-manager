@@ -505,8 +505,6 @@ class AppSettings(Base):
     # quorum) produces one alert when it settles, not one per flip. 0 = notify
     # immediately. See findings._settle_notifications.
     notification_hold_down_minutes = Column(Integer, nullable=False, default=5)
-    # Where the in-app "Send by email" feedback goes (maintainer mailbox); empty = that option is hidden.
-    feedback_email = Column(String, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)
 
     @property
