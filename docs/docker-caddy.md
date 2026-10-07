@@ -12,6 +12,26 @@ browser --HTTPS--> caddy :443 --> web (Next.js) :3000 --> api :8000 --> db / red
 The native systemd install (`ops/install/install.sh`) still works and is
 unchanged. Pick one per host; don't run both against the same database.
 
+## What you need first
+
+- **One VM**, Ubuntu 24.04 LTS. Caddy, PostgreSQL and Redis run as containers in the stack; install only Docker Engine with
+  the Compose plugin (`sudo bash ops/docker/install-docker.sh`), and put the login user in the `docker` group. `git`,
+  `python3`, `cron` and `curl` (standard on Ubuntu) are used by the installer, the in-app updater and the backup.
+- **Suggested size**: Small (up to 4 nodes / 50 guests) 2 vCPU, 4 GB, 40 GB; Medium (up to 16 nodes / 300 guests) 4 vCPU,
+  8 GB, 80 GB; Large (more) 8 vCPU, 16 GB, 120 GB+. Disk is about 30 GB plus 0.1 GB per node or guest (400 days of
+  metrics is 30 to 60 MB per object, plus backups; each update leaves 9 to 15 GB of Docker build cache that
+  `docker builder prune` clears). Measured on a 4-node, 24-guest lab: the whole stack used about 0.5 GB RAM and almost
+  no CPU. On an 8-node, 130-guest production install: about 0.9 GB RAM, a 2.9 GB database, 22 GB of disk in use. The updater builds a new version beside
+  the running one for about a minute, so keep at least 2 vCPU and 4 GB. Run check (Integrations, step 8) compares the VM
+  with these numbers.
+- **Network**: a DNS name for the VM; users reach 443 (80 redirects). VM to every Proxmox node on TCP 8006, and 22 if
+  you patch hosts through PyXie. VM out to GitHub (HTTPS) and your mail relay. A node reaches the VM on 443 once, to get
+  the host installer. NTP on the VM.
+- **A certificate choice** (`PYXIE_TLS_MODE`, below). `internal` is quickest for a lab, but browsers and Proxmox nodes will
+  not trust it by default (the host script has an option for that).
+- **Access**: read access to the repository on GitHub, and someone with root on a Proxmox node to create the accounts and
+  install the host wrapper (PyXie never does that for you).
+
 ## Configuration (`.env`)
 
 The stack uses the same `.env` as the native install, plus:

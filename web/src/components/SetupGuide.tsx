@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Prerequisites from "@/components/Prerequisites";
 
 type StepItem = { name: string; ok: boolean; detail: string };
 type SubStep = {
@@ -96,6 +97,7 @@ export default function SetupGuide({ initial }: { initial: SetupStatus }) {
         <a href="/platform/quick-start" className="text-xs text-accent hover:underline">New? Read the quick start</a>
         <span className="ml-auto text-xs text-muted">{done} of {total} done</span>
       </div>
+      <Prerequisites collapsible />
       <div className="h-1 rounded bg-border mb-3 overflow-hidden"><div className="h-full bg-good" style={{ width: `${Math.round((done / Math.max(total, 1)) * 100)}%` }} /></div>
 
       <div className="space-y-2">
