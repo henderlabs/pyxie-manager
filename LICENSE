@@ -1,0 +1,11 @@
+# PyXie Manager Use License
+
+Copyright (c) 2026 HenderLabs. All rights reserved.
+
+1. **Grant.** HenderLabs grants you a free, non-exclusive, non-transferable, revocable license to install and run PyXie Manager (the "Software") for your own internal use, including managing Proxmox environments you own or administer.
+2. **Not permitted.** You may not: (a) modify the Software or create derivative works; (b) fork, or develop against, the source code, other than local configuration through documented settings; (c) redistribute, sublicense, sell, or publish the Software or any copy; (d) offer the Software as a hosted or managed service to third parties; (e) remove copyright or license notices.
+3. **Source access.** The source is made available for transparency and security review only. Viewing the source does not grant development rights.
+4. **Feedback.** Bug reports and suggestions submitted to henderlabs/pyxie-feedback may be used by HenderLabs without obligation.
+5. **No warranty.** THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND. PyXie can make changes to production clusters; you are responsible for testing and backups.
+6. **Limitation of liability.** HenderLabs is not liable for any damages arising from use of the Software.
+7. **Termination.** This license ends automatically if you breach it.
