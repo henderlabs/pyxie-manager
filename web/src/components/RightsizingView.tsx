@@ -8,6 +8,7 @@ import RecommendationsList from "@/components/RecommendationsList";
 import RightsizingTable from "@/components/tables/RightsizingTable";
 import RecomputeRightsizingButton from "@/components/RecomputeRightsizingButton";
 import { useMe } from "@/lib/useMe";
+import { notifyBadgesChanged } from "@/lib/operationsBus";
 
 export type RightsizingTab = "all" | "open" | "acknowledged" | "dismissed" | "resolved";
 
@@ -45,6 +46,7 @@ export default function RightsizingView({
       const res = await fetch("/api/recommendations/triage", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids, action }) });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       setSelected(new Set());
+      notifyBadgesChanged();
       router.refresh();
     } catch (e) {
       setError((e as Error).message);

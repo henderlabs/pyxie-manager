@@ -18,3 +18,17 @@ export function onOperationsChanged(callback: () => void): () => void {
   window.addEventListener(EVENT_NAME, callback);
   return () => window.removeEventListener(EVENT_NAME, callback);
 }
+
+/** Same idea for the sidebar's count badges (Health, Rightsizing, Maintenance...): call this right after an action
+ * that changes what they count (acknowledge / dismiss / restore) so they update at once instead of on the 30 s poll. */
+const BADGES_EVENT = "pyxie:badges-changed";
+
+export function notifyBadgesChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(BADGES_EVENT));
+}
+
+export function onBadgesChanged(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(BADGES_EVENT, callback);
+  return () => window.removeEventListener(BADGES_EVENT, callback);
+}

@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useMe } from "@/lib/useMe";
+import { notifyBadgesChanged } from "@/lib/operationsBus";
 
 /** Acknowledge / Dismiss for one recommendation, state-aware: open -> Acknowledge, Dismiss; acknowledged -> Dismiss,
  * Un-acknowledge; dismissed -> Restore. Admins only. Same behaviour as Health findings. */
@@ -20,6 +21,7 @@ export default function RecommendationActions({ id, state = "open" }: { id: stri
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [id], action }),
       });
+      notifyBadgesChanged();
       router.refresh();
     } finally {
       setPending(false);
