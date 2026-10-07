@@ -473,7 +473,7 @@ export default function WorkloadLifecycleForm({
             onClick={runBulkPreview}
             disabled={bulkPending}
             title="Builds one reviewable line per selected VM -- nothing moves until you review and approve it."
-            className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+            className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
           >
             {bulkPending ? "Planning…" : "Preview Bulk Migrate"}
           </button>
@@ -577,7 +577,7 @@ export default function WorkloadLifecycleForm({
             (action === "move" && !destNodeId)
           }
           title="Shows what would happen -- nothing changes until you review the result and approve it."
-          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           Preview
         </button>
