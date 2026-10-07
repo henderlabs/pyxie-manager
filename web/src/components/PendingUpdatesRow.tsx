@@ -35,7 +35,7 @@ export default function PendingUpdatesRow({ nodeId, initialCount }: { nodeId: st
   }
 
   return (
-    <div className="py-0.5">
+    <div className="py-0.5 text-sm">
       <div className="flex justify-between items-center">
         <dt className="text-muted">Pending updates</dt>
         <dd className="text-text">
