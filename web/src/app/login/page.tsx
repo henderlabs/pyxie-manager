@@ -104,7 +104,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={pending}
-          className="w-full px-3 py-2 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="w-full px-3 py-2 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           {pending ? "Working…" : needsBootstrap ? "Create account & sign in" : "Sign in"}
         </button>
