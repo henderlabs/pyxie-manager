@@ -697,6 +697,12 @@ class Recommendation(Base):
     lifecycle_state = Column(String, nullable=False, default="open")  # open|acknowledged|snoozed|dismissed|resolved
     snoozed_until = Column(DateTime(timezone=True), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
+    # Operator triage (see recommendations.apply_triage): who/when, and the suggestion fingerprint at that moment.
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_by = Column(String, nullable=True)
+    dismissed_at = Column(DateTime(timezone=True), nullable=True)
+    dismissed_by = Column(String, nullable=True)
+    triage_fingerprint = Column(String, nullable=True)
 
     __table_args__ = (UniqueConstraint("dedupe_key", name="uq_recommendation_dedupe_key"),)
 

@@ -45,7 +45,7 @@ export default function RecommendationsList({
           </div>
           <div className="divide-y divide-border">
             {byCategory[category].map((r) => (
-              <div key={r.id} className="py-3">
+              <div key={r.id} className={`py-3 ${r.lifecycle_state !== "open" ? "opacity-70" : ""}`}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="text-sm text-text font-medium">{r.title}</div>
@@ -58,7 +58,12 @@ export default function RecommendationsList({
                       {r.observation_window_days != null && (
                         <span className="text-xs text-muted">{r.observation_window_days}d observed</span>
                       )}
-                      <span className="text-xs text-muted">· {r.lifecycle_state}</span>
+                      {r.lifecycle_state === "acknowledged" && r.acknowledged_at && (
+                        <span className="text-xs text-muted">· acknowledged by {r.acknowledged_by ?? "unknown"}, {new Date(r.acknowledged_at).toLocaleString()}</span>
+                      )}
+                      {(r.lifecycle_state === "dismissed" || r.lifecycle_state === "snoozed") && (
+                        <span className="text-xs text-muted">· dismissed{r.dismissed_by ? ` by ${r.dismissed_by}` : ""}{r.dismissed_at ? `, ${new Date(r.dismissed_at).toLocaleString()}` : ""}</span>
+                      )}
                     </div>
                     {category === "rightsizing" &&
                       r.object_id &&
@@ -104,7 +109,7 @@ export default function RecommendationsList({
                         );
                       })()}
                   </div>
-                  <RecommendationActions id={r.id} />
+                  <RecommendationActions id={r.id} state={r.lifecycle_state} />
                 </div>
               </div>
             ))}

@@ -399,6 +399,10 @@ export type Recommendation = {
   generated_at: string;
   lifecycle_state: string;
   snoozed_until: string | null;
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  dismissed_at: string | null;
+  dismissed_by: string | null;
 };
 
 export type ObservationStats = {
