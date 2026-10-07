@@ -7,6 +7,7 @@ import PveTargetRow from "@/components/PveTargetRow";
 import AddSiteForm from "@/components/AddSiteForm";
 import SiteRow from "@/components/SiteRow";
 import { PlugIcon } from "@/components/Icons";
+import HostSetupBuilder from "@/components/HostSetupBuilder";
 
 const UNIMPLEMENTED_CATEGORIES = ["protection", "monitoring", "notification", "itsm", "authentication", "hardware"];
 
@@ -96,6 +97,14 @@ export default async function ProvidersPage() {
             Reserved for future phases (PBS, Veeam, Commvault, etc). Nothing to set up here yet.
           </div>
         </details>
+      </Card>
+
+      <Card className="mb-4">
+        <CardTitle>Step 3 · Prepare a host (setup scripts)</CardTitle>
+        <p className="text-xs text-muted mb-3 normal-case">
+          Tick what you need and PyXie writes the scripts: the Proxmox service account, roles and tokens, and the host wrapper that lets PyXie patch and reboot a node. You copy them onto a node and run them yourself.
+        </p>
+        <HostSetupBuilder targets={targets.map((t) => ({ id: t.id, name: t.name }))} />
       </Card>
     </div>
   );

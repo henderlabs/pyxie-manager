@@ -253,7 +253,9 @@ function NodeReadinessRow({
 
       {pinned && reachable && (
         <div className="text-[11px] text-muted mt-1">
-          wrapper {status?.wrapper_version} · contract {status?.contract_version} · {status?.upgradable_count ?? "?"}{" "}
+          wrapper {status?.wrapper_version}
+          {status?.wrapper_outdated ? <span className="text-warn"> (update available: {status?.kit_wrapper_version}; Integrations &gt; Prepare a host)</span> : null}
+          {" "}· contract {status?.contract_version} · {status?.upgradable_count ?? "?"}{" "}
           packages pending
           {status?.reboot_required ? <span className="text-warn"> · reboot required</span> : null}
         </div>

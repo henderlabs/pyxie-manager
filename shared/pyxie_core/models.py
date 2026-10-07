@@ -100,6 +100,8 @@ class Node(Base):
     ssh_host_key_base64 = Column(Text, nullable=True)
     ssh_host_key_fingerprint = Column(String, nullable=True)
     ssh_host_key_pinned_at = Column(DateTime(timezone=True), nullable=True)
+    wrapper_version = Column(String, nullable=True)  # host-maintenance wrapper version last seen on this node
+    wrapper_checked_at = Column(DateTime(timezone=True), nullable=True)
     ssh_host_key_pinned_by = Column(String, nullable=True)
     cpu_usage_pct = Column(Float, nullable=True)
     mem_usage_pct = Column(Float, nullable=True)

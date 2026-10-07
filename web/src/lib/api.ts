@@ -109,6 +109,8 @@ export type HostMaintenanceStatus = {
   provisioned: boolean;
   reachable: boolean;
   wrapper_version?: string | null;
+  kit_wrapper_version?: string | null;
+  wrapper_outdated?: boolean;
   contract_version?: number | null;
   contract_compatible?: boolean;
   capabilities?: string[];

@@ -188,6 +188,8 @@ def dry_run_host_update(
     cred_row.last_validated_at = now()
     cred_row.last_seen_wrapper_version = version_info.get("wrapper_version")
     cred_row.last_seen_contract_version = version_info.get("contract_version")
+    node.wrapper_version = version_info.get("wrapper_version")
+    node.wrapper_checked_at = now()
     db.commit()
 
     packages = plan_info.get("packages", [])
