@@ -24,6 +24,7 @@ export function middleware(req: NextRequest) {
     pathname.startsWith("/accept-invite") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/host-kit/") ||
     STATIC_ASSET_RE.test(pathname)
   ) {
     return NextResponse.next();

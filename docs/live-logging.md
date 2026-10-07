@@ -10,6 +10,9 @@ operation card). Two kinds of lines share one stream, stored in `operation_log` 
 
 ## Upgrading the wrapper on a host (run as root, once per PVE node)
 
+Easiest: Platform > Integrations > Step 3 "Prepare a host" > tick "Install or upgrade the host wrapper" > copy the script
+to the node and run it as root. The manual route is below.
+
 PyXie never installs this itself. From a checkout of this repo that is at v0.27.0 or later:
 
 ```

@@ -323,8 +323,41 @@ def evaluate_findings(db: Session) -> dict:
     current.extend(_protection_findings(db))
     current.extend(_affinity_violation_findings(db))
     current.extend(_liveness_findings(db))
+    current.extend(_wrapper_findings(db))
 
     return _reconcile(db, current)
+
+
+def _wrapper_findings(db: Session) -> list[dict]:
+    """A node whose host-maintenance wrapper is older than the one this PyXie ships. Updates still work through the
+    old wrapper, but newer features (live host output) need the new one. Low-key: info severity."""
+    from . import host_kit
+    from pathlib import Path
+
+    kit_dir = Path(__file__).resolve().parents[1] / "host_maintenance_kit"
+    if not (kit_dir / "pyxie-maint").exists():
+        return []
+    expected = host_kit.wrapper_version(kit_dir)
+    out: list[dict] = []
+    for node in db.query(Node).filter(Node.is_missing.is_(False), Node.wrapper_version.isnot(None)).all():
+        if not host_kit.is_outdated(node.wrapper_version, expected):
+            continue
+        out.append(
+            {
+                "dedupe_key": f"host.wrapper_outdated:{node.id}",
+                "object_type": "node",
+                "object_id": node.id,
+                "category": "version",
+                "severity": "info",
+                "title": f"Host wrapper on {node.name} is outdated ({node.wrapper_version}, current {expected})",
+                "evidence": {
+                    "node": node.name, "installed": node.wrapper_version, "expected": expected,
+                    "fix": "Integrations > Prepare a host: generate the host script and run it as root on this node. "
+                           "Updates still work meanwhile; live host output needs the new wrapper.",
+                },
+            }
+        )
+    return out
 
 
 def _liveness_findings(db: Session) -> list[dict]:

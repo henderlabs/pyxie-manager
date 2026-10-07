@@ -11,6 +11,7 @@ from . import config  # noqa: F401 -- import asserts the Phase 0 safety gate at 
 from .routers import (
     audit,
     console,
+    host_kit,
     auth,
     findings,
     inventory,
@@ -102,6 +103,8 @@ app.include_router(system_updates.router)
 app.include_router(node_detail.router)
 app.include_router(workload_detail.router)
 app.include_router(console.router)
+app.include_router(host_kit.admin_router)
+app.include_router(host_kit.public_router)
 
 
 @app.get("/api/health")

@@ -353,11 +353,19 @@ def get_node_host_maintenance_status(node_id: uuid.UUID, db: Session = Depends(g
         return {**base, "provisioned": True, "reachable": False, "error": str(exc)}
 
     contract_version = version_info.get("contract_version")
+    from pyxie_core import host_kit as _hk
+    from .host_kit import KIT_DIR as _KIT_DIR
+    kit_wrapper = _hk.wrapper_version(_KIT_DIR)
+    node.wrapper_version = version_info.get("wrapper_version")
+    node.wrapper_checked_at = datetime.now(timezone.utc)
+    db.commit()
     return {
         **base,
         "provisioned": True,
         "reachable": True,
         "wrapper_version": version_info.get("wrapper_version"),
+        "kit_wrapper_version": kit_wrapper,
+        "wrapper_outdated": _hk.is_outdated(version_info.get("wrapper_version"), kit_wrapper),
         "contract_version": contract_version,
         "contract_compatible": contract_version == SUPPORTED_CONTRACT_VERSION,
         "capabilities": version_info.get("capabilities", []),

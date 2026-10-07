@@ -146,6 +146,15 @@ it stays a deliberate manual step (or part of your own configuration
 management). Budget for it: a 16-node cluster means 16 installs and 16 host
 key pins.
 
+**Easiest way (v0.27.1+): Platform > Integrations > Step 3, "Prepare a host".** Tick what you need and PyXie writes
+the scripts: one for the Proxmox account (user, roles, tokens, optional console access), and one for the host
+wrapper (install, upgrade or remove). Copy a script to a node and run it as root. The wrapper script downloads a
+single self-contained installer from a 30-minute link and refuses to run unless its SHA-256 matches the one PyXie
+computed, so it is safe to use even over a connection the node does not trust. Running the same script again
+upgrades the wrapper; `bash pyxie-host-kit.sh --check` (on the node) shows installed vs available without changing
+anything. The credentials page flags a node whose wrapper is older than the one this PyXie ships. The manual steps
+below remain valid.
+
 **Steps**
 
 1. **Generate the keypair.** Platform -> Credentials -> *Host maintenance --
