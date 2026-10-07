@@ -80,6 +80,22 @@ def _settle_notifications(db: Session, now: datetime, events: list) -> None:
         f.notified_active = f.active
 
 
+SEVERITY_RANK = {"info": 0, "unknown": 0, "warning": 1, "critical": 2}
+
+
+def triage_state(f: Finding) -> str:
+    """open | acknowledged | dismissed (dismissed wins if both were somehow set)."""
+    if f.dismissed_at is not None:
+        return "dismissed"
+    if f.acknowledged_at is not None:
+        return "acknowledged"
+    return "open"
+
+
+def clear_triage(f: Finding) -> None:
+    f.acknowledged_at = f.acknowledged_by = f.dismissed_at = f.dismissed_by = None
+
+
 def _reconcile(db: Session, current: list[dict], now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     seen_keys = set()
@@ -110,6 +126,9 @@ def _reconcile(db: Session, current: list[dict], now: datetime | None = None) ->
         else:
             if not existing.active:
                 existing.state_since = now  # a new occurrence begins
+                clear_triage(existing)  # acknowledged/dismissed applied to the old occurrence
+            elif SEVERITY_RANK.get(f["severity"], 0) > SEVERITY_RANK.get(existing.severity, 0):
+                clear_triage(existing)  # it got worse since the operator looked
             existing.last_observed = now
             existing.active = True
             existing.resolved_at = None
