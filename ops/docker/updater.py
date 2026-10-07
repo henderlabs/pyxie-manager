@@ -666,12 +666,9 @@ def poll_window() -> None:
         lock = _try_lock()
         if lock is not None:
             try:
-                had_request = (UPDATE_DIR / "request.json").exists()
                 poll()
             finally:
                 lock.close()
-            if had_request:
-                return  # that run can take minutes; the next cron tick starts a fresh window
         if time.monotonic() >= deadline:
             return
         time.sleep(POLL_INTERVAL_SECONDS)
