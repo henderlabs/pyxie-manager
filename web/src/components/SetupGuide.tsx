@@ -3,10 +3,15 @@
 import { useCallback, useEffect, useState } from "react";
 
 type StepItem = { name: string; ok: boolean; detail: string };
+type SubStep = {
+  key: string; label: string; state: "done" | "todo" | "waiting"; detail: string;
+  action: { kind: "generate_keypair" | "anchor" | "href"; label: string; target_id?: string | null; anchor?: string; href?: string } | null;
+};
 type Step = {
   key: string; number: number; title: string; summary: string;
   state: "done" | "next" | "todo" | "waiting" | "optional";
   items?: StepItem[];
+  substeps?: SubStep[];
   action?: { label: string; anchor?: string; href?: string };
 };
 export type SetupStatus = { steps: Step[]; progress: { done: number; total: number } };
@@ -34,6 +39,24 @@ export default function SetupGuide({ initial }: { initial: SetupStatus }) {
   const [result, setResult] = useState<CheckResult | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [subError, setSubError] = useState<string | null>(null);
+
+  async function generateKeypair(targetId: string | null | undefined) {
+    if (!targetId) return;
+    setBusyKey("keypair");
+    setSubError(null);
+    try {
+      const r = await fetch(`/api/pve-targets/${targetId}/host-maintenance-credential/generate`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
+      await refresh();
+    } catch (e) {
+      setSubError((e as Error).message);
+    } finally {
+      setBusyKey(null);
+    }
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -96,6 +119,31 @@ export default function SetupGuide({ initial }: { initial: SetupStatus }) {
                     </li>
                   ))}
                 </ul>
+              )}
+              {s.substeps && (
+                <ol className="mt-2 ml-9 space-y-1.5">
+                  {s.substeps.map((ss, i) => (
+                    <li key={ss.key} className={`flex items-start gap-2 text-xs ${ss.state === "waiting" ? "opacity-60" : ""}`}>
+                      <span className={`w-4 text-center font-medium ${ss.state === "done" ? "text-good" : "text-muted"}`}>{ss.state === "done" ? "✓" : String.fromCharCode(97 + i) + ")"}</span>
+                      <span className="flex-1">
+                        <span className="text-text">{ss.label}.</span> <span className="text-muted">{ss.detail}</span>
+                        {ss.action && (
+                          <span className="ml-2">
+                            {ss.action.kind === "generate_keypair" ? (
+                              <button type="button" disabled={busyKey === "keypair"} onClick={() => generateKeypair(ss.action!.target_id)}
+                                className="px-2 py-0.5 rounded border border-border hover:bg-surface2 disabled:opacity-50">{busyKey === "keypair" ? "Generating…" : ss.action.label}</button>
+                            ) : ss.action.kind === "href" ? (
+                              <a href={ss.action.href} className="px-2 py-0.5 rounded border border-border hover:bg-surface2">{ss.action.label} →</a>
+                            ) : (
+                              <button type="button" onClick={() => go(ss.action!.anchor!)} className="px-2 py-0.5 rounded border border-border hover:bg-surface2">{ss.action.label} ↓</button>
+                            )}
+                          </span>
+                        )}
+                      </span>
+                    </li>
+                  ))}
+                  {subError && <li className="text-xs text-bad">{subError}</li>}
+                </ol>
               )}
               {s.key === "check" ? (
                 <div className="ml-9 mt-2">
