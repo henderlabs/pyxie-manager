@@ -46,6 +46,13 @@ function keysymFor(ch: string): number | null {
   return cp < 0x100 ? cp : 0x01000000 + cp;
 }
 
+const SIZES: { key: string; label: string; height: string }[] = [
+  { key: "small", label: "Small", height: "420px" },
+  { key: "medium", label: "Medium", height: "640px" },
+  { key: "large", label: "Large", height: "860px" },
+  { key: "fill", label: "Fill window", height: "max(480px, calc(100vh - 300px))" },
+];
+
 const KEY_SHIFT_L = 0xffe1;
 /** US layout: characters that need Shift held. QEMU's VNC server maps a keysym to the unshifted key
  * unless Shift is sent explicitly (what a real keyboard does), so we press it ourselves. */
@@ -67,6 +74,7 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
   const [fromGuest, setFromGuest] = useState("");
   const [clipNote, setClipNote] = useState<string | null>(null);
   const typingRef = useRef(false);
+  const [size, setSize] = useState("fill");
 
   const disconnect = useCallback((why?: string) => {
     if (idleRef.current) clearTimeout(idleRef.current);
@@ -80,6 +88,18 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
     if (idleRef.current) clearTimeout(idleRef.current);
     idleRef.current = setTimeout(() => disconnect("Disconnected after 15 minutes without input."), IDLE_LIMIT_MS);
   }, [disconnect]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("pyxie:console-size");
+      if (saved && SIZES.some((z) => z.key === saved)) setSize(saved);
+    } catch { /* storage unavailable */ }
+  }, []);
+
+  function pickSize(key: string) {
+    setSize(key);
+    try { localStorage.setItem("pyxie:console-size", key); } catch { /* ignore */ }
+  }
 
   useEffect(() => () => {
     if (idleRef.current) clearTimeout(idleRef.current);
@@ -179,6 +199,14 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
             <button type="button" onClick={() => disconnect("Console closed.")} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Disconnect</button>
             <button type="button" disabled={state !== "connected"} onClick={() => rfbRef.current?.sendCtrlAltDel()} className="px-2.5 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-50">Ctrl-Alt-Del</button>
             <button type="button" onClick={() => setShowClip((v) => !v)} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Clipboard</button>
+            <span className="inline-flex rounded border border-border overflow-hidden" role="group" aria-label="Console size">
+              {SIZES.map((z) => (
+                <button key={z.key} type="button" onClick={() => pickSize(z.key)}
+                  className={`px-2 py-1 text-xs border-r border-border last:border-r-0 ${size === z.key ? "bg-surface2 text-text" : "text-muted hover:text-text"}`}>
+                  {z.label}
+                </button>
+              ))}
+            </span>
             <button type="button" onClick={() => screenRef.current?.requestFullscreen?.()} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Full screen</button>
           </>
         )}
@@ -218,10 +246,11 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
         onKeyDownCapture={bumpIdle}
         onMouseDownCapture={bumpIdle}
         onMouseMoveCapture={() => { if (state === "connected") bumpIdle(); }}
-        className={live ? "w-full h-[520px] bg-black rounded border border-border overflow-hidden" : "hidden"}
+        style={live ? { height: SIZES.find((z) => z.key === size)?.height, minHeight: 240, minWidth: 320, maxWidth: "100%", resize: "both" } : undefined}
+        className={live ? "w-full bg-black rounded border border-border overflow-hidden" : "hidden"}
       />
       <p className="text-[11px] text-muted">
-        The console shows the guest's own screen with full keyboard and mouse control. Opening and closing it is recorded in the audit log.
+        Drag the bottom-right corner to resize freely. The console shows the guest's own screen with full keyboard and mouse control. Opening and closing it is recorded in the audit log.
       </p>
     </div>
   );
