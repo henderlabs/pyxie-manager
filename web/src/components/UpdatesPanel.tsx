@@ -33,7 +33,8 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
   // The click is acknowledged at once: "asked" bridges the gap until the updater starts a run (state.started_at changes).
   const [asked, setAsked] = useState<{ action: "update" | "rollback"; version: string | null; at: number; stateStart: string | null } | null>(null);
   const [now, setNow] = useState(Date.now());
-  const pending = data.pending ?? null;
+  // A pending Check now is not an update: only updates and restores get the waiting card.
+  const pending = data.pending && (data.pending.action === "update" || data.pending.action === "rollback") ? data.pending : null;
   const askedLive = asked !== null && !running && data.state.started_at === asked.stateStart && now - asked.at < 3 * 60 * 1000;
   const waiting = !running && (pending !== null || askedLive);
   const waitAction = pending?.action ?? asked?.action ?? "update";
