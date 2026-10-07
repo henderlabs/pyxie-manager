@@ -153,7 +153,7 @@ export default function WorkloadLifecycleButtons({
             <button
               disabled={pending}
               onClick={confirm}
-              className="px-2 py-0.5 rounded bg-ink text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
+              className="px-2 py-0.5 rounded bg-ink text-on-ink border border-warn hover:bg-warn/10 disabled:opacity-50"
             >
               {pending ? "…" : "Confirm"}
             </button>
