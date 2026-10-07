@@ -45,7 +45,7 @@ export default function ActionButton({
 
   const cls =
     variant === "primary"
-      ? "bg-ink text-white border border-accent hover:bg-accent/10"
+      ? "bg-ink text-on-ink border border-accent hover:bg-accent/10"
       : "bg-surface2 text-text border border-border hover:bg-surface2/70";
 
   return (

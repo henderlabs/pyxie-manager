@@ -84,7 +84,7 @@ export default function EditCredentialForm({ targetId, credential }: { targetId:
         <button
           onClick={save}
           disabled={pending || !form.token_secret}
-          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           {pending ? "Saving…" : "Save"}
         </button>

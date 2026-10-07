@@ -202,7 +202,7 @@ export default function SettingsForm({ initial }: { initial: AppSettings }) {
         <button
           type="submit"
           disabled={pending}
-          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           {pending ? "Saving…" : "Save settings"}
         </button>

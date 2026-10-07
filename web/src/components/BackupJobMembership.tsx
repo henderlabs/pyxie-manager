@@ -188,7 +188,7 @@ function JobCard({ job }: { job: BackupJob }) {
               <button
                 disabled={busy || !!dryRun}
                 onClick={previewSelectAll}
-                className="text-xs px-2 py-1 rounded bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+                className="text-xs px-2 py-1 rounded bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
                 title="Switch this job to PVE's native all-guests mode -- every current AND future VM is backed up automatically from then on."
               >
                 Select All
@@ -231,7 +231,7 @@ function JobCard({ job }: { job: BackupJob }) {
           <button
             disabled={busy}
             onClick={previewChanges}
-            className="text-xs px-2 py-1 rounded bg-ink text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
+            className="text-xs px-2 py-1 rounded bg-ink text-on-ink border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
           >
             {busy ? "Checking…" : "Preview Changes"}
           </button>
@@ -271,7 +271,7 @@ function JobCard({ job }: { job: BackupJob }) {
             <button
               disabled={busy}
               onClick={confirm}
-              className="px-2 py-1 rounded bg-ink text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
+              className="px-2 py-1 rounded bg-ink text-on-ink border border-warn hover:bg-warn/10 disabled:opacity-50"
             >
               {busy ? "Applying…" : "Confirm & Apply"}
             </button>

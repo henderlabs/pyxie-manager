@@ -17,6 +17,7 @@
   --c-bad: 229 72 77;
   --c-proxmox: 229 112 0;
   --c-ink: 0 0 0;
+  --c-on-ink: 255 255 255;
 }
 
 /* Light palette: accents are a shade deeper than the dark ones so text and thin lines keep their contrast on white. */
@@ -33,7 +34,9 @@
   --c-warn: 169 106 11;
   --c-bad: 204 52 58;
   --c-proxmox: 214 100 0;
-  --c-ink: 26 34 48;
+  /* Buttons: dark mode keeps solid black; light mode is a soft white button with a coloured outline and dark text. */
+  --c-ink: 255 255 255;
+  --c-on-ink: 26 34 48;
 }
 
 body {

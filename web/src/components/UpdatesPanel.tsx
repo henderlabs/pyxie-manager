@@ -14,7 +14,7 @@ const STEP_ICON: Record<UpdateStep["status"], { icon: string; cls: string }> = {
   pending: { icon: "○", cls: "text-muted" },
 };
 
-const BTN = "px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50 disabled:cursor-not-allowed";
+const BTN = "px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50 disabled:cursor-not-allowed";
 const BTN2 = "px-3 py-1.5 rounded text-sm border border-border text-muted hover:text-text disabled:opacity-50";
 
 export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) {

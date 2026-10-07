@@ -283,7 +283,7 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
           <button
             onClick={approve}
             disabled={approving}
-            className="px-2 py-1 rounded text-[11px] font-medium bg-ink text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
+            className="px-2 py-1 rounded text-[11px] font-medium bg-ink text-on-ink border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
           >
             {approving ? "Approving…" : "Approve & Execute"}
           </button>

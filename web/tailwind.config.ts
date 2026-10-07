@@ -22,6 +22,7 @@ const config: Config = {
         bad: c("bad"),
         proxmox: c("proxmox"),
         ink: c("ink"),
+        "on-ink": c("on-ink"),
       },
     },
   },

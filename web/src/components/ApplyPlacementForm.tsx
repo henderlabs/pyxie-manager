@@ -165,7 +165,7 @@ export default function ApplyPlacementForm({
         <button
           onClick={preview}
           disabled={pending}
-          className="px-2 py-1 rounded text-xs font-medium bg-ink text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
+          className="px-2 py-1 rounded text-xs font-medium bg-ink text-on-ink border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
         >
           {pending ? "Checking…" : "Apply…"}
         </button>
@@ -210,7 +210,7 @@ export default function ApplyPlacementForm({
             <button
               disabled={pending}
               onClick={confirmApply}
-              className="px-2 py-1 rounded bg-ink text-white border border-warn hover:bg-warn/10 disabled:opacity-50"
+              className="px-2 py-1 rounded bg-ink text-on-ink border border-warn hover:bg-warn/10 disabled:opacity-50"
             >
               {pending ? "Migrating…" : "Confirm & Migrate"}
             </button>

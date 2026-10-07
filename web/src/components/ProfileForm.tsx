@@ -127,7 +127,7 @@ export default function ProfileForm({ me }: { me: Me }) {
       <button
         type="submit"
         disabled={pending}
-        className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
+        className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-proxmox hover:bg-proxmox/10 disabled:opacity-50"
       >
         {pending ? "Saving…" : "Save changes"}
       </button>

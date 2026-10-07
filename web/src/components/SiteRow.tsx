@@ -52,7 +52,7 @@ export default function SiteRow({ site }: { site: Site }) {
         <button
           onClick={save}
           disabled={pending}
-          className="px-2 py-1 rounded text-xs font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="px-2 py-1 rounded text-xs font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           {pending ? "Saving…" : "Save"}
         </button>

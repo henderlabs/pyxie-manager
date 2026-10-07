@@ -22,7 +22,7 @@ export default async function NodeDetailPage({ params }: { params: { id: string 
         <PageHeader title={node.name} subtitle="Host · live status from PVE" icon={<ServerIcon className="w-5 h-5" />} />
         <Link
           href={`/operations/maintenance?node=${node.id}`}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-warn hover:bg-warn/10 shrink-0 mt-9"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-warn hover:bg-warn/10 shrink-0 mt-9"
           title="Open this node on the Maintenance page"
         >
           <WrenchIcon className="w-4 h-4" />

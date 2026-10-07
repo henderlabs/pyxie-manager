@@ -51,7 +51,7 @@ export default function PbsTargetForm({ siteId }: { siteId: string }) {
 
   if (!open) {
     return (
-      <button onClick={() => setOpen(true)} className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10">
+      <button onClick={() => setOpen(true)} className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10">
         + Add PBS Target
       </button>
     );
@@ -88,7 +88,7 @@ export default function PbsTargetForm({ siteId }: { siteId: string }) {
       </Field>
       {error && <div className="text-xs text-bad">{error}</div>}
       <div className="flex gap-2 pt-1">
-        <button type="submit" disabled={pending} className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50">
+        <button type="submit" disabled={pending} className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50">
           {pending ? "Saving…" : "Save target"}
         </button>
         <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded text-sm font-medium bg-surface text-muted border border-border">
