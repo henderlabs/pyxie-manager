@@ -66,12 +66,54 @@ Switching modes: edit `.env`, then `docker compose up -d pyxie-manager-caddy`.
 
 ## First-time setup on a host
 
-1. Install Docker (a human, as root): `sudo bash ops/docker/install-docker.sh`
-2. Add the Docker variables to `.env` (above). DNS for `PYXIE_HOSTNAME` must
-   resolve to this host.
-3. `docker compose build`
-4. Copy the existing database in (see below) or start empty with
-   `docker compose up -d` (migrations run when the API starts).
+A new installation takes about 15 minutes. Commands run as the login user on the VM unless marked root.
+
+1. **Get the code.** Use your own checkout directory; the in-app updater works from it later.
+   ```bash
+   sudo apt-get install -y git
+   git clone https://github.com/henderlabs/pyxie-manager.git ~/pyxie-manager
+   cd ~/pyxie-manager
+   ```
+   The repository is private today: if the clone asks for a login, you need read access first (a GitHub account that
+   was added to the repository, using a personal access token as the password, or a read-only deploy key; see step 1
+   of [`INSTALL.md`](INSTALL.md)).
+2. **Install Docker** (as root; this also puts your user in the `docker` group, so log out and back in afterwards):
+   ```bash
+   sudo bash ops/docker/install-docker.sh --add-user "$USER"
+   ```
+3. **Create `.env`** from the example and fill in the required values:
+   ```bash
+   cp .env.example .env && chmod 600 .env
+   ```
+   | Set | To |
+   |---|---|
+   | `PYXIE_HOSTNAME` | the DNS name users will type; it must resolve to this VM |
+   | `POSTGRES_PASSWORD` | a long random value, URL-safe characters only: `openssl rand -hex 24` |
+   | `PYXIE_CREDENTIAL_KEY` | `openssl rand -base64 32 \| tr '+/' '-_'`. **Back it up outside git and outside this VM:** it cannot be recovered, and without it every saved Proxmox token is unreadable |
+   | `PYXIE_TLS_MODE` | `internal` to start (see TLS modes above) |
+   | `TZ` | your time zone |
+
+   `DATABASE_URL` and `REDIS_URL` in the example can stay as they are (the containers override them). Never commit `.env` and never paste it into a ticket or chat.
+4. **Build and start:**
+   ```bash
+   docker compose build
+   docker compose up -d
+   docker compose ps          # wait until api and web show (healthy)
+   ```
+   Database migrations run by themselves when the API starts. To move an existing native install instead of
+   starting empty, see the next section.
+5. **Create your admin account.** Open `https://<PYXIE_HOSTNAME>`. With `internal` certificates the browser warns
+   until you trust Caddy's root certificate (see TLS modes). The first visit shows **Create the administrator account**; once one exists, that form is gone for good.
+6. **Connect your cluster.** The Dashboard shows a **New here?** banner linking to **Platform > Quick start**;
+   **Platform > Integrations** then walks you through eight steps (site, Proxmox accounts and tokens, cluster, admin
+   token, host wrapper, features, notifications, Run check). See [`setup-guide.md`](setup-guide.md) and
+   [`host-kit.md`](host-kit.md). PyXie never creates Proxmox accounts for you; the script builder prints the commands
+   for someone with root on a node to run.
+7. **Turn on updates and backups** (optional but recommended):
+   ```bash
+   bash ops/docker/install-updater.sh      # Settings > Updates, see updates.md
+   ```
+   and the cron backup lines under "Scheduled backups" below.
 
 ## Moving an existing native install
 

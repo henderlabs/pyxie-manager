@@ -1,5 +1,8 @@
 # Installing PyXie Manager
 
+> **Legacy path.** New installations should use the Docker stack: see [`docker-caddy.md`](docker-caddy.md). This
+> document is the older native systemd install and is kept for hosts that already run that way.
+
 Native install, no Docker, one Linux VM. This covers a fresh deployment end
 to end. Steps marked **[scripted]** are handled by `ops/install/`; steps
 marked **[manual]** genuinely can't be scripted (they depend on your

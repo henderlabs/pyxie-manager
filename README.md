@@ -15,14 +15,19 @@ one of those is gated.
 
 ## Installation
 
-See [`docs/INSTALL.md`](docs/INSTALL.md) for a from-scratch install on a
-fresh Ubuntu 24.04 VM, and [`docs/adding-a-host.md`](docs/adding-a-host.md)
-for onboarding a PVE cluster once the app is running.
+PyXie runs as one Docker stack (web, API, worker, PostgreSQL, Redis and Caddy for HTTPS) on a single Ubuntu 24.04 VM.
 
-To run the whole stack in Docker behind Caddy with HTTPS (self-signed to start,
-swappable for a real or ACME-issued certificate), see
-[`docs/docker-caddy.md`](docs/docker-caddy.md). The native systemd install
-remains supported; pick one per host.
+1. **Install it:** follow [`docs/docker-caddy.md`](docs/docker-caddy.md). It covers what you need first (VM size,
+   network, certificate choice) and a step-by-step first-time setup, from `git clone` to creating your admin account.
+2. **Connect your Proxmox cluster:** on first sign-in PyXie shows a **New here?** banner on the Dashboard that opens
+   **Platform > Quick start**, and **Platform > Integrations** walks the same setup in 8 steps with live status. Written
+   up in [`docs/setup-guide.md`](docs/setup-guide.md); installing the host wrapper on each node is in
+   [`docs/host-kit.md`](docs/host-kit.md) and [`docs/adding-a-host.md`](docs/adding-a-host.md).
+3. **Keep it current:** [`docs/updates.md`](docs/updates.md) (Settings > Updates) and
+   [`docs/patching-a-node.md`](docs/patching-a-node.md).
+
+The older native systemd install (no Docker) is still supported but is the legacy path:
+[`docs/INSTALL.md`](docs/INSTALL.md). Pick one per host.
 
 ## Screenshots
 
