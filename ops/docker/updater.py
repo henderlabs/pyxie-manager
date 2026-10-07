@@ -6,6 +6,7 @@ so the web app never gets any control over Docker.
     python3 updater.py poll               (cron, every minute) carry out update/request.json if the app wrote one
     python3 updater.py update 0.25.0 [--dry-run]   update now from the command line (--dry-run = safety checks only)
     python3 updater.py rollback           restore the version before the last update
+    python3 updater.py prune              clear old Docker build cache now (an update does this itself afterwards)
     python3 updater.py status             print what the app would show
     python3 updater.py test-mail          send a test announcement e-mail
 
@@ -189,6 +190,39 @@ def run(cmd: list[str], *, timeout: int = 300, input: str | None = None, check: 
 
 def compose(*args: str, **kw) -> str:
     return run(["docker", "compose", *args], **kw)
+
+
+# Every update builds new images next to the running ones, and BuildKit keeps the layers it built. After a successful
+# update or restore we cap the build cache at 3 GB (BuildKit drops the least recently used first, so the next update or
+# a restore still builds quickly). Cache that is shared with the running images is not counted as waste and is left
+# alone, so on a tidy server this frees nothing. Best effort: never fails an update.
+BUILD_CACHE_KEEP = "3gb"
+
+
+def parse_reclaimed(output: str) -> str | None:
+    """'Total:  5.2GB' from `docker builder prune`, else None."""
+    m = re.findall(r"^Total:\s+(\S+)", output or "", re.M)
+    return m[-1] if m else None
+
+
+def prune_build_cache() -> str:
+    attempts = [
+        ["docker", "builder", "prune", "-f", "--max-used-space", BUILD_CACHE_KEEP],
+        ["docker", "builder", "prune", "-f", "--filter", "until=72h"],  # older Docker without --max-used-space
+    ]
+    last = ""
+    for cmd in attempts:
+        try:
+            out = run(cmd, timeout=300)
+            freed = parse_reclaimed(out) or "0B"
+            msg = f"[cleanup] Docker build cache capped at {BUILD_CACHE_KEEP}; freed {freed}"
+            log(msg)
+            return msg
+        except Exception as e:  # noqa: BLE001
+            last = str(e)[:160]
+    msg = f"[cleanup] could not clear the Docker build cache (not a problem for the update): {last}"
+    log(msg)
+    return msg
 
 
 def psql(sql: str, **variables: str) -> str:
@@ -537,6 +571,7 @@ def do_update(version: str | None, requested_by: str = "cron", dry_run: bool = F
         notify("informational", f"PyXie updated to v{v} on {instance_name(env().get('PYXIE_HOSTNAME'))}",
                f"PyXie was updated from v{cur} to v{v}, requested by {requested_by}.\nDatabase backup taken first: {dump}\n{settings_url()}",
                subject_tag="update")
+        prune_build_cache()
         return True
     except Exception as e:  # noqa: BLE001
         msg = str(e)
@@ -598,6 +633,7 @@ def do_rollback(requested_by: str = "cron") -> bool:
         log(f"=== restored v{last['from_version']} ===")
         do_check(announce=False)
         notify("informational", f"PyXie restored to v{last['from_version']}", f"The update to v{cur} was undone, requested by {requested_by}.", subject_tag="update")
+        prune_build_cache()
         return True
     except Exception as e:  # noqa: BLE001
         log(f"[FAILED] {e}")
@@ -698,6 +734,8 @@ def main(argv: list[str]) -> int:
         return 0 if ok else 1
     elif mode == "rollback":
         return 0 if do_rollback(os.environ.get("USER", "cli")) else 1
+    elif mode == "prune":
+        print(prune_build_cache())
     elif mode == "status":
         print(json.dumps({"status": read_json(UPDATE_DIR / "status.json", {}), "state": read_json(UPDATE_DIR / "state.json", {}), "history": history()[-3:]}, indent=1))
     elif mode == "test-mail":

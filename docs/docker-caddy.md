@@ -19,8 +19,8 @@ unchanged. Pick one per host; don't run both against the same database.
   `python3`, `cron` and `curl` (standard on Ubuntu) are used by the installer, the in-app updater and the backup.
 - **Suggested size**: Small (up to 4 nodes / 50 guests) 2 vCPU, 4 GB, 40 GB; Medium (up to 16 nodes / 300 guests) 4 vCPU,
   8 GB, 80 GB; Large (more) 8 vCPU, 16 GB, 120 GB+. Disk is about 30 GB plus 0.1 GB per node or guest (400 days of
-  metrics is 30 to 60 MB per object, plus backups; each update leaves 9 to 15 GB of Docker build cache that
-  `docker builder prune` clears). Measured on a 4-node, 24-guest lab: the whole stack used about 0.5 GB RAM and almost
+  metrics is 30 to 60 MB per object, plus backups; Docker build cache can reach 15 GB where images are built by hand
+  repeatedly; the updater caps it at 3 GB after each update, and `docker builder prune` clears it any time). Measured on a 4-node, 24-guest lab: the whole stack used about 0.5 GB RAM and almost
   no CPU. On an 8-node, 130-guest production install: about 0.9 GB RAM, a 2.9 GB database, 22 GB of disk in use. The updater builds a new version beside
   the running one for about a minute, so keep at least 2 vCPU and 4 GB. Run check (Integrations, step 8) compares the VM
   with these numbers.
