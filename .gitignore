@@ -32,3 +32,6 @@ build/
 # TLS material for PYXIE_TLS_MODE=file
 certs/*
 !certs/.gitkeep
+
+# Host updater runtime state (see docs/updates.md)
+update/
