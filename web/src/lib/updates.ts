@@ -48,4 +48,5 @@ export type UpdatesResponse = {
   in_flight_operations: number;
   blocked_by: string[];
   rollback: UpdateHistoryEntry | null;
+  pending?: { action?: string; version?: string; requested_by?: string; requested_at?: string } | null;
 };

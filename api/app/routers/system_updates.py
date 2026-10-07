@@ -42,6 +42,14 @@ def _request(db: Session, user, payload: dict, event: str) -> dict:
     return {"status": "requested"}
 
 
+def _pending_request() -> dict | None:
+    for name in ("request.json", "request.processing"):
+        r = read_json(UPDATE_DIR / name, None)
+        if isinstance(r, dict):
+            return {k: r.get(k) for k in ("action", "version", "requested_by", "requested_at")}
+    return None
+
+
 @router.get("/updates")
 def update_status(db: Session = Depends(get_db), user=Depends(require_admin)):
     installed = UPDATE_DIR.is_dir() and (UPDATE_DIR / "status.json").exists()
@@ -61,6 +69,7 @@ def update_status(db: Session = Depends(get_db), user=Depends(require_admin)):
         "in_flight_operations": in_flight,
         "blocked_by": block_reasons(installed=installed, state=state, in_flight=in_flight, request_waiting=waiting),
         "rollback": rollback_target(history, current),
+        "pending": _pending_request(),
     }
 
 

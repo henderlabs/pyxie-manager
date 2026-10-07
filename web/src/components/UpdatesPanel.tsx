@@ -30,6 +30,17 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
 
   const running = data.state.state === "running";
 
+  // The click is acknowledged at once: "asked" bridges the gap until the updater starts a run (state.started_at changes).
+  const [asked, setAsked] = useState<{ action: "update" | "rollback"; version: string | null; at: number; stateStart: string | null } | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const pending = data.pending ?? null;
+  const askedLive = asked !== null && !running && data.state.started_at === asked.stateStart && now - asked.at < 3 * 60 * 1000;
+  const waiting = !running && (pending !== null || askedLive);
+  const waitAction = pending?.action ?? asked?.action ?? "update";
+  const waitVersion = pending?.version ?? asked?.version ?? null;
+  const waitSince = pending?.requested_at ? new Date(pending.requested_at).getTime() : asked?.at ?? now;
+  const askedStale = asked !== null && !running && !pending && data.state.started_at === asked.stateStart && now - asked.at >= 3 * 60 * 1000;
+
   const refresh = useCallback(async () => {
     try {
       const r = await fetch("/api/system/updates", { cache: "no-store" });
@@ -42,9 +53,15 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
   }, []);
 
   useEffect(() => {
-    const iv = setInterval(refresh, running || offline || checking ? 2000 : 20000);
+    const iv = setInterval(refresh, running || offline || checking || waiting ? 2000 : 20000);
     return () => clearInterval(iv);
-  }, [refresh, running, offline, checking]);
+  }, [refresh, running, offline, checking, waiting]);
+
+  useEffect(() => {
+    if (!waiting) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [waiting]);
 
   // A new version is running: reload so the page's own code is the new version too.
   useEffect(() => {
@@ -83,7 +100,7 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
   const latest = s.latest;
   const instance = s.instance || "this server";
   const canAct = data.installed && data.blocked_by.length === 0;
-  const showProgress = data.state.state != null;
+  const showProgress = data.state.state != null && !waiting;
   const rb = data.rollback;
 
   return (
@@ -135,7 +152,7 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
             <div className="flex justify-between"><dt className="text-muted">Running operations</dt><dd>{data.in_flight_operations === 0 ? <span className="text-good">none, safe to update</span> : <span className="text-warn">{data.in_flight_operations}</span>}</dd></div>
           </dl>
 
-          {s.update_available && !running && (
+          {s.update_available && !running && !waiting && (
             <div className="mt-4">
               {confirm !== "update" ? (
                 <div>
@@ -152,7 +169,7 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
                     <li>The site is unavailable for about 1 to 2 minutes while it restarts.</li>
                     <li>If the new version does not come up healthy, the previous version is restored automatically.</li>
                   </ul>
-                  <button type="button" className={BTN} disabled={busy} onClick={async () => { if (await post("apply", { version: latest })) setConfirm(null); }}>
+                  <button type="button" className={BTN} disabled={busy} onClick={async () => { if (await post("apply", { version: latest })) { setAsked({ action: "update", version: latest ?? null, at: Date.now(), stateStart: data.state.started_at ?? null }); setConfirm(null); } }}>
                     {busy ? "Starting…" : "Update now"}
                   </button>
                   <button type="button" className={`${BTN2} ml-2`} onClick={() => setConfirm(null)}>Cancel</button>
@@ -178,6 +195,25 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
           )}
         </Card>
       </div>
+
+      {waiting && (
+        <Card>
+          <CardTitle>
+            {waitAction === "rollback" ? "Restoring" : "Updating"}{waitVersion ? ` to v${waitVersion}` : ""}{" "}
+            <span className="normal-case"><StatusBadge status="running" /></span>
+          </CardTitle>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="inline-block w-3.5 h-3.5 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+            <span>Request sent. Waiting for the updater to start ({Math.max(0, Math.floor((now - waitSince) / 1000))}s)…</span>
+          </div>
+          <p className="mt-2 text-xs text-muted">The updater checks for requests every couple of seconds; the first step appears here as soon as it begins. You can leave this page open.</p>
+        </Card>
+      )}
+      {askedStale && (
+        <div className="px-3 py-2 rounded border border-warn/40 bg-warn/10 text-warn text-sm">
+          The updater has not started the request after 3 minutes. Check that its cron job is installed (docs/updates.md) and look at update/update.log on the server.
+        </div>
+      )}
 
       {showProgress && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
@@ -244,7 +280,7 @@ export default function UpdatesPanel({ initial }: { initial: UpdatesResponse }) 
                     : "That update did not change the database, so only the program is switched back; no data is touched."}{" "}
                   The site is unavailable for about 1 to 2 minutes.
                 </div>
-                <button type="button" className={BTN} disabled={busy} onClick={async () => { if (await post("rollback")) setConfirm(null); }}>
+                <button type="button" className={BTN} disabled={busy} onClick={async () => { if (await post("rollback")) { setAsked({ action: "rollback", version: rb.from_version, at: Date.now(), stateStart: data.state.started_at ?? null }); setConfirm(null); } }}>
                   {busy ? "Starting…" : `Restore v${rb.from_version}`}
                 </button>
                 <button type="button" className={`${BTN2} ml-2`} onClick={() => setConfirm(null)}>Cancel</button>
