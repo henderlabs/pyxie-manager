@@ -217,7 +217,7 @@ class CredentialOut(OrmModel):
 
 
 class CredentialCreate(BaseModel):
-    slot_name: str  # inventory | maintenance | administrative
+    slot_name: str  # inventory | maintenance | administrative | console
     token_user: str
     token_id: str
     token_secret: str
@@ -274,6 +274,7 @@ class AppSettingsOut(OrmModel):
     rightsizing_mem_peak_target_pct: int
     rightsizing_round_vcpu_even: bool
     pve_mutations_enabled: bool
+    console_enabled: bool = False
     smtp_enabled: bool
     smtp_host: Optional[str] = None
     smtp_port: int
@@ -296,6 +297,7 @@ class AppSettingsUpdate(BaseModel):
     rightsizing_mem_peak_target_pct: Optional[int] = None
     rightsizing_round_vcpu_even: Optional[bool] = None
     pve_mutations_enabled: Optional[bool] = None
+    console_enabled: Optional[bool] = None
     smtp_enabled: Optional[bool] = None
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None

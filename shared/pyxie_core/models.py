@@ -467,6 +467,8 @@ class AppSettings(Base):
     # mutation to actually happen. Used to be an env var requiring a
     # redeploy to change; moved here so it's a real Settings-page control.
     pve_mutations_enabled = Column(Boolean, nullable=False, default=False)
+    # Kill switch for the embedded VM console (console_tickets / routers/console.py); off by default.
+    console_enabled = Column(Boolean, nullable=False, default=False)
     # Rightsizing's peak-safety check sizes a workload so its observed peak
     # usage lands at roughly this % of the new allocation -- see
     # rightsizing.py. Memory can be set stricter than CPU (a tight memory

@@ -292,6 +292,7 @@ export type AppSettings = {
   rightsizing_mem_peak_target_pct: number;
   rightsizing_round_vcpu_even: boolean;
   pve_mutations_enabled: boolean;
+  console_enabled: boolean;
   smtp_enabled: boolean;
   smtp_host: string | null;
   smtp_port: number;

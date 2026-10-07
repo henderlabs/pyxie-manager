@@ -469,3 +469,60 @@ class PveMaintenanceClient:
         if not _mutations_enabled():
             raise MutationsDisabledError(_disabled_message("reboot"))
         return self._request("POST", f"/nodes/{node}/status", data={"command": "reboot"})
+
+
+class PveConsoleClient:
+    """The one non-mutating POST PyXie makes: PVE's `vncproxy`, which opens a short-lived
+    console session on the node (it changes nothing about the guest or the cluster).
+    Lives here so "every POST to PVE" stays greppable in one module. Uses the dedicated
+    'console' credential slot (VM.Console only) and is gated by the Settings console switch
+    in the API router, not by PVE_MUTATIONS."""
+
+    def __init__(self, creds: PveCredentials, timeout: float = 15.0, *, transport=None):
+        self._creds = creds
+        self._pool = _EndpointPool(creds, timeout, transport)
+
+    def close(self):
+        self._pool.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
+
+    @property
+    def active_host(self) -> str:
+        return self._pool.active_host
+
+    def vncproxy(self, node: str, vmid: int, kind: str) -> dict:
+        """Returns {port, vncticket, password, host, api_port}. QEMU: `ticket` authorises the
+        websocket and `password` (generate-password) is the VNC password. LXC has no separate
+        password: the ticket is both."""
+        path = f"/nodes/{node}/{'qemu' if kind == 'vm' else 'lxc'}/{int(vmid)}/vncproxy"
+        form = {"websocket": 1}
+        if kind == "vm":
+            form["generate-password"] = 1
+        try:
+            resp = self._pool.request("POST", path, data=form)
+        except httpx.ConnectError as exc:
+            if "certificate" in str(exc).lower() or "SSL" in str(exc):
+                raise PveTlsError(str(exc)) from exc
+            raise PveConnectionError(str(exc)) from exc
+        except httpx.TimeoutException as exc:
+            raise PveConnectionError(f"timeout: {exc}") from exc
+        except httpx.TransportError as exc:
+            raise PveConnectionError(str(exc)) from exc
+        if resp.status_code in (401, 403):
+            raise PveAuthError(f"{resp.status_code}: {resp.text[:300]}")
+        resp.raise_for_status()
+        data = resp.json().get("data") or {}
+        if "port" not in data or "ticket" not in data:
+            raise PveConnectionError("PVE vncproxy returned no port/ticket")
+        return {
+            "port": int(data["port"]),
+            "vncticket": data["ticket"],
+            "password": data.get("password") or data["ticket"],
+            "host": self._pool.active_host,
+            "api_port": self._creds.api_port,
+        }

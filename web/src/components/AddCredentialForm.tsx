@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useMe } from "@/lib/useMe";
 
-const ALL_SLOTS = ["inventory", "maintenance", "administrative"];
+const ALL_SLOTS = ["inventory", "maintenance", "administrative", "console"];
 
 export default function AddCredentialForm({ targetId, existingSlots }: { targetId: string; existingSlots: string[] }) {
   const router = useRouter();
@@ -80,6 +80,8 @@ export default function AddCredentialForm({ targetId, existingSlots }: { targetI
           ? "Read-only -- only used to discover and monitor this target. Same purpose as the token on the Integrations page."
           : form.slot_name === "maintenance"
           ? "Required for any write action (migration, maintenance, rightsizing apply, etc). Do not use root@pam."
+          : form.slot_name === "console"
+          ? "Only for the embedded VM console: a token holding just VM.Console (plus VM.Audit) so a leak cannot power off or migrate anything."
           : "Full administrative-scope token, if this deployment needs one beyond maintenance."}
       </div>
       <div className="grid grid-cols-2 gap-3">

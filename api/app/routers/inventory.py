@@ -809,6 +809,7 @@ def _settings_snapshot(row: AppSettings) -> dict:
         "rightsizing_mem_peak_target_pct": row.rightsizing_mem_peak_target_pct,
         "rightsizing_round_vcpu_even": row.rightsizing_round_vcpu_even,
         "pve_mutations_enabled": row.pve_mutations_enabled,
+        "console_enabled": row.console_enabled,
         "smtp_enabled": row.smtp_enabled,
         "smtp_host": row.smtp_host,
         "smtp_port": row.smtp_port,
@@ -851,6 +852,18 @@ def update_settings(payload: schemas.AppSettingsUpdate, db: Session = Depends(ge
     # could just as easily be a timezone tweak. Separate from the write
     # path's own re-check at call time; this only records the toggle
     # itself.
+    if before["console_enabled"] != after["console_enabled"]:
+        write_audit_event(
+            db,
+            event_category="settings",
+            event_type="settings.console_enabled_changed",
+            actor="user",
+            actor_type="user",
+            result="success",
+            severity="warning" if after["console_enabled"] else "info",
+            state_before={"console_enabled": before["console_enabled"]},
+            state_after={"console_enabled": after["console_enabled"]},
+        )
     if before["pve_mutations_enabled"] != after["pve_mutations_enabled"]:
         write_audit_event(
             db,
