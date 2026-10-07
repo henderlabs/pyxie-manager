@@ -64,7 +64,9 @@ type State = "idle" | "connecting" | "connected" | "ended";
  * tab is open; leaving the tab disconnects. The 15 min idle limit is enforced here (VNC itself
  * never goes quiet on the wire); the 4 h cap and session checks are enforced server-side. */
 export default function ConsoleViewer({ workloadId, info }: { workloadId: string; info: ConsoleInfo | null }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const screenRef = useRef<HTMLDivElement>(null);
+  const [isFs, setIsFs] = useState(false);
   const rfbRef = useRef<any>(null);
   const idleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [state, setState] = useState<State>("idle");
@@ -95,6 +97,17 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
       if (saved && SIZES.some((z) => z.key === saved)) setSize(saved);
     } catch { /* storage unavailable */ }
   }, []);
+
+  useEffect(() => {
+    const onChange = () => setIsFs(document.fullscreenElement === wrapRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else wrapRef.current?.requestFullscreen?.();
+  }
 
   function pickSize(key: string) {
     setSize(key);
@@ -186,7 +199,7 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
   const canEmbed = info?.embedded === "ready";
 
   return (
-    <div className="space-y-2">
+    <div ref={wrapRef} className={isFs ? "space-y-2 bg-canvas p-3 flex flex-col h-screen overflow-auto" : "space-y-2"}>
       <div className="flex items-center gap-2 flex-wrap text-sm">
         {!live && (
           <button type="button" onClick={connect} disabled={!canEmbed}
@@ -207,7 +220,7 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
                 </button>
               ))}
             </span>
-            <button type="button" onClick={() => screenRef.current?.requestFullscreen?.()} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Full screen</button>
+            <button type="button" onClick={toggleFullscreen} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">{isFs ? "Exit full screen" : "Full screen"}</button>
           </>
         )}
         {info && (
@@ -246,7 +259,7 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
         onKeyDownCapture={bumpIdle}
         onMouseDownCapture={bumpIdle}
         onMouseMoveCapture={() => { if (state === "connected") bumpIdle(); }}
-        style={live ? { height: SIZES.find((z) => z.key === size)?.height, minHeight: 240, minWidth: 320, maxWidth: "100%", resize: "both" } : undefined}
+        style={live ? (isFs ? { flex: "1 1 0", minHeight: 240 } : { height: SIZES.find((z) => z.key === size)?.height, minHeight: 240, minWidth: 320, maxWidth: "100%", resize: "both" }) : undefined}
         className={live ? "w-full bg-black rounded border border-border overflow-hidden" : "hidden"}
       />
       <p className="text-[11px] text-muted">
