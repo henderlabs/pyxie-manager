@@ -33,17 +33,30 @@ The older native systemd install (no Docker) is still supported but is the legac
 
 ## Screenshots
 
+Illustrative mockups; the data shown is fictional.
+
 **Dashboard** -- cluster resource usage, environment health, and what needs attention right now:
+
+![Dashboard](docs/screenshots/mockup-dashboard.png)
+
+**Rightsizing** -- evidence-backed sizing suggestions, triaged with acknowledge and dismiss:
+
+![Rightsizing](docs/screenshots/mockup-rightsizing.png)
+
+**Maintenance** -- node evacuation, host updates and reboots, every action previewed and approved before it runs:
+
+![Maintenance](docs/screenshots/mockup-maintenance.png)
+
+<details>
+<summary>Screenshots of the running app (demo data)</summary>
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
-**Rightsizing** -- per-workload observation status with evidence-backed sizing suggestions:
-
 ![Rightsizing](docs/screenshots/rightsizing.png)
 
-**Maintenance** -- node evacuation, guest lifecycle, host updates, and full maintenance runs, every action previewed before approval:
-
 ![Maintenance](docs/screenshots/maintenance.png)
+
+</details>
 
 ## Versioning
 
