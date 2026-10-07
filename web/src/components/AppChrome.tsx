@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import NavProgress from "@/components/NavProgress";
+import UpdateBanner from "@/components/UpdateBanner";
 import Sidebar from "@/components/Sidebar";
 import TaskPanel, { PANEL_WIDTH_PX } from "@/components/TaskPanel";
 
@@ -22,6 +23,7 @@ export default function AppChrome({ children, version, instance }: { children: R
         className="flex-1 min-w-0 p-6 transition-[margin-right] duration-200 ease-out"
         style={{ marginRight: showTasks ? PANEL_WIDTH_PX : 0 }}
       >
+        <UpdateBanner />
         {children}
       </main>
       {showTasks && <TaskPanel open setOpen={() => {}} pinned setPinned={() => {}} locked />}
