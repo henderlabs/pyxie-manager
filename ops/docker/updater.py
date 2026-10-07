@@ -621,6 +621,7 @@ def poll() -> None:
         return
     work = UPDATE_DIR / "request.processing"
     os.replace(req_path, work)
+    log("[poll] request picked up")
     try:
         req = json.loads(work.read_text())
     except Exception:  # noqa: BLE001
@@ -642,6 +643,40 @@ def poll() -> None:
         work.unlink(missing_ok=True)
 
 
+POLL_WINDOW_SECONDS = 55
+POLL_INTERVAL_SECONDS = 2
+
+
+def _try_lock():
+    lock = open(UPDATE_DIR / "lock", "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        lock.close()
+        return None
+    return lock
+
+
+def poll_window() -> None:
+    """cron starts this every minute. Instead of looking once, keep looking for ~55 s so a request
+    from Settings > Updates is picked up within a couple of seconds. The lock is held only for each
+    look (never while idle), so 'check' and other runs can still take it between looks."""
+    deadline = time.monotonic() + POLL_WINDOW_SECONDS
+    while True:
+        lock = _try_lock()
+        if lock is not None:
+            try:
+                had_request = (UPDATE_DIR / "request.json").exists()
+                poll()
+            finally:
+                lock.close()
+            if had_request:
+                return  # that run can take minutes; the next cron tick starts a fresh window
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(POLL_INTERVAL_SECONDS)
+
+
 def main(argv: list[str]) -> int:
     UPDATE_DIR.mkdir(parents=True, exist_ok=True)
     try:
@@ -649,6 +684,9 @@ def main(argv: list[str]) -> int:
     except OSError:
         pass
     mode = argv[1] if len(argv) > 1 else "poll"
+    if mode == "poll":
+        poll_window()
+        return 0
     lock = open(UPDATE_DIR / "lock", "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
