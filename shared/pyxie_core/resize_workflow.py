@@ -14,6 +14,7 @@ response) -> verify -> audit.
 
 from .credentials import load_pve_credentials
 from .discovery import build_pve_client
+from .labels import vm_label
 from .locks import LockContention, acquire_lock, release_locks_for_operation
 from .models import Cluster, Node, Operation, PveTarget, Workload
 from .operations_engine import (
@@ -129,7 +130,7 @@ def execute_resize(db, operation_id) -> Operation:
             live = next((v for v in live_vms if int(v.get("vmid", -1)) == workload.vmid), None)
             if live is None:
                 release_locks_for_operation(db, op.id)
-                return fail_operation(db, op, error=f"VM {workload.vmid} is no longer listed on {node.name}")
+                return fail_operation(db, op, error=f"{vm_label(workload)} is no longer listed on {node.name}")
             # was_running was captured at dry-run time and is what governs
             # whether we power-cycle at all -- if live state has since
             # DIVERGED from that (someone started/stopped it by hand in the
