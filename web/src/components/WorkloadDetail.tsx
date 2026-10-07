@@ -458,7 +458,7 @@ export default function WorkloadDetail({
             {st?.uptime ? ` · uptime ${formatUptime(st.uptime)}` : ""}
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap mt-9">
           <WorkloadLifecycleButtons
             workloadId={w.id}
             workloadName={name}
