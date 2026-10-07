@@ -631,7 +631,7 @@ def poll() -> None:
         action = req.get("action")
         who = str(req.get("requested_by") or "unknown")[:80]
         if action == "check":
-            do_check(announce=False)
+            do_check(announce=True)  # once per version (announced.json), so a manual check can e-mail it too
         elif action == "update":
             do_update(req.get("version"), who)
         elif action == "rollback":

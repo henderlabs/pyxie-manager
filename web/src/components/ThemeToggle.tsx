@@ -39,7 +39,7 @@ const OPTIONS: { value: Pref; label: string; icon: React.ReactNode }[] = [
 ];
 
 /** Light / Dark / Match this computer. Saved per browser; with nothing saved the app stays dark. "Match this computer" follows its setting live. */
-export default function ThemeToggle() {
+export default function ThemeToggle({ bare = false }: { bare?: boolean }) {
   const [pref, setPref] = useState<Pref>("dark");
 
   useEffect(() => {
@@ -70,7 +70,7 @@ export default function ThemeToggle() {
   }
 
   return (
-    <div className="inline-flex rounded border border-border overflow-hidden" role="radiogroup" aria-label="Colour theme">
+    <div className={`inline-flex rounded overflow-hidden ${bare ? "" : "border border-border"}`} role="radiogroup" aria-label="Colour theme">
       {OPTIONS.map((o) => (
         <button
           key={o.value}
