@@ -2,77 +2,10 @@
 
 import { useMemo, useState } from "react";
 import { useMe } from "@/lib/useMe";
+import { hostScript, pveScript, TOKEN_FILE } from "@/lib/hostScripts";
+import type { ConsoleOpt, Link } from "@/lib/hostScripts";
 
 type Target = { id: string; name: string };
-type Link = { path: string; sha256: string; expires_in: number; kit_version: string; wrapper_version: string };
-type ConsoleOpt = "none" | "maintenance" | "separate";
-
-const MAINT_PRIVS = "Datastore.Allocate,Datastore.AllocateSpace,Sys.Audit,Sys.Modify,Sys.PowerMgmt,VM.Audit,VM.Config.CPU,VM.Config.Disk,VM.Config.Memory,VM.Migrate,VM.PowerMgmt";
-
-function pveScript(o: { roUser: string; adminUser: string; consoleUser: string; inventory: boolean; maintenance: boolean; console: ConsoleOpt }): string {
-  const L: string[] = [
-    "#!/bin/bash",
-    "# PyXie Manager: Proxmox VE service accounts, roles and API tokens.",
-    "# Run ONCE, as root, on any node of the cluster. Safe to re-run: existing users, roles and tokens are left alone.",
-    "# Token secrets are shown by PVE exactly once, when a token is created: copy each into PyXie (Platform > Credentials).",
-    "set -euo pipefail",
-    'command -v pveum >/dev/null || { echo "pveum not found: run this on a Proxmox VE node" >&2; exit 1; }',
-    "ensure_user() { # ensure_user <user> <comment>",
-    '  pveum user add "$1" --comment "$2" 2>/dev/null || echo "user $1 already exists"',
-    "}",
-    'have_token() { pveum user token list "$1" --output-format json 2>/dev/null | grep -Eq "\\"tokenid\\": *\\"$2\\""; }',
-    "add_token() { # add_token <user> <token-id> <comment>",
-    '  if have_token "$1" "$2"; then echo "token $1!$2 already exists"; else pveum user token add "$1" "$2" --privsep 1 --comment "$3"; fi',
-    "}",
-    "grant() { # grant <path> <role> <user> <token-id>: the user AND the token need the grant (privilege separation)",
-    '  pveum acl modify "$1" --roles "$2" --users "$3"',
-    '  pveum acl modify "$1" --roles "$2" --tokens "$3!$4"',
-    "}",
-  ];
-  const users: string[] = [];
-  if (o.inventory) {
-    users.push(o.roUser);
-    L.push("", "# Read-only account: inventory token (built-in PVEAuditor role)", `ensure_user '${o.roUser}' "PyXie read-only (inventory)"`, `add_token '${o.roUser}' inventory "PyXie inventory (read-only)"`, `grant / PVEAuditor '${o.roUser}' inventory`);
-  }
-  if (o.maintenance) {
-    users.push(o.adminUser);
-    const privs = MAINT_PRIVS + (o.console === "maintenance" ? ",VM.Console" : "");
-    L.push(
-      "",
-      `# Admin account: maintenance token (migrations, power, host reboots${o.console === "maintenance" ? ", embedded console" : ""})`,
-      `ensure_user '${o.adminUser}' "PyXie admin (maintenance)"`,
-      `pveum role add PyXieAdmin --privs "${privs}" 2>/dev/null || pveum role modify PyXieAdmin --privs "${privs}"`,
-      `add_token '${o.adminUser}' maintenance "PyXie maintenance (admin)"`,
-      `grant / PyXieAdmin '${o.adminUser}' maintenance`,
-    );
-  }
-  if (o.console === "separate") {
-    users.push(o.consoleUser);
-    L.push("", "# Console account: its own token, VM.Console only (built-in role PVEVMConsole)", `ensure_user '${o.consoleUser}' "PyXie embedded console"`, `add_token '${o.consoleUser}' console "PyXie embedded console"`, `grant /vms PVEVMConsole '${o.consoleUser}' console`);
-  }
-  L.push("", 'echo ""', 'echo "Done. Tokens (secrets are NOT shown again):"');
-  for (const u of users) L.push(`pveum user token list '${u}'`);
-  return L.join("\n") + "\n";
-}
-
-function hostScript(o: { origin: string; link: Link; mode: "install" | "uninstall"; insecure: boolean }): string {
-  const url = `${o.origin}${o.link.path}`;
-  return [
-    "#!/bin/bash",
-    `# PyXie Manager: ${o.mode === "install" ? "install or upgrade" : "remove"} the host-maintenance wrapper on THIS node (kit ${o.link.kit_version}, wrapper ${o.link.wrapper_version}).`,
-    "# Run as root on EVERY Proxmox node you want PyXie to patch and reboot. Safe to re-run.",
-    `# The download link expires in ${Math.round(o.link.expires_in / 60)} minutes. The checksum below comes from PyXie: the script refuses to run if the file differs.`,
-    "set -euo pipefail",
-    '[ "$(id -u)" -eq 0 ] || { echo "Run as root" >&2; exit 1; }',
-    'F="$(mktemp /tmp/pyxie-host-kit.XXXXXX)"',
-    "trap 'rm -f \"$F\"' EXIT",
-    `curl -fsS${o.insecure ? "k" : ""} -o "$F" '${url}'`,
-    `echo "${o.link.sha256}  $F" | sha256sum -c -`,
-    `bash "$F"${o.mode === "uninstall" ? " --uninstall" : ""}`,
-    "",
-  ].join("\n");
-}
-
 function download(name: string, text: string) {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([text], { type: "text/x-shellscript" }));
@@ -163,7 +96,8 @@ function AfterGenerate({ targetId, sha256, mode }: { targetId: string; sha256: s
     mode === "install" ? "bash install.sh" : "bash uninstall.sh",
   ].join("\n");
   const pasteCmds = [
-    "# On the node, as root: paste the script above into a file, then run it",
+    "# On the node, as root: paste the script above straight into the shell (it is paste-safe),",
+    "# or save it to a file and run it:",
     "nano pyxie-host-setup.sh        # paste, then Ctrl-O, Enter, Ctrl-X",
     "bash pyxie-host-setup.sh",
   ].join("\n");
@@ -357,7 +291,7 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
 
       {generated && (
         <div className="space-y-3">
-          {pve && <ScriptBox title="Script 1: Proxmox accounts (run once, as root, on any node)" hint="Copy it to a node and run it with bash. Copy each token secret it prints into PyXie; PVE shows it only once." text={pve} filename="pyxie-pve-setup.sh" />}
+          {pve && <ScriptBox title="Script 1: Proxmox accounts (run once, as root, on any node)" hint={`Paste it into a root shell on any node (it is safe to paste: an error prints "STOPPED at line ..." and cannot close your session). Proxmox shows each token secret only once, so the output is also saved to ${TOKEN_FILE}: copy the secrets from there into PyXie, then delete the file.`} text={pve} filename="pyxie-pve-setup.sh" />}
           {hostMode !== "none" && link && (
             <ScriptBox
               title={`Script ${pve ? 2 : 1}: host wrapper (${hostMode === "install" ? "install or upgrade" : "remove"}, run as root on every node)`}

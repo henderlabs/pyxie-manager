@@ -20,6 +20,20 @@ const PRIVS: [string, string][] = [
   ["VM.Console (optional)", "The embedded console. Added only if you choose it in the script builder."],
 ];
 
+const NAMES: [string, string, string][] = [
+  ["Proxmox account", "pyxie-ro@pve", "The read-only account. Holds the inventory token."],
+  ["Proxmox token", "pyxie-ro@pve!inventory", "Token ID inventory. PyXie credential purpose: inventory."],
+  ["Proxmox role", "PVEAuditor", "Built into Proxmox. Granted at / to the read-only user and its token."],
+  ["Proxmox account", "pyxie-admin@pve", "The write-capable account. Holds the maintenance token."],
+  ["Proxmox token", "pyxie-admin@pve!maintenance", "Token ID maintenance. PyXie credential purpose: maintenance (admin)."],
+  ["Proxmox role", "PyXieAdmin", "Custom role you create (the script does it): the 12 privileges listed above. Granted at / to the admin user and its token."],
+  ["Proxmox account", "pyxie-console@pve", "Optional: only if you choose a separate console token."],
+  ["Proxmox role", "PVEVMConsole", "Built into Proxmox. Only for that optional console token, at /vms."],
+  ["Each host", "pyxie-hostmaint", "The SSH identity PyXie uses to patch and reboot a node (no shell, seven fixed commands)."],
+  ["Each host", "/usr/local/sbin/pyxie-maint", "The wrapper that identity may run. Its sudoers entry is /etc/sudoers.d/pyxie-maint."],
+  ["On the node", "/root/pyxie-tokens.txt", "Where the account script saves the token secrets (root only). Copy them, then delete it with shred -u."],
+]
+
 function chip(done: boolean | undefined, doneText: string, todoText: string) {
   return (
     <span className={`text-[11px] px-2 py-0.5 rounded ${done ? "bg-good/15 text-good" : "bg-surface2 text-muted"}`}>
@@ -103,8 +117,8 @@ export default async function QuickStartPage() {
         <CardTitle>The 6 steps</CardTitle>
         <ol className="space-y-2 text-sm text-text">
           <Row n={1} title="Add a site" body="A location or grouping, such as Lab. Setup guide step 1." />
-          <Row n={2} title="Create both accounts in Proxmox" body="Easiest: open the script builder on the Integrations page, tick the inventory and maintenance tokens, copy the script to any Proxmox node and run it as root. It is safe to re-run. Prefer clicking? See Doing it by hand, below." />
-          <Row n={3} title="Save the two token secrets" body="Proxmox shows each secret exactly once, when the token is created. Copy them somewhere safe right away; if you lose one, regenerate it in Proxmox." />
+          <Row n={2} title="Create both accounts in Proxmox" body="Easiest: open the script builder on the Integrations page, tick the inventory and maintenance tokens, and paste the script into a root shell on any Proxmox node. It is safe to paste and safe to re-run; if something fails it says STOPPED at line N. Prefer clicking? See Doing it by hand, below." />
+          <Row n={3} title="Save the two token secrets" body="Proxmox shows each secret exactly once, when the token is created. The script saves its output, secrets included, to /root/pyxie-tokens.txt (root only): copy the two secrets from it, then delete it with shred -u. If you lose a secret, regenerate it: Datacenter > Permissions > API Tokens > select the token > Regenerate Secret." />
           <Row n={4} title="Connect the cluster with token 1" body="Integrations > Add PVE target: the hostname or IP of any one node, Verify TLS off for a stock self-signed certificate, token user, token ID and secret. Click Test connection, then Sync now." />
           <Row n={5} title="Add token 2" body="Credentials > Add credential purpose > maintenance (admin). Click Test connection on that row. The target-level test only checks token 1." />
           <Row n={6} title="Connect each host and switch features on" body="To apply updates and reboot hosts: generate the host key pair, run the host script from the builder on every node, pin each node's SSH host key. Then, when you are ready, Settings > Allow PyXie to write to Proxmox VE." />
@@ -114,6 +128,23 @@ export default async function QuickStartPage() {
           <Link href="/platform/credentials" className="px-3 py-1.5 rounded border border-border text-sm hover:bg-surface2">Credentials</Link>
           <Link href="/platform/settings" className="px-3 py-1.5 rounded border border-border text-sm hover:bg-surface2">Settings</Link>
         </div>
+      </Card>
+
+      <Card className="mb-4">
+        <CardTitle>Names used in this guide</CardTitle>
+        <p className="text-xs text-muted mb-2">Everything the setup creates, in one place. The names are only labels: pick your own in the script builder if you prefer.</p>
+        <table className="w-full text-xs">
+          <thead><tr className="text-left text-muted"><th className="py-1 pr-3">Where</th><th className="pr-3">Name</th><th>What it is</th></tr></thead>
+          <tbody>
+            {NAMES.map(([where, name, what]) => (
+              <tr key={where + name} className="border-t border-border align-top">
+                <td className="py-1.5 pr-3 text-muted whitespace-nowrap">{where}</td>
+                <td className="pr-3 font-mono whitespace-nowrap text-text">{name}</td>
+                <td className="py-1.5 text-muted">{what}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </Card>
 
       <Card className="mb-4">
