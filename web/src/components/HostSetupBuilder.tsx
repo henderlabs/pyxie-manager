@@ -138,6 +138,7 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [generated, setGenerated] = useState(false);
+  const [needKey, setNeedKey] = useState(false);
 
   const okName = (u: string) => /^[A-Za-z0-9._-]+@pve$/.test(u);
   const effConsole: ConsoleOpt = consoleOpt === "maintenance" && !maintenance ? "none" : consoleOpt;
@@ -157,7 +158,11 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
       if (hostMode !== "none") {
         const r = await fetch(`/api/pve-targets/${targetId}/host-kit/link`, { method: "POST" });
         const d = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
+        if (!r.ok) {
+          if (r.status === 409 && /key pair|host-maintenance credential/i.test(d.error || "")) setNeedKey(true);
+          throw new Error(r.status === 409 ? "The host key pair has not been generated yet." : d.error || `Request failed (${r.status})`);
+        }
+        setNeedKey(false);
         setLink(d);
       } else {
         setLink(null);
@@ -168,6 +173,23 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function generateKeyThenRetry() {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/pve-targets/${targetId}/host-maintenance-credential/generate`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
+      setNeedKey(false);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+      return;
+    }
+    setBusy(false);
+    await generate();
   }
 
   if (!isAdmin) return <p className="text-sm text-muted">Admin accounts can generate host scripts.</p>;
@@ -233,6 +255,10 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
           {busy ? "Generating…" : "Generate scripts"}
         </button>
         {error && <span className="text-sm text-bad">{error}</span>}
+        {needKey && (
+          <button type="button" onClick={generateKeyThenRetry} disabled={busy}
+            className="px-3 py-1.5 rounded text-sm border border-warn hover:bg-warn/10 disabled:opacity-50">Generate the host key pair now</button>
+        )}
       </div>
 
       {generated && (

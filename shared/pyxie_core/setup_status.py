@@ -77,27 +77,48 @@ def build_steps(inp: dict) -> list[dict]:
             "Needed for migrations, power actions and reboots. Add the Maintenance (Admin) token on the target, then Test connection.",
             action={"label": "Open credentials", "href": "/platform/credentials"})
 
-    # 5. hosts
-    hm = any(h.get("has_cred") for h in inp.get("hostmaint", []))
+    # 5. hosts: three sub-steps, in the order they must be done
+    cred_targets = {h.get("target_id") for h in inp.get("hostmaint", []) if h.get("has_cred")}
+    missing_key = [t for t in targets if t["id"] not in cred_targets]
     items = []
     ready = 0
+    wrapper_ok = 0
+    pinned = 0
     for n in nodes:
         ok, why = _node_ready(n, expected)
         ready += ok
+        pinned += bool(n.get("pinned"))
+        wrapper_ok += bool(n.get("wrapper_version")) and not host_kit.is_outdated(n.get("wrapper_version"), expected)
         items.append({"name": n["name"], "ok": ok, "detail": why})
+    n_nodes = len(nodes)
+    key_done = bool(targets) and not missing_key
+    wrap_done = bool(n_nodes) and wrapper_ok == n_nodes
+    pin_done = bool(n_nodes) and pinned == n_nodes
+    substeps = [
+        {"key": "keypair", "label": "Generate the host key pair (once per cluster)",
+         "state": "done" if key_done else ("waiting" if not cluster_ok else "todo"),
+         "detail": "Done." if key_done else "PyXie creates an SSH key pair; the host script carries only its public half.",
+         "action": None if key_done or not cluster_ok else {"kind": "generate_keypair", "target_id": missing_key[0]["id"] if missing_key else None, "label": "Generate the key pair"}},
+        {"key": "script", "label": "Run the host script on every node",
+         "state": "done" if wrap_done else ("waiting" if not key_done else "todo"),
+         "detail": f"{wrapper_ok} of {n_nodes} nodes have the current wrapper." if key_done else "Needs the key pair first.",
+         "action": None if wrap_done or not key_done else {"kind": "anchor", "anchor": "builder", "label": "Open the host script builder"}},
+        {"key": "pin", "label": "Pin each node's SSH host key (compare the fingerprint)",
+         "state": "done" if pin_done else ("waiting" if not key_done else "todo"),
+         "detail": f"{pinned} of {n_nodes} nodes pinned." if key_done else "Needs the key pair first.",
+         "action": None if pin_done or not key_done else {"kind": "href", "href": "/platform/credentials", "label": "Pin host keys (Credentials page)"}},
+    ]
     if not cluster_ok:
-        add("hosts", "Connect each host for patching", "waiting", "Needs the cluster connected first.", items=items,
-            action={"label": "Open credentials", "href": "/platform/credentials"})
-    elif not hm:
+        add("hosts", "Connect each host for patching", "waiting", "Needs the cluster connected first.", items=items, substeps=substeps)
+    elif key_done and wrap_done and pin_done:
+        add("hosts", "Connect each host for patching", "done", f"All {n_nodes} nodes ready.", items=items, substeps=substeps)
+    elif not key_done:
         add("hosts", "Connect each host for patching", "todo",
-            "a) Generate the host key pair once (Credentials page). b) On every node, run the host script from the builder. c) Pin each node's SSH host key after checking its fingerprint.",
-            items=items, action={"label": "Open credentials", "href": "/platform/credentials"})
-    elif nodes and ready == len(nodes):
-        add("hosts", "Connect each host for patching", "done", f"All {len(nodes)} nodes ready.", items=items, action={"label": "Open credentials", "href": "/platform/credentials"})
+            "Three parts, in order: a) generate the host key pair, b) run the host script on every node, c) pin each node's SSH host key.",
+            items=items, substeps=substeps)
     else:
-        add("hosts", "Connect each host for patching", "todo",
-            f"{ready} of {len(nodes)} nodes ready. Run the host script from the builder on the others, then pin their SSH host keys.",
-            items=items, action={"label": "Open credentials", "href": "/platform/credentials"})
+        add("hosts", "Connect each host for patching", "todo", f"{ready} of {n_nodes} nodes ready. Finish the parts below, in order.",
+            items=items, substeps=substeps)
 
     # 6. features
     writes, console = bool(st.get("pve_mutations_enabled")), bool(st.get("console_enabled"))
