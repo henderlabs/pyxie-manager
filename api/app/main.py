@@ -10,6 +10,7 @@ from pyxie_core.models import AppSettings
 from . import config  # noqa: F401 -- import asserts the Phase 0 safety gate at startup
 from .routers import (
     audit,
+    console,
     auth,
     findings,
     inventory,
@@ -100,6 +101,7 @@ app.include_router(network.router)
 app.include_router(system_updates.router)
 app.include_router(node_detail.router)
 app.include_router(workload_detail.router)
+app.include_router(console.router)
 
 
 @app.get("/api/health")

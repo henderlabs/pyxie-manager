@@ -10,6 +10,7 @@ import { Meter } from "@/components/Gauges";
 import MetricChart from "@/components/MetricChart";
 import WorkloadLifecycleButtons from "@/components/WorkloadLifecycleButtons";
 import MigrateWorkloadAction from "@/components/MigrateWorkloadAction";
+import ConsoleViewer, { useConsoleInfo } from "@/components/ConsoleViewer";
 import { PreferredHostSelect, ProfileSelect, StoragePreferenceSelect } from "@/components/ProfileSelect";
 import { formatBytes, formatUptime, formatRelativeTime } from "@/lib/format";
 import { onOperationsChanged } from "@/lib/operationsBus";
@@ -204,6 +205,11 @@ type Profile = { values: ProfileValues; onChange: (patch: Partial<ProfileValues>
 
 type PanelFinding = { id: string; severity: string; title: string };
 
+function ConsoleTabBody({ workloadId }: { workloadId: string }) {
+  const info = useConsoleInfo(workloadId);
+  return <ConsoleViewer workloadId={workloadId} info={info} />;
+}
+
 /** The Summary / Statistics / Hardware / Tasks / Console tabs. Used both on the full page
  * and inside an expanded Workloads table row, so the two never drift apart. Data for a tab
  * is only fetched while that tab is showing. */
@@ -377,10 +383,7 @@ export function WorkloadDetailPanel({
       {tab === "console" && (
         <Card>
           <CardTitle>Console</CardTitle>
-          <div className="text-sm text-text space-y-2">
-            <p>The console is planned for this tab, opening the guest's screen in the browser.</p>
-            <p className="text-muted">It is not available yet: PyXie's PVE account has no console permission (<code>VM.Console</code>), and granting it is a separate decision. Until then, open the guest's console from the PVE web interface.</p>
-          </div>
+          <ConsoleTabBody workloadId={w.id} />
         </Card>
       )}
     </div>
@@ -426,6 +429,7 @@ export default function WorkloadDetail({
   const tab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : "summary";
   const { live } = useLive(overview.workload.id);
   const w = overview.workload;
+  const consoleInfo = useConsoleInfo(w.id);
   const lxc = w.type === "lxc";
   const st = live?.status ?? null;
   const status = st?.status ?? w.status;
@@ -472,9 +476,14 @@ export default function WorkloadDetail({
           <Link href={`/operations/maintenance?workload=${w.id}`} className="px-2.5 py-1 rounded border border-border text-sm text-muted hover:text-text">
             Maintenance
           </Link>
-          <button type="button" disabled className="px-2.5 py-1 rounded border border-border text-sm text-muted opacity-50 cursor-not-allowed" title="Console is not available yet — it needs a PVE permission change first (see the Console tab).">
+          <button type="button" onClick={() => setTab("console")} disabled={w.is_missing || status !== "running"} className="px-2.5 py-1 rounded border border-border text-sm text-muted hover:text-text disabled:opacity-50 disabled:cursor-not-allowed" title="Open the console tab">
             Console
           </button>
+          {consoleInfo && !w.is_missing && (
+            <a href={consoleInfo.pve_url} target="_blank" rel="noopener noreferrer" className="px-2.5 py-1 rounded border border-border text-sm text-muted hover:text-text" title="Opens PVE's own console in a new window (sign in to PVE there)">
+              Open in PVE
+            </a>
+          )}
         </div>
       </div>
 

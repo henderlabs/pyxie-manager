@@ -252,7 +252,7 @@ def list_credentials(target_id: uuid.UUID, db: Session = Depends(get_db)):
     return out
 
 
-CREDENTIAL_SLOT_NAMES = {"inventory", "maintenance", "administrative"}
+CREDENTIAL_SLOT_NAMES = {"inventory", "maintenance", "administrative", "console"}
 
 
 @router.post("/pve-targets/{target_id}/credentials", response_model=schemas.CredentialOut, dependencies=[Depends(require_admin)])
@@ -389,6 +389,10 @@ def test_credential(target_id: uuid.UUID, credential_id: uuid.UUID, db: Session 
             client.version()
             if cred.slot_name == "inventory":
                 client.cluster_status()
+                ok = True
+            elif cred.slot_name == "console":
+                # VM.Console is only exercised by opening a console; authenticating
+                # (client.version() above) is the available check.
                 ok = True
             else:
                 cluster = db.query(Cluster).filter(Cluster.pve_target_id == target_id).first()

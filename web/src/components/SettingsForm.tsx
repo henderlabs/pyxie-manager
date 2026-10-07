@@ -97,6 +97,23 @@ export default function SettingsForm({ initial }: { initial: AppSettings }) {
           </p>
         )}
       </div>
+      <div className="p-3 rounded border border-border">
+        <label className="flex items-center gap-2 text-sm font-medium text-text">
+          <input
+            type="checkbox"
+            disabled={!isAdmin}
+            checked={form.console_enabled}
+            onChange={(e) => setForm({ ...form, console_enabled: e.target.checked })}
+          />
+          Allow the embedded VM console
+        </label>
+        <p className="text-[11px] text-muted mt-1.5 normal-case">
+          Lets admins open a guest's screen inside PyXie (Console tab). It uses the separate
+          &quot;console&quot; credential and gives full keyboard and mouse control of the guest, so it is off by
+          default. Checked on every connection and every minute while one is open; switching it off closes open
+          consoles. Open in PVE keeps working either way.
+        </p>
+      </div>
       <Field label="Sync frequency (inventory, PVE health/status, protection, recommendations -- one shared schedule)">
         <select
           className="input"

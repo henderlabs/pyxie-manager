@@ -13,7 +13,16 @@
 	encode zstd gzip
 
 	# Caddy sets X-Forwarded-For/Proto/Host on the upstream request.
-	reverse_proxy pyxie-manager-web:3000
+	# Embedded VM console: websocket straight to the API (the Next.js layer cannot
+	# proxy websockets). The one-time ticket in this path is useless after first use
+	# and no access log is configured, so it is not written anywhere.
+	handle /console-ws/* {
+		reverse_proxy pyxie-manager-api:8000
+	}
+
+	handle {
+		reverse_proxy pyxie-manager-web:3000
+	}
 
 	# HSTS is deliberately NOT enabled yet: with a self-signed cert it would
 	# lock browsers out of click-through. Enable once the real cert is live.
