@@ -71,9 +71,11 @@ def _chk(group, label, status, detail="", fix=""):
 
 
 def _endpoint_reachable(host: str, port: int) -> bool:
+    """Does this node's Proxmox web service answer? GET / (the login page) is instant. Do NOT probe /api2/json/version
+    without a token: Proxmox deliberately delays that 401 by about 3 seconds, which made healthy nodes look down."""
     try:
-        r = httpx.get(f"https://{host}:{port}/api2/json/version", verify=False, timeout=3.0)
-        return r.status_code < 500  # 401 without a token still proves the API answers
+        r = httpx.get(f"https://{host}:{port}/", verify=False, timeout=6.0)
+        return r.status_code < 500
     except Exception:  # noqa: BLE001
         return False
 

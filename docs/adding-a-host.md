@@ -42,7 +42,9 @@ rush it.
 > Naming (v0.27.2): new deployments use `pyxie-ro` and `pyxie-admin` with the role `PyXieAdmin`. Deployments set up
 > earlier with `pyxie-manager@pve` / `PyXieMaintenanceW1` keep working unchanged; the names are only labels in PVE.
 
-## 2. Create the maintenance role, if you haven't already **[manual]**
+## 2. Create the maintenance role
+
+(The script builder on the Integrations page does steps 1 to 4 for you. It is safe to paste into a root shell: it runs inside its own `bash`, saves the token secrets to `/root/pyxie-tokens.txt`, and prints `STOPPED at line N` if something fails.), if you haven't already **[manual]**
 
 `inventory` uses PVE's own built-in **`PVEAuditor`** role -- nothing to
 create. `maintenance` needs a custom role that doesn't exist by default:
