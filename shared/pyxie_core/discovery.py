@@ -6,6 +6,7 @@ relationships survive an object temporarily disappearing from PVE (it is
 marked is_missing=True, never hard-deleted, by a single scan).
 """
 
+import logging
 import uuid
 from datetime import datetime, timezone
 
@@ -78,6 +79,7 @@ def _storage_scope(entry: dict) -> str:
 
 
 _DISCOVERY_LOCK_NAMESPACE = "pyxie:discovery"
+log = logging.getLogger(__name__)
 
 
 def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict:
@@ -103,19 +105,30 @@ def run_discovery(db: Session, target: PveTarget, actor: str = "system") -> dict
     lifecycle, and a lightweight advisory lock keyed by target id is the
     right-sized tool for "don't let two of these run at once for the same
     target", not "operations fighting over a node/workload resource"."""
-    got_lock = db.execute(
-        text("SELECT pg_try_advisory_lock(hashtext(:ns), hashtext(:key))"),
-        {"ns": _DISCOVERY_LOCK_NAMESPACE, "key": str(target.id)},
-    ).scalar()
-    if not got_lock:
-        return {"status": "skipped", "reason": "a discovery is already in progress for this target"}
+    # The lock is held on its OWN dedicated connection. _run_discovery_inner() commits several times, and every commit
+    # hands the Session's connection back to the pool; the Session then checks out whichever connection is next. A
+    # session-level lock taken on one connection and "released" on another is never released: found live, a leaked lock
+    # made every later discovery skip silently for hours. Lock and unlock must run on the same connection.
+    params = {"ns": _DISCOVERY_LOCK_NAMESPACE, "key": str(target.id)}
+    lock_conn = db.get_bind().connect()
     try:
-        return _run_discovery_inner(db, target, actor)
+        got_lock = lock_conn.execute(text("SELECT pg_try_advisory_lock(hashtext(:ns), hashtext(:key))"), params).scalar()
+        lock_conn.commit()  # ends the implicit transaction; the lock is session-level and stays
+        if not got_lock:
+            log.warning("discovery skipped for target %s: %s", target.id, "another discovery holds the lock")
+            return {"status": "skipped", "reason": "a discovery is already in progress for this target"}
+        try:
+            return _run_discovery_inner(db, target, actor)
+        finally:
+            try:
+                lock_conn.execute(text("SELECT pg_advisory_unlock(hashtext(:ns), hashtext(:key))"), params)
+                lock_conn.commit()
+            except Exception:  # noqa: BLE001
+                # Could not unlock cleanly: close the connection for real, which frees every lock it holds.
+                log.exception("could not release the discovery lock; closing its connection")
+                lock_conn.invalidate()
     finally:
-        db.execute(
-            text("SELECT pg_advisory_unlock(hashtext(:ns), hashtext(:key))"),
-            {"ns": _DISCOVERY_LOCK_NAMESPACE, "key": str(target.id)},
-        )
+        lock_conn.close()
 
 
 def _run_discovery_inner(db: Session, target: PveTarget, actor: str = "system") -> dict:

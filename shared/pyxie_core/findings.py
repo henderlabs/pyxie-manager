@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from .models import AppSettings, Cluster, Finding, Node, Notification, PlacementAffinityRule, Policy, Provider, PveTarget, PveTask, Storage, Workload, WorkloadLiveness
+from .inventory_health import stale_minutes
 from .notifications import dispatch_event
 from .vm_liveness import finding_worthy
 
@@ -324,8 +325,37 @@ def evaluate_findings(db: Session) -> dict:
     current.extend(_affinity_violation_findings(db))
     current.extend(_liveness_findings(db))
     current.extend(_wrapper_findings(db))
+    current.extend(_stale_inventory_findings(db))
 
     return _reconcile(db, current)
+
+
+def _stale_inventory_findings(db: Session) -> list[dict]:
+    """PyXie's picture of the cluster has stopped refreshing. Everything it shows (VM states, plans for maintenance) is
+    then old, and a maintenance plan built from it can be wrong."""
+    from sqlalchemy import func
+
+    last = db.query(func.max(Node.last_seen)).filter(Node.is_missing.is_(False)).scalar()
+    settings = db.query(AppSettings).filter(AppSettings.id == 1).one_or_none()
+    mins = stale_minutes(last, datetime.now(timezone.utc), settings.inventory_refresh_interval_seconds if settings else 300)
+    target = db.query(PveTarget).first()
+    if mins is None or target is None:
+        return []
+    return [
+        {
+            "dedupe_key": "inventory.stale",
+            "object_type": "pve_target",
+            "object_id": target.id,
+            "category": "connectivity",
+            "severity": "warning",
+            "title": f"Inventory has not refreshed for {mins} minutes",
+            "evidence": {
+                "minutes": mins, "last_refresh": last.isoformat() if last else None,
+                "fix": "PyXie is showing old VM and host states, so maintenance plans built from them can be wrong. "
+                       "Check the worker log for discovery messages; restarting the API and worker containers clears a stuck discovery lock.",
+            },
+        }
+    ]
 
 
 def _wrapper_findings(db: Session) -> list[dict]:
