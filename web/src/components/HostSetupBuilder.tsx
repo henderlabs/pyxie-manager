@@ -9,39 +9,49 @@ type ConsoleOpt = "none" | "maintenance" | "separate";
 
 const MAINT_PRIVS = "Datastore.Allocate,Datastore.AllocateSpace,Sys.Audit,Sys.Modify,Sys.PowerMgmt,VM.Audit,VM.Config.CPU,VM.Config.Disk,VM.Config.Memory,VM.Migrate,VM.PowerMgmt";
 
-function pveScript(o: { user: string; inventory: boolean; maintenance: boolean; console: ConsoleOpt }): string {
+function pveScript(o: { roUser: string; adminUser: string; consoleUser: string; inventory: boolean; maintenance: boolean; console: ConsoleOpt }): string {
   const L: string[] = [
     "#!/bin/bash",
-    "# PyXie Manager: Proxmox VE service account, roles and API tokens.",
+    "# PyXie Manager: Proxmox VE service accounts, roles and API tokens.",
     "# Run ONCE, as root, on any node of the cluster. Safe to re-run: existing users, roles and tokens are left alone.",
     "# Token secrets are shown by PVE exactly once, when a token is created: copy each into PyXie (Platform > Credentials).",
     "set -euo pipefail",
     'command -v pveum >/dev/null || { echo "pveum not found: run this on a Proxmox VE node" >&2; exit 1; }',
-    `U='${o.user}'`,
-    'pveum user add "$U" --comment "PyXie Manager service account" 2>/dev/null || echo "user $U already exists"',
-    'have_token() { pveum user token list "$U" --output-format json 2>/dev/null | grep -Eq "\\"tokenid\\": *\\"$1\\""; }',
-    "grant() { # grant <path> <role> <token-id>: the user AND the token need the grant (privilege separation)",
-    '  pveum acl modify "$1" --roles "$2" --users "$U"',
-    '  pveum acl modify "$1" --roles "$2" --tokens "$U!$3"',
+    "ensure_user() { # ensure_user <user> <comment>",
+    '  pveum user add "$1" --comment "$2" 2>/dev/null || echo "user $1 already exists"',
+    "}",
+    'have_token() { pveum user token list "$1" --output-format json 2>/dev/null | grep -Eq "\\"tokenid\\": *\\"$2\\""; }',
+    "add_token() { # add_token <user> <token-id> <comment>",
+    '  if have_token "$1" "$2"; then echo "token $1!$2 already exists"; else pveum user token add "$1" "$2" --privsep 1 --comment "$3"; fi',
+    "}",
+    "grant() { # grant <path> <role> <user> <token-id>: the user AND the token need the grant (privilege separation)",
+    '  pveum acl modify "$1" --roles "$2" --users "$3"',
+    '  pveum acl modify "$1" --roles "$2" --tokens "$3!$4"',
     "}",
   ];
+  const users: string[] = [];
   if (o.inventory) {
-    L.push("", "# inventory: read-only", 'have_token inventory && echo "token inventory already exists" || pveum user token add "$U" inventory --privsep 1 --comment "PyXie inventory (read-only)"', "grant / PVEAuditor inventory");
+    users.push(o.roUser);
+    L.push("", "# Read-only account: inventory token (built-in PVEAuditor role)", `ensure_user '${o.roUser}' "PyXie read-only (inventory)"`, `add_token '${o.roUser}' inventory "PyXie inventory (read-only)"`, `grant / PVEAuditor '${o.roUser}' inventory`);
   }
   if (o.maintenance) {
+    users.push(o.adminUser);
     const privs = MAINT_PRIVS + (o.console === "maintenance" ? ",VM.Console" : "");
     L.push(
       "",
-      `# maintenance: migrations, power, host reboots${o.console === "maintenance" ? ", and the embedded console (VM.Console)" : ""}`,
-      `pveum role add PyXieMaintenanceW1 --privs "${privs}" 2>/dev/null || pveum role modify PyXieMaintenanceW1 --privs "${privs}"`,
-      'have_token maintenance && echo "token maintenance already exists" || pveum user token add "$U" maintenance --privsep 1 --comment "PyXie maintenance (write)"',
-      "grant / PyXieMaintenanceW1 maintenance",
+      `# Admin account: maintenance token (migrations, power, host reboots${o.console === "maintenance" ? ", embedded console" : ""})`,
+      `ensure_user '${o.adminUser}' "PyXie admin (maintenance)"`,
+      `pveum role add PyXieAdmin --privs "${privs}" 2>/dev/null || pveum role modify PyXieAdmin --privs "${privs}"`,
+      `add_token '${o.adminUser}' maintenance "PyXie maintenance (admin)"`,
+      `grant / PyXieAdmin '${o.adminUser}' maintenance`,
     );
   }
   if (o.console === "separate") {
-    L.push("", "# console: its own token, VM.Console only (built-in role PVEVMConsole)", 'have_token console && echo "token console already exists" || pveum user token add "$U" console --privsep 1 --comment "PyXie embedded console"', "grant /vms PVEVMConsole console");
+    users.push(o.consoleUser);
+    L.push("", "# Console account: its own token, VM.Console only (built-in role PVEVMConsole)", `ensure_user '${o.consoleUser}' "PyXie embedded console"`, `add_token '${o.consoleUser}' console "PyXie embedded console"`, `grant /vms PVEVMConsole '${o.consoleUser}' console`);
   }
-  L.push("", 'echo ""', 'echo "Done. Tokens on this user (secrets are NOT shown again):"', 'pveum user token list "$U"');
+  L.push("", 'echo ""', 'echo "Done. Tokens (secrets are NOT shown again):"');
+  for (const u of users) L.push(`pveum user token list '${u}'`);
   return L.join("\n") + "\n";
 }
 
@@ -91,6 +101,16 @@ function ScriptBox({ title, hint, text, filename }: { title: string; hint: strin
   );
 }
 
+function UserField({ label, value, onChange, ok }: { label: string; value: string; onChange: (v: string) => void; ok: boolean }) {
+  return (
+    <label className="block text-xs text-muted space-y-1 pl-6">
+      <span>{label}</span>
+      <input className="input" value={value} onChange={(e) => onChange(e.target.value)} />
+      {!ok && <span className="text-bad">Use the form name@pve.</span>}
+    </label>
+  );
+}
+
 function Check({ checked, onChange, label, sub }: { checked: boolean; onChange: (v: boolean) => void; label: string; sub?: string }) {
   return (
     <label className="flex items-start gap-2 text-sm">
@@ -105,7 +125,9 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
   const me = useMe();
   const isAdmin = me === undefined || me?.is_admin === true;
   const [targetId, setTargetId] = useState(targets[0]?.id ?? "");
-  const [user, setUser] = useState("pyxie-manager@pve");
+  const [roUser, setRoUser] = useState("pyxie-ro@pve");
+  const [adminUser, setAdminUser] = useState("pyxie-admin@pve");
+  const [consoleUser, setConsoleUser] = useState("pyxie-console@pve");
   const [inventory, setInventory] = useState(true);
   const [maintenance, setMaintenance] = useState(false);
   const [consoleOpt, setConsoleOpt] = useState<ConsoleOpt>("none");
@@ -116,13 +138,14 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
   const [busy, setBusy] = useState(false);
   const [generated, setGenerated] = useState(false);
 
-  const userOk = /^[A-Za-z0-9._-]+@pve$/.test(user);
+  const okName = (u: string) => /^[A-Za-z0-9._-]+@pve$/.test(u);
   const effConsole: ConsoleOpt = consoleOpt === "maintenance" && !maintenance ? "none" : consoleOpt;
   const anyPve = inventory || maintenance || effConsole === "separate";
   const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const namesOk = (!inventory || okName(roUser)) && (!maintenance || okName(adminUser)) && (effConsole !== "separate" || okName(consoleUser));
   const pve = useMemo(
-    () => (userOk && anyPve ? pveScript({ user, inventory, maintenance, console: effConsole }) : ""),
-    [user, userOk, inventory, maintenance, effConsole, anyPve],
+    () => (namesOk && anyPve ? pveScript({ roUser, adminUser, consoleUser, inventory, maintenance, console: effConsole }) : ""),
+    [roUser, adminUser, consoleUser, namesOk, inventory, maintenance, effConsole, anyPve],
   );
   const touch = () => setGenerated(false);
 
@@ -163,18 +186,15 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
       <div className="grid md:grid-cols-2 gap-4">
         <div className="space-y-2">
           <div className="text-xs uppercase tracking-wide text-muted">1. Proxmox account, once per cluster</div>
-          <label className="block text-xs text-muted space-y-1">
-            <span>Service user</span>
-            <input className="input" value={user} onChange={(e) => { setUser(e.target.value); touch(); }} />
-            {!userOk && <span className="text-bad">Use the form name@pve.</span>}
-          </label>
           <Check checked={inventory} onChange={(v) => { setInventory(v); touch(); }} label="Inventory token (read-only)" sub="Built-in PVEAuditor role. Discovery and monitoring." />
-          <Check checked={maintenance} onChange={(v) => { setMaintenance(v); touch(); }} label="Maintenance token (write)" sub="Role PyXieMaintenanceW1: migrations, power, reboots. Still gated by PyXie's own Settings switch." />
+          {inventory && <UserField label="Read-only user" value={roUser} onChange={(v) => { setRoUser(v); touch(); }} ok={okName(roUser)} />}
+          <Check checked={maintenance} onChange={(v) => { setMaintenance(v); touch(); }} label="Maintenance (Admin) token (write)" sub="Role PyXieAdmin: migrations, power, reboots. Still gated by PyXie's own Settings switch." />
+          {maintenance && <UserField label="Admin user" value={adminUser} onChange={(v) => { setAdminUser(v); touch(); }} ok={okName(adminUser)} />}
           <div className="pl-6 space-y-1">
             <div className="text-xs text-muted">Embedded VM console</div>
             {([
               ["none", "Not needed"],
-              ["maintenance", "Add VM.Console to the maintenance role"],
+              ["maintenance", "Add VM.Console to the admin role"],
               ["separate", "Separate console token (VM.Console only, smaller blast radius)"],
             ] as [ConsoleOpt, string][]).map(([v, label]) => (
               <label key={v} className={`flex items-center gap-2 text-sm ${v === "maintenance" && !maintenance ? "opacity-50" : ""}`}>
@@ -183,6 +203,7 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
                 {label}
               </label>
             ))}
+            {effConsole === "separate" && <UserField label="Console user" value={consoleUser} onChange={(v) => { setConsoleUser(v); touch(); }} ok={okName(consoleUser)} />}
           </div>
         </div>
 
@@ -215,7 +236,7 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
 
       {generated && (
         <div className="space-y-3">
-          {pve && <ScriptBox title="Script 1: Proxmox account (run once, as root, on any node)" hint="Copy it to a node and run it with bash. Copy each token secret it prints into PyXie; PVE shows it only once." text={pve} filename="pyxie-pve-setup.sh" />}
+          {pve && <ScriptBox title="Script 1: Proxmox accounts (run once, as root, on any node)" hint="Copy it to a node and run it with bash. Copy each token secret it prints into PyXie; PVE shows it only once." text={pve} filename="pyxie-pve-setup.sh" />}
           {hostMode !== "none" && link && (
             <ScriptBox
               title={`Script ${pve ? 2 : 1}: host wrapper (${hostMode === "install" ? "install or upgrade" : "remove"}, run as root on every node)`}
