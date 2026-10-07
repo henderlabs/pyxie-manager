@@ -8,15 +8,18 @@ import AddSiteForm from "@/components/AddSiteForm";
 import SiteRow from "@/components/SiteRow";
 import { PlugIcon } from "@/components/Icons";
 import HostSetupBuilder from "@/components/HostSetupBuilder";
+import SetupGuide from "@/components/SetupGuide";
+import type { SetupStatus } from "@/components/SetupGuide";
 
 const UNIMPLEMENTED_CATEGORIES = ["protection", "monitoring", "notification", "itsm", "authentication", "hardware"];
 
 export default async function ProvidersPage() {
-  const [providers, targets, sites, organizations] = await Promise.all([
+  const [providers, targets, sites, organizations, setupStatus] = await Promise.all([
     apiFetch<Provider[]>("/api/providers"),
     apiFetch<PveTarget[]>("/api/pve-targets"),
     apiFetch<Site[]>("/api/sites"),
     apiFetch<Organization[]>("/api/organizations"),
+    apiFetch<SetupStatus>("/api/setup/status"),
   ]);
   const endpointsByTarget: Record<string, PveEndpoints | null> = Object.fromEntries(
     await Promise.all(
@@ -32,13 +35,15 @@ export default async function ProvidersPage() {
     <div>
       <PageHeader
         title="Integrations"
-        subtitle="Connect your infrastructure in two steps: add a site (a physical location or logical grouping), then connect a provider to it."
+        subtitle="Follow the steps below from top to bottom. Each step says what to do, why, and whether it is already done."
         icon={<PlugIcon className="w-5 h-5" />}
       />
 
+      <SetupGuide initial={setupStatus} />
+
       {organization && (
-        <Card className="mb-4">
-          <CardTitle>Step 1 · Sites</CardTitle>
+        <Card className="mb-4" id="sites">
+          <CardTitle>Step 1 · Add a site</CardTitle>
           <div className="divide-y divide-border mb-3">
             {sites.map((s) => (
               <SiteRow key={s.id} site={s} />
@@ -48,8 +53,16 @@ export default async function ProvidersPage() {
         </Card>
       )}
 
-      <Card className="mb-4">
-        <CardTitle>Step 2 · Proxmox VE (PVE targets)</CardTitle>
+      <Card className="mb-4" id="builder">
+        <CardTitle>Steps 2 and 5 · Setup scripts (Proxmox accounts, host wrapper)</CardTitle>
+        <p className="text-xs text-muted mb-3 normal-case">
+          Tick what you need and PyXie writes the scripts: the Proxmox service account, roles and tokens, and the host wrapper that lets PyXie patch and reboot a node. You copy them onto a node and run them yourself.
+        </p>
+        <HostSetupBuilder targets={targets.map((t) => ({ id: t.id, name: t.name }))} />
+      </Card>
+
+      <Card className="mb-4" id="targets">
+        <CardTitle>Step 3 · Connect your cluster (PVE targets)</CardTitle>
         <p className="text-xs text-muted mb-3 normal-case">
           The only provider category implemented so far -- connects one Proxmox cluster or standalone host per target.
         </p>
@@ -99,13 +112,6 @@ export default async function ProvidersPage() {
         </details>
       </Card>
 
-      <Card className="mb-4">
-        <CardTitle>Step 3 · Prepare a host (setup scripts)</CardTitle>
-        <p className="text-xs text-muted mb-3 normal-case">
-          Tick what you need and PyXie writes the scripts: the Proxmox service account, roles and tokens, and the host wrapper that lets PyXie patch and reboot a node. You copy them onto a node and run them yourself.
-        </p>
-        <HostSetupBuilder targets={targets.map((t) => ({ id: t.id, name: t.name }))} />
-      </Card>
     </div>
   );
 }
