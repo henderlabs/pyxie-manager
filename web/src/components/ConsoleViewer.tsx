@@ -46,13 +46,27 @@ function keysymFor(ch: string): number | null {
   return cp < 0x100 ? cp : 0x01000000 + cp;
 }
 
+const SIZES: { key: string; label: string; height: string }[] = [
+  { key: "small", label: "Small", height: "420px" },
+  { key: "medium", label: "Medium", height: "640px" },
+  { key: "large", label: "Large", height: "860px" },
+  { key: "fill", label: "Fill window", height: "max(480px, calc(100vh - 300px))" },
+];
+
+const KEY_SHIFT_L = 0xffe1;
+/** US layout: characters that need Shift held. QEMU's VNC server maps a keysym to the unshifted key
+ * unless Shift is sent explicitly (what a real keyboard does), so we press it ourselves. */
+const NEEDS_SHIFT = /[A-Z~!@#$%^&*()_+{}|:"<>?]/;
+
 type State = "idle" | "connecting" | "connected" | "ended";
 
 /** noVNC (bundled) talking to PyXie's ticketed websocket proxy. Mounted only while the Console
  * tab is open; leaving the tab disconnects. The 15 min idle limit is enforced here (VNC itself
  * never goes quiet on the wire); the 4 h cap and session checks are enforced server-side. */
 export default function ConsoleViewer({ workloadId, info }: { workloadId: string; info: ConsoleInfo | null }) {
+  const wrapRef = useRef<HTMLDivElement>(null);
   const screenRef = useRef<HTMLDivElement>(null);
+  const [isFs, setIsFs] = useState(false);
   const rfbRef = useRef<any>(null);
   const idleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [state, setState] = useState<State>("idle");
@@ -62,6 +76,7 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
   const [fromGuest, setFromGuest] = useState("");
   const [clipNote, setClipNote] = useState<string | null>(null);
   const typingRef = useRef(false);
+  const [size, setSize] = useState("fill");
 
   const disconnect = useCallback((why?: string) => {
     if (idleRef.current) clearTimeout(idleRef.current);
@@ -75,6 +90,29 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
     if (idleRef.current) clearTimeout(idleRef.current);
     idleRef.current = setTimeout(() => disconnect("Disconnected after 15 minutes without input."), IDLE_LIMIT_MS);
   }, [disconnect]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("pyxie:console-size");
+      if (saved && SIZES.some((z) => z.key === saved)) setSize(saved);
+    } catch { /* storage unavailable */ }
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => setIsFs(document.fullscreenElement === wrapRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) document.exitFullscreen?.();
+    else wrapRef.current?.requestFullscreen?.();
+  }
+
+  function pickSize(key: string) {
+    setSize(key);
+    try { localStorage.setItem("pyxie:console-size", key); } catch { /* ignore */ }
+  }
 
   useEffect(() => () => {
     if (idleRef.current) clearTimeout(idleRef.current);
@@ -99,8 +137,11 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
       if (!rfbRef.current) break;
       const sym = keysymFor(ch);
       if (sym === null) continue;
+      const shift = NEEDS_SHIFT.test(ch);
+      if (shift) rfb.sendKey(KEY_SHIFT_L, "ShiftLeft", true);
       rfb.sendKey(sym, null, true);
       rfb.sendKey(sym, null, false);
+      if (shift) rfb.sendKey(KEY_SHIFT_L, "ShiftLeft", false);
       await new Promise((r) => setTimeout(r, 4));
     }
     typingRef.current = false;
@@ -158,7 +199,7 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
   const canEmbed = info?.embedded === "ready";
 
   return (
-    <div className="space-y-2">
+    <div ref={wrapRef} className={isFs ? "space-y-2 bg-canvas p-3 flex flex-col h-screen overflow-auto" : "space-y-2"}>
       <div className="flex items-center gap-2 flex-wrap text-sm">
         {!live && (
           <button type="button" onClick={connect} disabled={!canEmbed}
@@ -171,7 +212,15 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
             <button type="button" onClick={() => disconnect("Console closed.")} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Disconnect</button>
             <button type="button" disabled={state !== "connected"} onClick={() => rfbRef.current?.sendCtrlAltDel()} className="px-2.5 py-1 rounded border border-border hover:bg-surface2 disabled:opacity-50">Ctrl-Alt-Del</button>
             <button type="button" onClick={() => setShowClip((v) => !v)} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Clipboard</button>
-            <button type="button" onClick={() => screenRef.current?.requestFullscreen?.()} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">Full screen</button>
+            <span className="inline-flex rounded border border-border overflow-hidden" role="group" aria-label="Console size">
+              {SIZES.map((z) => (
+                <button key={z.key} type="button" onClick={() => pickSize(z.key)}
+                  className={`px-2 py-1 text-xs border-r border-border last:border-r-0 ${size === z.key ? "bg-surface2 text-text" : "text-muted hover:text-text"}`}>
+                  {z.label}
+                </button>
+              ))}
+            </span>
+            <button type="button" onClick={toggleFullscreen} className="px-2.5 py-1 rounded border border-border hover:bg-surface2">{isFs ? "Exit full screen" : "Full screen"}</button>
           </>
         )}
         {info && (
@@ -210,10 +259,11 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
         onKeyDownCapture={bumpIdle}
         onMouseDownCapture={bumpIdle}
         onMouseMoveCapture={() => { if (state === "connected") bumpIdle(); }}
-        className={live ? "w-full h-[520px] bg-black rounded border border-border overflow-hidden" : "hidden"}
+        style={live ? (isFs ? { flex: "1 1 0", minHeight: 240 } : { height: SIZES.find((z) => z.key === size)?.height, minHeight: 240, minWidth: 320, maxWidth: "100%", resize: "both" }) : undefined}
+        className={live ? "w-full bg-black rounded border border-border overflow-hidden" : "hidden"}
       />
       <p className="text-[11px] text-muted">
-        The console shows the guest's own screen with full keyboard and mouse control. Opening and closing it is recorded in the audit log.
+        Drag the bottom-right corner to resize freely. The console shows the guest's own screen with full keyboard and mouse control. Opening and closing it is recorded in the audit log.
       </p>
     </div>
   );
