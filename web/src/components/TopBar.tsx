@@ -53,16 +53,16 @@ export default function TopBar({ instance }: { instance: string }) {
 
   const name = me ? me.display_name || me.email : "";
   return (
-    <div className="absolute top-6 right-6 z-20 flex items-center gap-2 text-xs">
+    <div className="absolute top-[22px] right-6 z-20 flex items-center gap-2 text-xs">
       {info?.running ? (
-        <Link href="/platform/settings/updates" className="inline-flex items-center gap-1.5 rounded-lg border border-warn/40 bg-warn/10 text-warn px-2.5 py-1.5 font-medium hover:bg-warn/20" title="An update is in progress. Click to watch it.">
+        <Link href="/platform/settings/updates" className="inline-flex items-center gap-1.5 h-8 rounded-lg border border-warn/40 bg-warn/10 text-warn px-2.5 font-medium hover:bg-warn/20" title="An update is in progress. Click to watch it.">
           <span className="w-1.5 h-1.5 rounded-full bg-warn animate-pulse" />
           Updating…
         </Link>
       ) : info?.available ? (
         <Link
           href="/platform/settings/updates"
-          className="inline-flex items-center gap-1.5 rounded-lg border border-accent/40 bg-accent/10 text-accent px-2.5 py-1.5 font-medium hover:bg-accent/20"
+          className="inline-flex items-center gap-1.5 h-8 rounded-lg border border-accent/40 bg-accent/10 text-accent px-2.5 font-medium hover:bg-accent/20"
           title={`PyXie v${info.latest} is available for ${info.instance || "this server"} (running v${info.current}). Click to review and update.`}
         >
           <span className="relative flex h-1.5 w-1.5">
@@ -72,22 +72,22 @@ export default function TopBar({ instance }: { instance: string }) {
           Update to v{info.latest}
         </Link>
       ) : null}
-      <div className="flex items-stretch rounded-lg border border-border bg-surface divide-x divide-border overflow-hidden shadow-sm">
-        <span className="flex items-center px-3 py-1.5 font-semibold tracking-wide text-text" title="Which PyXie this is">
+      <div className="flex items-stretch h-8 rounded-lg border border-border bg-surface divide-x divide-border overflow-hidden shadow-sm">
+        <span className="flex items-center px-3 font-semibold tracking-wide text-text" title="Which PyXie this is">
           {instance}
         </span>
         {me ? (
           <>
-            <Link href="/profile" className="flex items-center gap-1.5 px-3 py-1.5 text-muted hover:text-text" title={`${me.email} — edit profile`}>
+            <Link href="/profile" className="flex items-center gap-1.5 px-3 text-muted hover:text-text" title={`${me.email} — edit profile`}>
               <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent/15 text-accent text-[10px] font-semibold uppercase">{name.charAt(0)}</span>
               {name}
             </Link>
-            <button type="button" onClick={logout} className="flex items-center px-3 py-1.5 text-muted hover:text-accent hover:bg-surface2">
+            <button type="button" onClick={logout} className="flex items-center px-3 text-muted hover:text-accent hover:bg-surface2">
               Sign out
             </button>
           </>
         ) : (
-          <span className="flex items-center px-3 py-1.5 text-muted">Read-only</span>
+          <span className="flex items-center px-3 text-muted">Read-only</span>
         )}
         <div className="flex items-center px-1.5">
           <ThemeToggle bare />
