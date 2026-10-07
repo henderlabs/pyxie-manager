@@ -9,8 +9,8 @@ import type { UpdatesResponse } from "@/lib/updates";
 
 type UpdateInfo = { latest?: string; available: boolean; running: boolean; instance?: string; current: string };
 
-/** Administrators only: is a newer release waiting, or an update running? Polled gently. */
-function useUpdateInfo(enabled: boolean): UpdateInfo | null {
+/** Administrators only: is a newer release waiting, or an update running? Refreshed on every page change, on window focus, and every minute. */
+function useUpdateInfo(enabled: boolean, pathname: string): UpdateInfo | null {
   const [info, setInfo] = useState<UpdateInfo | null>(null);
   useEffect(() => {
     if (!enabled) return;
@@ -24,14 +24,23 @@ function useUpdateInfo(enabled: boolean): UpdateInfo | null {
         })
         .catch(() => {});
     load();
+    // The top bar stays mounted while you move between pages, so refresh on navigation and when the window regains
+    // focus, not only on a timer: a release found by "Check now" must show up at once.
     const iv = setInterval(() => {
       if (!document.hidden) load();
-    }, 300000);
+    }, 60000);
+    const onVisible = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
     return () => {
       cancelled = true;
       clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
     };
-  }, [enabled]);
+  }, [enabled, pathname]);
   return info;
 }
 
@@ -42,7 +51,7 @@ export default function TopBar({ instance }: { instance: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const me = useMe();
-  const info = useUpdateInfo(me?.is_admin === true);
+  const info = useUpdateInfo(me?.is_admin === true, pathname);
   if (pathname === "/login" || pathname.startsWith("/accept-invite")) return null;
 
   async function logout() {
