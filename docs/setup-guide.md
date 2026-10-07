@@ -22,3 +22,10 @@ permission (when the console is on), how many nodes can act as the cluster entry
 each host's SSH wrapper (connected, version), the write and console switches, and email alerts.
 
 API: `GET /api/setup/status` (database only, any signed-in user) and `POST /api/setup/check` (admin).
+
+## Quick start (Platform > Quick start)
+
+A short page for new installations: the two Proxmox tokens side by side (read-only inventory and Maintenance (Admin)),
+what each is used for and cannot do, exactly how to create each in Proxmox (the script builder, or the web-interface
+clicks) and where each goes in PyXie, what each privilege of the `PyXieAdmin` role is for, and the safety gates. The
+Dashboard shows a "New here?" banner until a site, the accounts and a connected cluster exist.
