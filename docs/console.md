@@ -32,6 +32,14 @@ token id `console`, the secret), and **Settings > Allow the embedded VM console*
 5. Audit events: `console.requested`, `console.opened`, `console.closed` (duration, byte counts,
    reason), `console.denied`, `settings.console_enabled_changed`. No screen or keystroke capture.
 
+## Copy and paste
+
+The **Clipboard** button opens a panel. **Type it in** sends your text to the guest as keystrokes
+(up to 4000 characters) and works on any guest. **Send to guest clipboard** uses VNC cut text; the
+guest then pastes with Ctrl+V, but only if it runs a clipboard agent (spice-vdagent on Linux). Text
+copied inside the guest appears in the panel (same agent requirement) and in your browser
+clipboard when the browser allows it. Clipboard text is not stored or logged.
+
 ## Notes
 
 - Admin only; off by default (Settings switch). Switching it off closes open consoles within a minute.
