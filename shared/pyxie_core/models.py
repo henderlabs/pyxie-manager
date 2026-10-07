@@ -919,6 +919,19 @@ class Operation(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class OperationLog(Base):
+    """One appended chunk of live output for an operation: the host's own apt output
+    (source "host") or a line the workflow wrote itself (source "stage"). See operation_log.py."""
+
+    __tablename__ = "operation_log"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    operation_id = Column(UUID(as_uuid=True), ForeignKey("operations.id", ondelete="CASCADE"), nullable=False)
+    ts = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+    source = Column(String, nullable=False, default="host")
+    text = Column(Text, nullable=False)
+
+
 class PlacementAffinityRule(Base):
     """PyXie-level keep_together/keep_apart placement policy -- independent
     of PVE's own native HA affinity rules (see check_crs_affinity), so it

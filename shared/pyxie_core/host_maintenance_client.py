@@ -48,10 +48,10 @@ import paramiko
 
 WRAPPER_PATH = "/usr/local/sbin/pyxie-maint"
 SUPPORTED_CONTRACT_VERSION = 1
-_ALLOWED_COMMANDS = ("version", "status", "refresh", "plan", "apply", "verify")
+_ALLOWED_COMMANDS = ("version", "status", "refresh", "plan", "apply", "verify", "log")
 _TIMEOUT_BY_COMMAND = {
     "version": 15, "status": 30, "refresh": 120, "plan": 90,
-    "apply": 3600, "verify": 30,
+    "apply": 3600, "verify": 30, "log": 30,
 }
 _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]|\x1b\][^\x07]*\x07|[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
@@ -276,3 +276,8 @@ class HostMaintenanceClient:
 
     def verify(self) -> dict:
         return self._run("verify")
+
+    def log(self) -> dict:
+        """Read-only: the last 32 KB of the host's apply log with absolute byte offsets
+        (wrapper 1.1.0+; see operation_log.HostLogFollower). Needs the 'log' capability."""
+        return self._run("log")

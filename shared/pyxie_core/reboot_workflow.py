@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from .credentials import load_pve_credentials
 from .discovery import build_pve_client
 from .locks import LockContention, acquire_lock, release_locks_for_operation
+from .operation_log import log_stage
 from .maintenance import _quorum_after_removal
 from .models import Cluster, Node, PveTarget, PveTask, Operation, Workload
 from .operations_engine import (
@@ -149,6 +150,7 @@ def execute_reboot(db: Session, operation_id) -> Operation:
     try:
         if op.status == "approved":
             op = enter_stage(db, op, status="revalidating", stage="revalidating")
+            log_stage(op.id, f"Approved. Re-checking {node.name}: maintenance mode, reachability, quorum, no guests left on it.")
             if not node.maintenance_mode:
                 # Previewing reboot eligibility never required this (dry_run_reboot
                 # has no such gate) -- only actually rebooting does.
@@ -191,6 +193,7 @@ def execute_reboot(db: Session, operation_id) -> Operation:
         # that fact wasn't yet durable.
         if op.status == "executing" and not (op.context or {}).get("reboot_command_sent"):
             maintenance_creds = load_pve_credentials(db, target, "maintenance", avoid_node_id=node.id)
+            log_stage(op.id, f"Checks passed. Sending the reboot command to {node.name}.")
             with PveMaintenanceClient(maintenance_creds) as write_client:
                 write_client.reboot_node(node.name)
             op = enter_stage(
@@ -204,11 +207,18 @@ def execute_reboot(db: Session, operation_id) -> Operation:
             # the request).
             deadline = time.monotonic() + NODE_OFFLINE_CONFIRM_TIMEOUT_SECONDS
             went_offline = False
+            phase_start = time.monotonic()
+            last_note = phase_start
+            log_stage(op.id, f"Reboot command sent. Waiting for {node.name} to go offline.")
             while time.monotonic() < deadline:
                 reachable, online, _ = _node_status_tolerant(db, target, node.name, avoid_node_id=node.id)
                 if not reachable or not online:
                     went_offline = True
+                    log_stage(op.id, f"{node.name} is offline (after {int(time.monotonic() - phase_start)}s).")
                     break
+                if time.monotonic() - last_note >= 15:
+                    last_note = time.monotonic()
+                    log_stage(op.id, f"Still online, waiting for it to shut down ({int(last_note - phase_start)}s).")
                 time.sleep(POLL_INTERVAL_SECONDS)
             if not went_offline:
                 release_locks_for_operation(db, op.id)
@@ -218,11 +228,18 @@ def execute_reboot(db: Session, operation_id) -> Operation:
             # it doesn't -- this stops and waits for a human.
             deadline = time.monotonic() + NODE_RETURN_TIMEOUT_SECONDS
             came_back = False
+            phase_start = time.monotonic()
+            last_note = phase_start
+            log_stage(op.id, f"Waiting for {node.name} to boot and rejoin the cluster.")
             while time.monotonic() < deadline:
                 reachable, online, _ = _node_status_tolerant(db, target, node.name, avoid_node_id=node.id)
                 if reachable and online:
                     came_back = True
+                    log_stage(op.id, f"{node.name} is back online (after {int(time.monotonic() - phase_start)}s).")
                     break
+                if time.monotonic() - last_note >= 15:
+                    last_note = time.monotonic()
+                    log_stage(op.id, f"Still waiting for {node.name} ({int(last_note - phase_start)}s).")
                 time.sleep(POLL_INTERVAL_SECONDS)
             if not came_back:
                 release_locks_for_operation(db, op.id)
@@ -236,6 +253,7 @@ def execute_reboot(db: Session, operation_id) -> Operation:
             op = enter_stage(db, op, status="verifying", stage="verifying")
 
         if op.status == "verifying":
+            log_stage(op.id, f"Verifying {node.name}: cluster membership, quorum, uptime.")
             reachable, online, cluster_status = _node_status_tolerant(db, target, node.name, avoid_node_id=node.id)
             quorate_entry = next((e for e in (cluster_status or []) if e.get("type") == "cluster"), None)
 
@@ -280,6 +298,7 @@ def execute_reboot(db: Session, operation_id) -> Operation:
                 release_locks_for_operation(db, op.id)
                 return fail_operation(db, op, error=f"node uptime ({verification['uptime_seconds']}s) suggests it may not have actually rebooted")
 
+            log_stage(op.id, f"Verification passed: online, quorate, uptime {verification['uptime_seconds']}s, kernel {verification['kernel_version']}.")
             release_locks_for_operation(db, op.id)
             try:
                 from .discovery import run_discovery

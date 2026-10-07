@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import OperationLogPanel from "@/components/OperationLogPanel";
 import type { Operation } from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
 import { isInFlight } from "@/lib/operationStatus";
@@ -627,6 +628,10 @@ export default function OperationCard({
 
       {op.blocking_safety_rules && op.blocking_safety_rules.length > 0 && (
         <div className="text-xs text-bad mb-2">Blocked by: {op.blocking_safety_rules.join(", ")}</div>
+      )}
+
+      {(op.operation_type_id === "host.update" || op.operation_type_id === "host.reboot") && op.status !== "awaiting_approval" && (
+        <OperationLogPanel operationId={op.id} active={isInFlight(op.status)} />
       )}
 
       {op.operation_type_id === "host.update" && op.dry_run_result?.planned_packages != null && (
