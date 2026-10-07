@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { Finding } from "@/lib/api";
 import StatusBadge from "@/components/StatusBadge";
 import { useMe } from "@/lib/useMe";
+import { notifyBadgesChanged } from "@/lib/operationsBus";
 
 type View = "active" | "acknowledged" | "dismissed" | "resolved";
 
@@ -31,6 +32,7 @@ export default function FindingList({ findings, view }: { findings: Finding[]; v
       });
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       setSelected(new Set());
+      notifyBadgesChanged();
       router.refresh();
     } catch (e) {
       setError((e as Error).message);

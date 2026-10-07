@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { onBadgesChanged } from "@/lib/operationsBus";
 import { PackageIcon,
   DashboardIcon, HealthIcon, LightbulbIcon, WrenchIcon, LinkIcon, ShieldIcon, GaugeIcon,
   ServerIcon, WorkloadIcon, StorageIcon, NetworkIcon, PlugIcon, KeyIcon,
@@ -143,7 +144,11 @@ export default function Sidebar({ version }: { version: string }) {
     }
     refresh();
     const interval = setInterval(refresh, 30000);
-    return () => clearInterval(interval);
+    const off = onBadgesChanged(refresh);
+    return () => {
+      clearInterval(interval);
+      off();
+    };
   }, [pathname]);
 
   if (isPublicPage) return null;
