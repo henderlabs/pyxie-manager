@@ -660,6 +660,12 @@ class Finding(Base):
     # hold-down for notifications (findings._settle_notifications).
     state_since = Column(DateTime(timezone=True), nullable=True)
     notified_active = Column(Boolean, nullable=True)
+    # Operator triage. Acknowledged = still listed but muted and not counted; dismissed = hidden. Cleared by
+    # findings._reconcile when a new occurrence begins or the severity gets worse.
+    acknowledged_at = Column(DateTime(timezone=True), nullable=True)
+    acknowledged_by = Column(String, nullable=True)
+    dismissed_at = Column(DateTime(timezone=True), nullable=True)
+    dismissed_by = Column(String, nullable=True)
 
     __table_args__ = (UniqueConstraint("dedupe_key", name="uq_finding_dedupe_key"),)
 

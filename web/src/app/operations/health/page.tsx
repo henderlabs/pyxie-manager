@@ -1,46 +1,54 @@
 import { apiFetch } from "@/lib/api";
 import type { Finding } from "@/lib/api";
 import { Card, EmptyState, PageHeader } from "@/components/Card";
-import StatusBadge from "@/components/StatusBadge";
+import FindingList from "@/components/FindingList";
 import { HealthIcon } from "@/components/Icons";
 
-export default async function HealthPage({ searchParams }: { searchParams: { active?: string } }) {
-  const showResolved = searchParams.active === "false";
-  const findings = await apiFetch<Finding[]>(`/api/findings${showResolved ? "" : "?active=true"}`);
+type View = "active" | "acknowledged" | "dismissed" | "resolved";
+
+export default async function HealthPage({ searchParams }: { searchParams: { view?: string; active?: string } }) {
+  // ?active=false was the old "All (including resolved)" link; keep it working.
+  const requested = searchParams.view ?? (searchParams.active === "false" ? "resolved" : "active");
+  const view: View = (["active", "acknowledged", "dismissed", "resolved"] as const).find((v) => v === requested) ?? "active";
+
+  const [current, resolved] = await Promise.all([
+    apiFetch<Finding[]>("/api/findings?active=true&status=any"),
+    view === "resolved" ? apiFetch<Finding[]>("/api/findings?active=false") : Promise.resolve([] as Finding[]),
+  ]);
+  const counts = {
+    active: current.filter((f) => f.triage === "open").length,
+    acknowledged: current.filter((f) => f.triage === "acknowledged").length,
+    dismissed: current.filter((f) => f.triage === "dismissed").length,
+  };
+  const shown = view === "resolved" ? resolved : current.filter((f) => f.triage === (view === "active" ? "open" : view));
+  const chips: { key: View; label: string }[] = [
+    { key: "active", label: `Active (${counts.active})` },
+    { key: "acknowledged", label: `Acknowledged (${counts.acknowledged})` },
+    { key: "dismissed", label: `Dismissed (${counts.dismissed})` },
+    { key: "resolved", label: "Resolved" },
+  ];
+  const empty: Record<View, string> = {
+    active: counts.acknowledged + counts.dismissed > 0
+      ? "Nothing needs attention. Acknowledged and dismissed findings are under their own tabs."
+      : "No active health findings. Everything discovered so far looks healthy.",
+    acknowledged: "No acknowledged findings.",
+    dismissed: "No dismissed findings.",
+    resolved: "No resolved findings.",
+  };
 
   return (
     <div>
       <PageHeader title="Health" subtitle="Read-only findings, not recommendations" icon={<HealthIcon className="w-5 h-5" />} />
-      <div className="flex gap-2 mb-4 text-sm">
-        <a href="/operations/health" className={`px-3 py-1 rounded border ${!showResolved ? "border-accent text-accent bg-accent/10" : "border-border text-muted"}`}>
-          Active
-        </a>
-        <a href="/operations/health?active=false" className={`px-3 py-1 rounded border ${showResolved ? "border-accent text-accent bg-accent/10" : "border-border text-muted"}`}>
-          All (including resolved)
-        </a>
+      <div className="flex gap-2 mb-4 text-sm flex-wrap">
+        {chips.map((c) => (
+          <a key={c.key} href={c.key === "active" ? "/operations/health" : `/operations/health?view=${c.key}`}
+            className={`px-3 py-1 rounded border ${view === c.key ? "border-accent text-accent bg-accent/10" : "border-border text-muted"}`}>
+            {c.label}
+          </a>
+        ))}
       </div>
       <Card>
-        {findings.length === 0 ? (
-          <EmptyState message="No active health findings. Everything discovered so far looks healthy." />
-        ) : (
-          <div className="divide-y divide-border">
-            {findings.map((f) => (
-              <div key={f.id} className="py-2 text-sm">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <StatusBadge status={f.active ? f.severity : "unknown"} />
-                    <span className="text-text">{f.title}</span>
-                  </div>
-                  <span className="text-xs text-muted uppercase">{f.category}</span>
-                </div>
-                <div className="text-xs text-muted mt-0.5 ml-[70px]">
-                  first seen {new Date(f.first_observed).toLocaleString()} · last seen {new Date(f.last_observed).toLocaleString()}
-                  {!f.active && f.resolved_at && <> · resolved {new Date(f.resolved_at).toLocaleString()}</>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+        {shown.length === 0 ? <EmptyState message={empty[view]} /> : <FindingList key={view} findings={shown} view={view} />}
       </Card>
     </div>
   );

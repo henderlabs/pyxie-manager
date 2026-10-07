@@ -376,6 +376,11 @@ export type Finding = {
   active: boolean;
   resolved_at: string | null;
   confidence: string | null;
+  triage: "open" | "acknowledged" | "dismissed";
+  acknowledged_at: string | null;
+  acknowledged_by: string | null;
+  dismissed_at: string | null;
+  dismissed_by: string | null;
 };
 
 export type Recommendation = {
