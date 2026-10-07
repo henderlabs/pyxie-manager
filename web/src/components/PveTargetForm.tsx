@@ -59,7 +59,7 @@ export default function PveTargetForm({ sites }: { sites: Site[] }) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10"
+        className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10"
       >
         + Add PVE Target
       </button>
@@ -162,7 +162,7 @@ export default function PveTargetForm({ sites }: { sites: Site[] }) {
         <button
           type="submit"
           disabled={pending}
-          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-white border border-accent hover:bg-accent/10 disabled:opacity-50"
+          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
         >
           {pending ? "Saving…" : "Save target"}
         </button>
