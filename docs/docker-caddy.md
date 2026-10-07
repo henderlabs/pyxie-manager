@@ -84,7 +84,7 @@ A new installation takes about 15 minutes. Commands run as the login user on the
    ```
    | Set | To |
    |---|---|
-   | `PYXIE_HOSTNAME` | the DNS name users will type; it must resolve to this VM |
+   | `PYXIE_HOSTNAME` | the DNS name users will type; it must resolve to this VM. **Use a DNS name, not an IP address:** browsers send no hostname when you browse to an IP, so Caddy cannot pick a certificate and the connection fails with a TLS "internal error" |
    | `POSTGRES_PASSWORD` | a long random value, URL-safe characters only: `openssl rand -hex 24` |
    | `PYXIE_CREDENTIAL_KEY` | `openssl rand -base64 32 \| tr '+/' '-_'`. **Back it up outside git and outside this VM:** it cannot be recovered, and without it every saved Proxmox token is unreadable |
    | `PYXIE_TLS_MODE` | `internal` to start (see TLS modes above) |
