@@ -5,7 +5,7 @@
 # `command=`), running as pyxie-hostmaint itself -- NOT root. This is an
 # extra layer in front of sudo/pyxie-maint, not a replacement for it: even
 # if the SSH private key leaked, the attacker could not get an interactive
-# shell or run anything other than these six exact invocations, full stop,
+# shell or run anything other than these seven exact invocations, full stop,
 # before sudo (and its own separate restriction) is ever reached.
 #
 # $SSH_ORIGINAL_COMMAND is matched against an exact-string allowlist --
@@ -21,6 +21,7 @@ case "${SSH_ORIGINAL_COMMAND:-}" in
   "sudo /usr/local/sbin/pyxie-maint plan")    exec sudo /usr/local/sbin/pyxie-maint plan ;;
   "sudo /usr/local/sbin/pyxie-maint apply")   exec sudo /usr/local/sbin/pyxie-maint apply ;;
   "sudo /usr/local/sbin/pyxie-maint verify")  exec sudo /usr/local/sbin/pyxie-maint verify ;;
+  "sudo /usr/local/sbin/pyxie-maint log")     exec sudo /usr/local/sbin/pyxie-maint log ;;
   *)
     echo '{"error":"command not permitted for this identity"}' >&2
     exit 3

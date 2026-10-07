@@ -37,6 +37,7 @@ from .host_maintenance_client import (
     sanitize_captured_output,
 )
 from .locks import LockContention, acquire_lock, release_locks_for_operation
+from .operation_log import HostLogStreamer, log_stage
 from .maintenance import _quorum_after_removal
 from .models import Cluster, HostMaintenanceCredential, Node, Operation, PveTarget
 from .pve_client import PveClient
@@ -266,6 +267,7 @@ def execute_host_update(db: Session, operation_id) -> Operation:
     try:
         if op.status == "approved":
             op = enter_stage(db, op, status="revalidating", stage="revalidating")
+            log_stage(op.id, f"Approved. Re-checking {node.name}: maintenance mode, package lists, and that the plan is unchanged.")
             if not node.maintenance_mode:
                 # Checking for updates never required this (dry_run_host_update
                 # has no such gate) -- only actually applying them does. Matches
@@ -306,7 +308,27 @@ def execute_host_update(db: Session, operation_id) -> Operation:
                         return block_operation(db, op, blocking_safety_rules=["SAFE-PLAN-CHANGED-001"], actor="system")
 
                     before_status = client.status()
-                    apply_result = client.apply()
+                    log_stage(op.id, f"Plan unchanged ({len(approved_packages)} package(s)). Starting apt dist-upgrade on {node.name}.")
+                    streamer = None
+                    try:
+                        capabilities = (client.version() or {}).get("capabilities") or []
+                    except Exception:  # noqa: BLE001 -- live output is optional
+                        capabilities = []
+                    if "log" in capabilities:
+                        try:
+                            baseline = client.log()
+                        except Exception:  # noqa: BLE001
+                            baseline = None
+                        streamer = HostLogStreamer(op.id, HostMaintenanceClient, hm_creds, baseline).start()
+                    else:
+                        log_stage(op.id, "Live host output is not available: this host's pyxie-maint wrapper is older than 1.1.0. "
+                                         "The update still runs; its output appears when it finishes.")
+                    try:
+                        apply_result = client.apply()
+                    finally:
+                        if streamer is not None:
+                            streamer.stop()
+                    log_stage(op.id, f"apt finished (exit {apply_result.get('exit_status')}). Verifying against the host's live package state.")
                     if "log_tail" in apply_result:
                         # Defense in depth -- the wrapper already sanitizes
                         # its own captured output, but never trust a

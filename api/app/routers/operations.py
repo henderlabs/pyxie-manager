@@ -160,6 +160,25 @@ def dismiss_operation(
     return _serialize(op)
 
 
+@router.get("/{operation_id}/log")
+def get_operation_log(operation_id: uuid.UUID, after: int = 0, db: Session = Depends(get_db)):
+    """Live output for an operation (host apt output and workflow stage lines), oldest first.
+    The page passes the last `next` it saw as `after` to fetch only new chunks."""
+    from pyxie_core.models import OperationLog
+
+    rows = (
+        db.query(OperationLog)
+        .filter(OperationLog.operation_id == operation_id, OperationLog.id > max(after, 0))
+        .order_by(OperationLog.id)
+        .limit(500)
+        .all()
+    )
+    return {
+        "lines": [{"seq": r.id, "ts": r.ts.isoformat(), "source": r.source, "text": r.text} for r in rows],
+        "next": rows[-1].id if rows else max(after, 0),
+    }
+
+
 @router.get("/{operation_id}")
 def get_operation(operation_id: uuid.UUID, db: Session = Depends(get_db)):
     op = db.query(Operation).filter(Operation.id == operation_id).one_or_none()

@@ -1,7 +1,7 @@
 # /etc/sudoers.d/pyxie-maint
 #
 # Grants the dedicated 'pyxie-hostmaint' identity NOPASSWD sudo to run
-# /usr/local/sbin/pyxie-maint with ONLY these six exact argument forms --
+# /usr/local/sbin/pyxie-maint with ONLY these seven exact argument forms --
 # nothing else. Do not add a wildcard (e.g. "pyxie-maint *") to this file;
 # that would defeat the entire point of a restricted wrapper.
 #
@@ -9,7 +9,7 @@
 # `visudo -cf` before trusting it -- a malformed sudoers.d file can lock
 # out sudo entirely on some configurations.
 
-pyxie-hostmaint ALL=(root) NOPASSWD: /usr/local/sbin/pyxie-maint version, /usr/local/sbin/pyxie-maint status, /usr/local/sbin/pyxie-maint refresh, /usr/local/sbin/pyxie-maint plan, /usr/local/sbin/pyxie-maint apply, /usr/local/sbin/pyxie-maint verify
+pyxie-hostmaint ALL=(root) NOPASSWD: /usr/local/sbin/pyxie-maint version, /usr/local/sbin/pyxie-maint status, /usr/local/sbin/pyxie-maint refresh, /usr/local/sbin/pyxie-maint plan, /usr/local/sbin/pyxie-maint apply, /usr/local/sbin/pyxie-maint verify, /usr/local/sbin/pyxie-maint log
 
 # No PTY is available over a non-interactive SSH exec_command session --
 # without this, sudo refuses to run at all on distros with `requiretty` set.
