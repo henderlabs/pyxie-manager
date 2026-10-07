@@ -4,7 +4,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import {
+import { PackageIcon,
   DashboardIcon, HealthIcon, LightbulbIcon, WrenchIcon, LinkIcon, ShieldIcon, GaugeIcon,
   ServerIcon, WorkloadIcon, StorageIcon, NetworkIcon, PlugIcon, KeyIcon,
   ScrollIcon, ReportIcon, SlidersIcon, GearIcon, UsersIcon, BellIcon, MailIcon,
@@ -73,6 +73,7 @@ const SECTIONS: NavSection[] = [
         children: [
           { label: "Notifications", href: "/platform/settings/notifications", icon: <BellIcon /> },
           { label: "Email (SMTP)", href: "/platform/settings/email", icon: <MailIcon /> },
+          { label: "Updates", href: "/platform/settings/updates", icon: <PackageIcon /> },
           { label: "Integrations", href: "/platform/providers", icon: <PlugIcon /> },
           { label: "Credentials", href: "/platform/credentials", icon: <KeyIcon /> },
           { label: "Users", href: "/platform/users", icon: <UsersIcon />, adminOnly: true },
