@@ -26,6 +26,8 @@ PyXie runs as one Docker stack (web, API, worker, PostgreSQL, Redis and Caddy fo
 3. **Keep it current:** [`docs/updates.md`](docs/updates.md) (Settings > Updates) and
    [`docs/patching-a-node.md`](docs/patching-a-node.md).
 
+Bugs, requests and feedback: Platform > Feedback in the app, or [`docs/feedback.md`](docs/feedback.md).
+
 The older native systemd install (no Docker) is still supported but is the legacy path:
 [`docs/INSTALL.md`](docs/INSTALL.md). Pick one per host.
 

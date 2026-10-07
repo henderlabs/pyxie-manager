@@ -64,6 +64,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { label: "Logging", href: "/platform/logging", icon: <ScrollIcon /> },
       { label: "Reporting", href: "/platform/reporting", icon: <ReportIcon /> },
+      { label: "Feedback", href: "/platform/feedback", icon: <MailIcon /> },
       {
         label: "Settings",
         href: "/platform/settings",
@@ -224,7 +225,10 @@ export default function Sidebar({ version }: { version: string }) {
         ))}
       </nav>
       <div className="px-4 py-2 border-t border-border flex items-center justify-between text-xs text-muted/70 tracking-wide">
-        <span>v{version}</span>
+        <span className="flex items-center gap-2">
+          <span>v{version}</span>
+          <a href={`/platform/feedback${pathname && !pathname.startsWith("/platform/feedback") ? `?from=${encodeURIComponent(pathname)}` : ""}`} className="hover:text-text underline decoration-dotted">Send feedback</a>
+        </span>
         {lastRefreshed && (
           <button
             onClick={refreshNow}

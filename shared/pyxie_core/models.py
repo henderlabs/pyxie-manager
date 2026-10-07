@@ -505,6 +505,8 @@ class AppSettings(Base):
     # quorum) produces one alert when it settles, not one per flip. 0 = notify
     # immediately. See findings._settle_notifications.
     notification_hold_down_minutes = Column(Integer, nullable=False, default=5)
+    # Where the in-app "Send by email" feedback goes (maintainer mailbox); empty = that option is hidden.
+    feedback_email = Column(String, nullable=True)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)
 
     @property
@@ -1141,3 +1143,17 @@ class InternalJobRun(Base):
     status = Column(String, nullable=False, default="running")  # running|success|failed
     result_summary = Column(JSONB, nullable=True)
     error = Column(Text, nullable=True)
+
+
+class FeedbackSubmission(Base):
+    """What this instance has sent as feedback. Never stores the description or diagnostics."""
+
+    __tablename__ = "feedback_submissions"
+
+    id = uuid_pk()
+    created_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
+    kind = Column(String, nullable=False)  # bug | feature | feedback
+    title = Column(String, nullable=False)
+    channel = Column(String, nullable=False)  # github | email | copied
+    submitted_by = Column(String, nullable=True)
+    diagnostics_included = Column(Boolean, nullable=False, default=False)
