@@ -31,8 +31,10 @@ come up right.
 
 ## 1. Get GitHub access to this repo **[manual -- network-dependent]**
 
-This repo is private. Pick ONE of these, based on what your network
-actually allows (test both if you're not sure):
+The repository is public, so `git clone https://github.com/henderlabs/pyxie-manager.git`
+needs no login. The options below only matter if you pull from a private mirror
+or fork. Pick ONE of these, based on what your network actually allows (test
+both if you're not sure):
 
 **Option A -- SSH deploy key** (works if outbound SSH isn't intercepted):
 1. `ssh-keygen -t ed25519 -f ~/.ssh/pyxie_deploy_key -N ""` on the VM.

@@ -29,8 +29,8 @@ unchanged. Pick one per host; don't run both against the same database.
   the host installer. NTP on the VM.
 - **A certificate choice** (`PYXIE_TLS_MODE`, below). `internal` is quickest for a lab, but browsers and Proxmox nodes will
   not trust it by default (the host script has an option for that).
-- **Access**: read access to the repository on GitHub, and someone with root on a Proxmox node to create the accounts and
-  install the host wrapper (PyXie never does that for you).
+- **Access**: someone with root on a Proxmox node to create the accounts and install the host wrapper (PyXie never does that
+  for you). The repository is public, so cloning needs no GitHub login.
 
 ## Configuration (`.env`)
 
@@ -74,9 +74,6 @@ A new installation takes about 15 minutes. Commands run as the login user on the
    git clone https://github.com/henderlabs/pyxie-manager.git ~/pyxie-manager
    cd ~/pyxie-manager
    ```
-   The repository is private today: if the clone asks for a login, you need read access first (a GitHub account that
-   was added to the repository, using a personal access token as the password, or a read-only deploy key; see step 1
-   of [`INSTALL.md`](INSTALL.md)).
 2. **Install Docker** (as root; this also puts your user in the `docker` group, so log out and back in afterwards):
    ```bash
    sudo bash ops/docker/install-docker.sh --add-user "$USER"
@@ -87,7 +84,7 @@ A new installation takes about 15 minutes. Commands run as the login user on the
    ```
    | Set | To |
    |---|---|
-   | `PYXIE_HOSTNAME` | the DNS name users will type; it must resolve to this VM |
+   | `PYXIE_HOSTNAME` | the DNS name users will type; it must resolve to this VM. **Use a DNS name, not an IP address:** browsers send no hostname when you browse to an IP, so Caddy cannot pick a certificate and the connection fails with a TLS "internal error" |
    | `POSTGRES_PASSWORD` | a long random value, URL-safe characters only: `openssl rand -hex 24` |
    | `PYXIE_CREDENTIAL_KEY` | `openssl rand -base64 32 \| tr '+/' '-_'`. **Back it up outside git and outside this VM:** it cannot be recovered, and without it every saved Proxmox token is unreadable |
    | `PYXIE_TLS_MODE` | `internal` to start (see TLS modes above) |
