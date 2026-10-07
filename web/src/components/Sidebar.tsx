@@ -1,10 +1,9 @@
 "use client";
 
-import ThemeToggle from "@/components/ThemeToggle";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import {
+import { PackageIcon,
   DashboardIcon, HealthIcon, LightbulbIcon, WrenchIcon, LinkIcon, ShieldIcon, GaugeIcon,
   ServerIcon, WorkloadIcon, StorageIcon, NetworkIcon, PlugIcon, KeyIcon,
   ScrollIcon, ReportIcon, SlidersIcon, GearIcon, UsersIcon, BellIcon, MailIcon,
@@ -73,6 +72,7 @@ const SECTIONS: NavSection[] = [
         children: [
           { label: "Notifications", href: "/platform/settings/notifications", icon: <BellIcon /> },
           { label: "Email (SMTP)", href: "/platform/settings/email", icon: <MailIcon /> },
+          { label: "Updates", href: "/platform/settings/updates", icon: <PackageIcon /> },
           { label: "Integrations", href: "/platform/providers", icon: <PlugIcon /> },
           { label: "Credentials", href: "/platform/credentials", icon: <KeyIcon /> },
           { label: "Users", href: "/platform/users", icon: <UsersIcon />, adminOnly: true },
@@ -83,7 +83,7 @@ const SECTIONS: NavSection[] = [
   },
 ];
 
-export default function Sidebar({ version, instance }: { version: string; instance: string }) {
+export default function Sidebar({ version }: { version: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const [me, setMe] = useState<{ email: string; display_name: string | null; is_admin: boolean } | null>(null);
@@ -145,12 +145,6 @@ export default function Sidebar({ version, instance }: { version: string; instan
   }, [pathname]);
 
   if (isPublicPage) return null;
-
-  async function logout() {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/login");
-    router.refresh();
-  }
 
   function renderLink(item: NavItem, nested: boolean) {
     // Sub-routes (e.g. /infrastructure/nodes/<id>, a node detail page
@@ -228,25 +222,8 @@ export default function Sidebar({ version, instance }: { version: string; instan
           </div>
         ))}
       </nav>
-      <div className="px-4 py-3 border-t border-border text-xs">
-        <div className="mb-2.5">
-          <ThemeToggle />
-        </div>
-        {me ? (
-          <div className="flex items-center justify-between gap-2">
-            <Link href="/profile" className="text-muted hover:text-text truncate" title={`${me.email} — edit profile`}>
-              {me.display_name || me.email}
-            </Link>
-            <button onClick={logout} className="text-accent hover:underline shrink-0">
-              Sign out
-            </button>
-          </div>
-        ) : (
-          <span className="text-muted">Read-only</span>
-        )}
-      </div>
-      <div className="px-4 py-1.5 flex items-center justify-between text-xs text-muted/70 tracking-wide">
-        <span className="truncate min-w-0" title={`${instance} v${version}`}>{instance} v{version}</span>
+      <div className="px-4 py-2 border-t border-border flex items-center justify-between text-xs text-muted/70 tracking-wide">
+        <span>v{version}</span>
         {lastRefreshed && (
           <button
             onClick={refreshNow}

@@ -78,6 +78,11 @@ services:
       # trusting X-Forwarded-For from the private network is safe. This is what
       # makes request.client (sessions, audit client_ip) the real browser IP.
       FORWARDED_ALLOW_IPS: "*"
+      PYXIE_UPDATE_DIR: /update
+    # The host updater (ops/docker/updater.py) writes release status here and picks up update requests.
+    # Created by ops/docker/install-updater.sh so it is owned by the host user, not root. docs/updates.md
+    volumes:
+      - ${PYXIE_UPDATE_DIR:-./update}:/update
     networks:
       - internal
     depends_on:

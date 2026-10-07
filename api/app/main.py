@@ -27,6 +27,7 @@ from .routers import (
     recommendations,
     node_detail,
     reports,
+    system_updates,
     workload_detail,
 )
 from .seed import seed_defaults
@@ -96,6 +97,7 @@ app.include_router(notifications.router)
 app.include_router(notification_rules.router)
 app.include_router(jobs.router)
 app.include_router(network.router)
+app.include_router(system_updates.router)
 app.include_router(node_detail.router)
 app.include_router(workload_detail.router)
 
