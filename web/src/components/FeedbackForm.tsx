@@ -3,15 +3,11 @@
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { Card, CardTitle } from "@/components/Card";
-import { useMe } from "@/lib/useMe";
 
 export type FeedbackInfo = {
   repo: string;
   version: string;
-  email_available: boolean;
-  email_configured: boolean;
-  feedback_email: string | null;
-  smtp_enabled: boolean;
+  email_to: string | null;
   recent: { id: string; created_at: string; kind: string; title: string; channel: string; submitted_by: string | null }[];
 };
 
@@ -22,6 +18,7 @@ const KINDS = [
 ] as const;
 const CHANNEL_LABEL: Record<string, string> = { github: "opened on GitHub", email: "emailed", copied: "copied" };
 const MAX_URL = 7000; // GitHub rejects very long query strings
+const MAX_MAILTO = 1800; // mail apps and browsers truncate long mailto: links
 
 function browserSummary(): string {
   const ua = navigator.userAgent;
@@ -35,14 +32,11 @@ function browserSummary(): string {
 
 export default function FeedbackForm({ info, serverFields, from }: { info: FeedbackInfo; serverFields: { label: string; value: string }[]; from: string }) {
   const router = useRouter();
-  const me = useMe();
   const [kind, setKind] = useState<(typeof KINDS)[number]>(KINDS[0]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [withDiag, setWithDiag] = useState(true);
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [addr, setAddr] = useState(info.feedback_email ?? "");
 
   const diagText = useMemo(() => {
     const rows = [...serverFields];
@@ -60,7 +54,7 @@ export default function FeedbackForm({ info, serverFields, from }: { info: Feedb
     if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
     return data;
   }
-  const record = (channel: "github" | "copied") => post("submissions", { kind: kind.key, title: title.trim(), channel, diagnostics_included: withDiag });
+  const record = (channel: "github" | "email" | "copied") => post("submissions", { kind: kind.key, title: title.trim(), channel, diagnostics_included: withDiag });
 
   async function openGithub() {
     if (!valid) return need();
@@ -82,15 +76,21 @@ export default function FeedbackForm({ info, serverFields, from }: { info: Feedb
     setNotice({ ok: true, text: shortened ? "GitHub opened, but your description was too long for a link and was shortened. Paste the rest there, or use Copy as text." : "GitHub opened in a new tab. Review the issue there and submit it." });
   }
 
-  async function sendEmail() {
-    if (!valid) return need();
-    setBusy(true);
-    try {
-      await post("email", { kind: kind.key, title: title.trim(), description: description.trim(), diagnostics_text: withDiag ? diagText : "", diagnostics_included: withDiag });
-      setNotice({ ok: true, text: "Sent by email." });
-      setTitle(""); setDescription("");
-      router.refresh();
-    } catch (e) { setNotice({ ok: false, text: (e as Error).message }); } finally { setBusy(false); }
+  async function openEmail() {
+    if (!valid || !info.email_to) return need();
+    const subject = `[PyXie ${kind.key}] ${title.trim()}`;
+    const mk = (desc: string) => `mailto:${info.email_to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(`${desc}${withDiag ? `\n\n--- Diagnostics ---\n${diagText}` : ""}\n\nPyXie version: ${info.version}\n`)}`;
+    let desc = description.trim();
+    let url = mk(desc);
+    let shortened = false;
+    while (url.length > MAX_MAILTO && desc.length > 200) {
+      desc = desc.slice(0, Math.floor(desc.length * 0.8));
+      url = mk(desc);
+      shortened = true;
+    }
+    window.location.href = url;
+    try { await record("email"); router.refresh(); } catch { /* the record is a convenience */ }
+    setNotice({ ok: true, text: shortened ? "Your mail app should open with the message filled in. It was too long for a link and was shortened; add the rest there, or use Copy as text." : "Your mail app should open with the message filled in. Review it and send it from there." });
   }
 
   async function copyText() {
@@ -99,14 +99,6 @@ export default function FeedbackForm({ info, serverFields, from }: { info: Feedb
     try { await navigator.clipboard.writeText(text); } catch { setNotice({ ok: false, text: "Your browser blocked copying. Select the text and copy it by hand." }); return; }
     try { await record("copied"); router.refresh(); } catch { /* ignore */ }
     setNotice({ ok: true, text: `Copied. Post it at github.com/${info.repo}/issues or email it to the maintainers.` });
-  }
-
-  async function saveAddr() {
-    try {
-      await post("settings", { feedback_email: addr.trim() || null }, "PUT");
-      setNotice({ ok: true, text: addr.trim() ? "Feedback email address saved." : "Feedback email address cleared." });
-      router.refresh();
-    } catch (e) { setNotice({ ok: false, text: (e as Error).message }); }
   }
 
   const chip = (active: boolean) => `px-3 py-1 rounded border text-sm ${active ? "border-accent text-accent bg-accent/10" : "border-border text-muted"}`;
@@ -135,30 +127,15 @@ export default function FeedbackForm({ info, serverFields, from }: { info: Feedb
         )}
         <div className="flex gap-2 flex-wrap items-center">
           <button type="button" onClick={openGithub} className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10">Open on GitHub</button>
-          {info.email_available && <button type="button" disabled={busy} onClick={sendEmail} className={btn}>Send by email</button>}
+          {info.email_to && <button type="button" onClick={openEmail} className={btn}>Send by email</button>}
           <button type="button" onClick={copyText} className={btn}>Copy as text</button>
         </div>
         <p className="text-xs text-muted mt-2">
           GitHub opens with this filled in and you review it there before submitting; it needs a GitHub account.
-          {!info.email_available && " No GitHub account? Copy as text and send it to the maintainers."}
+          {info.email_to ? " No GitHub account? Send by email opens your own mail app with the message filled in." : " No GitHub account? Copy as text and send it to the maintainers."}
         </p>
         {notice && <p className={`text-sm mt-2 ${notice.ok ? "text-text" : "text-danger"}`} role="status">{notice.text}</p>}
       </Card>
-
-      {me?.is_admin === true && (
-        <Card>
-          <CardTitle>Email option (admin)</CardTitle>
-          <p className="text-xs text-muted mb-2">
-            Adds a "Send by email" button for everyone on this server. It sends through this server's own email settings
-            {info.smtp_enabled ? "." : ", which are currently off (Settings > Email (SMTP))."} Leave empty to hide the button.
-          </p>
-          <div className="flex gap-2">
-            <input value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="feedback@example.com" aria-label="Feedback email address"
-              className="flex-1 px-3 py-2 rounded border border-border bg-surface text-sm text-text" />
-            <button type="button" onClick={saveAddr} className={btn}>Save</button>
-          </div>
-        </Card>
-      )}
 
       <Card>
         <CardTitle>Sent from this server</CardTitle>

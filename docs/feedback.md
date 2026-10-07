@@ -8,7 +8,7 @@ Feedback goes to the public repository [henderlabs/pyxie-feedback](https://githu
 | Button | What happens |
 |---|---|
 | **Open on GitHub** | Opens a new issue with your title, description, PyXie version and diagnostics filled in. You review it on GitHub and submit it there. Needs a GitHub account. Nothing is sent by PyXie. |
-| **Send by email** | Appears only when an admin has set a feedback address on this page and email (Settings > Email) is on. Sent through this server's own relay. |
+| **Send by email** | Opens your own mail app with a message to the PyXie developers already filled in. You review it and send it from there. Nothing goes through this server's email settings. |
 | **Copy as text** | For people without a GitHub account or a server with no internet access. |
 
 **Diagnostics** (a checkbox, on by default) is a fixed list shown on the page before anything leaves: PyXie version, the
