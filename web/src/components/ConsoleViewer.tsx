@@ -46,6 +46,11 @@ function keysymFor(ch: string): number | null {
   return cp < 0x100 ? cp : 0x01000000 + cp;
 }
 
+const KEY_SHIFT_L = 0xffe1;
+/** US layout: characters that need Shift held. QEMU's VNC server maps a keysym to the unshifted key
+ * unless Shift is sent explicitly (what a real keyboard does), so we press it ourselves. */
+const NEEDS_SHIFT = /[A-Z~!@#$%^&*()_+{}|:"<>?]/;
+
 type State = "idle" | "connecting" | "connected" | "ended";
 
 /** noVNC (bundled) talking to PyXie's ticketed websocket proxy. Mounted only while the Console
@@ -99,8 +104,11 @@ export default function ConsoleViewer({ workloadId, info }: { workloadId: string
       if (!rfbRef.current) break;
       const sym = keysymFor(ch);
       if (sym === null) continue;
+      const shift = NEEDS_SHIFT.test(ch);
+      if (shift) rfb.sendKey(KEY_SHIFT_L, "ShiftLeft", true);
       rfb.sendKey(sym, null, true);
       rfb.sendKey(sym, null, false);
+      if (shift) rfb.sendKey(KEY_SHIFT_L, "ShiftLeft", false);
       await new Promise((r) => setTimeout(r, 4));
     }
     typingRef.current = false;
