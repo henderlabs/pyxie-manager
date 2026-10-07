@@ -1,0 +1,126 @@
+"""Step-by-step setup guide: which steps of a new installation are done, from plain data.
+
+Pure functions (no database, no network) so the logic is testable. The API gathers the inputs (see
+routers/setup.py); the Integrations page renders the result as a numbered guide.
+
+States: done, next (the one to do now), todo (not done, not first), waiting (needs an earlier step), optional.
+"""
+
+from . import host_kit
+
+REQUIRED = ("sites", "accounts", "cluster")
+
+
+def _node_ready(n: dict, expected: str) -> tuple[bool, str]:
+    if not n.get("pinned"):
+        return False, "host key not pinned"
+    ver = n.get("wrapper_version")
+    if not ver:
+        return False, "wrapper not seen yet"
+    if host_kit.is_outdated(ver, expected):
+        return False, f"wrapper {ver}, update available ({expected})"
+    return True, f"pinned, wrapper {ver}"
+
+
+def build_steps(inp: dict) -> list[dict]:
+    expected = inp.get("expected_wrapper") or "0"
+    targets = inp.get("targets", [])
+    nodes = inp.get("nodes", [])
+    st = inp.get("settings", {})
+    steps: list[dict] = []
+
+    def add(key, title, state, summary, **extra):
+        steps.append({"key": key, "number": len(steps) + 1, "title": title, "state": state, "summary": summary, **extra})
+
+    # 1. site
+    n_sites = inp.get("sites", 0)
+    add("sites", "Add a site", "done" if n_sites else "todo",
+        f"{n_sites} site{'s' if n_sites != 1 else ''}." if n_sites else "A site is a location or grouping, such as Lab or Head office.",
+        action={"label": "Open sites", "anchor": "sites"})
+
+    # 2. proxmox accounts (we can only see their effect: an inventory credential exists)
+    have_inv = any(t.get("inventory_status") for t in targets)
+    add("accounts", "Create the Proxmox accounts", "done" if have_inv else "todo",
+        "Read-only account and token created." if have_inv else
+        "PyXie never creates accounts itself. Tick what you need in the script builder, copy the script to any Proxmox node, run it as root, and keep the token secrets it prints.",
+        action={"label": "Open the script builder", "anchor": "builder"})
+
+    # 3. cluster
+    if not targets:
+        add("cluster", "Connect your cluster", "waiting" if not have_inv else "todo",
+            "Enter the hostname of any one node and the read-only token from step 2, then Test connection.",
+            action={"label": "Add a PVE target", "anchor": "targets"})
+    else:
+        bad = [t for t in targets if t.get("inventory_status") != "valid"]
+        empty = [t for t in targets if not t.get("nodes")]
+        if bad:
+            add("cluster", "Connect your cluster", "todo",
+                f"{bad[0]['name']}: credential is {bad[0].get('inventory_status') or 'missing'}. Run Test connection on the target.",
+                action={"label": "Open PVE targets", "anchor": "targets"})
+        elif empty:
+            add("cluster", "Connect your cluster", "todo", f"{empty[0]['name']}: connected, but no nodes discovered yet. Run Sync now.",
+                action={"label": "Open PVE targets", "anchor": "targets"})
+        else:
+            total = sum(t.get("nodes", 0) for t in targets)
+            add("cluster", "Connect your cluster", "done", f"{len(targets)} target{'s' if len(targets) != 1 else ''}, {total} nodes discovered.",
+                action={"label": "Open PVE targets", "anchor": "targets"})
+    cluster_ok = steps[-1]["state"] == "done"
+
+    # 4. admin (maintenance) credential
+    maint = [t.get("maintenance_status") for t in targets if t.get("maintenance_status")]
+    if maint and all(s == "valid" for s in maint):
+        add("admin", "Add the admin credential (for changes)", "done", "Maintenance (Admin) token saved and tested.", action={"label": "Open credentials", "href": "/platform/credentials"})
+    elif maint:
+        add("admin", "Add the admin credential (for changes)", "todo", "Saved but not tested yet. Open Credentials and click Test connection on it.", action={"label": "Open credentials", "href": "/platform/credentials"})
+    else:
+        add("admin", "Add the admin credential (for changes)", "waiting" if not cluster_ok else "optional",
+            "Needed for migrations, power actions and reboots. Add the Maintenance (Admin) token on the target, then Test connection.",
+            action={"label": "Open credentials", "href": "/platform/credentials"})
+
+    # 5. hosts
+    hm = any(h.get("has_cred") for h in inp.get("hostmaint", []))
+    items = []
+    ready = 0
+    for n in nodes:
+        ok, why = _node_ready(n, expected)
+        ready += ok
+        items.append({"name": n["name"], "ok": ok, "detail": why})
+    if not cluster_ok:
+        add("hosts", "Connect each host for patching", "waiting", "Needs the cluster connected first.", items=items,
+            action={"label": "Open credentials", "href": "/platform/credentials"})
+    elif not hm:
+        add("hosts", "Connect each host for patching", "todo",
+            "a) Generate the host key pair once (Credentials page). b) On every node, run the host script from the builder. c) Pin each node's SSH host key after checking its fingerprint.",
+            items=items, action={"label": "Open credentials", "href": "/platform/credentials"})
+    elif nodes and ready == len(nodes):
+        add("hosts", "Connect each host for patching", "done", f"All {len(nodes)} nodes ready.", items=items, action={"label": "Open credentials", "href": "/platform/credentials"})
+    else:
+        add("hosts", "Connect each host for patching", "todo",
+            f"{ready} of {len(nodes)} nodes ready. Run the host script from the builder on the others, then pin their SSH host keys.",
+            items=items, action={"label": "Open credentials", "href": "/platform/credentials"})
+
+    # 6. features
+    writes, console = bool(st.get("pve_mutations_enabled")), bool(st.get("console_enabled"))
+    feat = [f"Writes to Proxmox: {'on' if writes else 'off'}", f"Embedded console: {'on' if console else 'off'}"]
+    add("features", "Turn features on", "done" if writes else "optional",
+        "Both are off until you switch them on in Settings. " + "; ".join(feat) + ".", action={"label": "Open settings", "href": "/platform/settings"})
+
+    # 7. notifications
+    mail = bool(st.get("smtp_enabled")) and bool(st.get("notification_recipient_set"))
+    add("notifications", "Notifications", "done" if mail else "optional",
+        f"Email on, {st.get('notification_rules', 0)} rule(s)." if mail else "Set an email relay and who gets alerts, so problems reach you.",
+        action={"label": "Open email settings", "href": "/platform/settings/email"})
+
+    # 8. check
+    add("check", "Check everything", "optional", "Runs every check and lists what is missing, in plain words.", action={"label": "Run check", "anchor": "check"})
+
+    # mark the first required (then first recommended) step that is not done as "next"
+    order = [s for s in steps if s["state"] in ("todo",) and s["key"] in REQUIRED] or [s for s in steps if s["state"] == "todo"]
+    if order:
+        order[0]["state"] = "next"
+    return steps
+
+
+def progress(steps: list[dict]) -> dict:
+    countable = [s for s in steps if s["key"] != "check"]
+    return {"done": sum(1 for s in countable if s["state"] == "done"), "total": len(countable)}

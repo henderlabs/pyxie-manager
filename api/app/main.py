@@ -12,6 +12,7 @@ from .routers import (
     audit,
     console,
     host_kit,
+    setup,
     auth,
     findings,
     inventory,
@@ -105,6 +106,7 @@ app.include_router(workload_detail.router)
 app.include_router(console.router)
 app.include_router(host_kit.admin_router)
 app.include_router(host_kit.public_router)
+app.include_router(setup.router)
 
 
 @app.get("/api/health")

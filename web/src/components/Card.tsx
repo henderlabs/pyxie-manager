@@ -1,7 +1,7 @@
 import Link from "next/link";
 
-export function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return <div className={`bg-surface border border-border rounded-lg p-4 ${className}`}>{children}</div>;
+export function Card({ children, className = "", id }: { children: React.ReactNode; className?: string; id?: string }) {
+  return <div id={id} className={`bg-surface border border-border rounded-lg p-4 scroll-mt-4 ${className}`}>{children}</div>;
 }
 
 export function CardTitle({ children }: { children: React.ReactNode }) {

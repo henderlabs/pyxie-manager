@@ -131,7 +131,8 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
   const [inventory, setInventory] = useState(true);
   const [maintenance, setMaintenance] = useState(false);
   const [consoleOpt, setConsoleOpt] = useState<ConsoleOpt>("none");
-  const [hostMode, setHostMode] = useState<"none" | "install" | "uninstall">("install");
+  const noTarget = targets.length === 0;
+  const [hostMode, setHostMode] = useState<"none" | "install" | "uninstall">(targets.length === 0 ? "none" : "install");
   const [insecure, setInsecure] = useState(false);
   const [link, setLink] = useState<Link | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -169,7 +170,6 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
     }
   }
 
-  if (targets.length === 0) return <p className="text-sm text-muted">Add a PVE target above first; the host script is built for a specific target.</p>;
   if (!isAdmin) return <p className="text-sm text-muted">Admin accounts can generate host scripts.</p>;
 
   return (
@@ -209,13 +209,14 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
 
         <div className="space-y-2">
           <div className="text-xs uppercase tracking-wide text-muted">2. On each node</div>
+          {noTarget && <p className="text-xs text-warn">The host script needs a connected PVE target (step 3), so it is not available yet. Do step 2 first, then come back for this part.</p>}
           {([
             ["install", "Install or upgrade the host wrapper", "Lets PyXie apply updates and reboot this node, with live output. Running it again upgrades."],
             ["uninstall", "Remove the host wrapper", "Removes the PyXie SSH identity, wrapper and sudoers entry from this node."],
             ["none", "Skip this part", ""],
           ] as ["install" | "uninstall" | "none", string, string][]).map(([v, label, sub]) => (
             <label key={v} className="flex items-start gap-2 text-sm">
-              <input type="radio" name="host-opt" className="mt-1" checked={hostMode === v} onChange={() => { setHostMode(v); touch(); }} />
+              <input type="radio" name="host-opt" className="mt-1" checked={hostMode === v} disabled={noTarget && v !== "none"} onChange={() => { setHostMode(v); touch(); }} />
               <span><span className="text-text">{label}</span>{sub && <span className="block text-xs text-muted">{sub}</span>}</span>
             </label>
           ))}
