@@ -111,6 +111,17 @@ export default async function QuickStartPage() {
       </Card>
 
       <Card className="mb-4">
+        <CardTitle>Putting the host kit on a node</CardTitle>
+        <p className="text-xs text-muted mb-2">The script builder (Integrations page) writes the script and shows the exact commands with your node address filled in. The three ways, in short:</p>
+        <ol className="list-decimal pl-5 text-sm text-text space-y-1.5">
+          <li><span className="font-medium">Paste on the node (simplest).</span> <span className="text-muted text-xs">Log in to the node as root, paste the generated script into a file with <code>nano</code>, run it with <code>bash</code>. It downloads one installer from a 30-minute link and refuses to run unless the checksum matches.</span></li>
+          <li><span className="font-medium">Copy the installer file.</span> <span className="text-muted text-xs">Download <code>pyxie-host-kit.sh</code>, <code>scp</code> it to the node, compare <code>sha256sum</code> with the checksum PyXie shows, run <code>bash pyxie-host-kit.sh</code>. Nothing to unzip.</span></li>
+          <li><span className="font-medium">Copy the classic .tar.gz kit.</span> <span className="text-muted text-xs"><code>scp</code> it over, <code>tar xzf</code> it, <code>cd</code> into the folder and run <code>bash install.sh</code> as root.</span></li>
+        </ol>
+        <p className="text-xs text-muted mt-2">Then check it on the node with <code>sudo -u pyxie-hostmaint sudo /usr/local/sbin/pyxie-maint version</code>, and pin the node&apos;s SSH host key in PyXie (Credentials): probe, compare the fingerprint with <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> on the node, and only then confirm. Running the same thing again later upgrades the node.</p>
+      </Card>
+
+      <Card className="mb-4">
         <CardTitle>What the PyXieAdmin role allows, and why</CardTitle>
         <p className="text-xs text-muted mb-2">Deliberately narrower than Proxmox&apos;s built-in PVEAdmin: only what PyXie&apos;s write paths call.</p>
         <table className="w-full text-sm">
