@@ -5,6 +5,15 @@ PyXie can show a guest's screen (noVNC) inside the Console tab of a workload, an
 
 ## One-time setup (per PVE target; done by a PVE admin, not by PyXie)
 
+Two options. PyXie uses the `console` credential if one is saved and otherwise falls back to the
+`maintenance` credential.
+
+**Reuse the maintenance token:** add `VM.Console` to the role the `pyxie-manager@pve!maintenance`
+token holds (`pveum acl list` shows it; privilege separation means the grant is on the token),
+e.g. `pveum role modify <ROLE> --privs VM.Console --append 1`. No PyXie credential change needed.
+
+**Or a dedicated token** (smaller blast radius if it leaks):
+
 Create a token with only console rights, on a PVE node:
 
 ```

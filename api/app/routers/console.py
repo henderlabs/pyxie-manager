@@ -59,6 +59,15 @@ def _load_workload_ctx(db: Session, workload_id):
     return w, node, cluster, target
 
 
+def _console_creds(db: Session, target: PveTarget):
+    """The dedicated 'console' token when one is saved, otherwise the 'maintenance' token
+    (which then needs VM.Console added in PVE). Raises CredentialNotConfigured if neither exists."""
+    try:
+        return load_pve_credentials(db, target, "console")
+    except CredentialNotConfigured:
+        return load_pve_credentials(db, target, "maintenance")
+
+
 def _console_enabled(db: Session) -> bool:
     return bool(db.query(AppSettings.console_enabled).filter(AppSettings.id == 1).scalar())
 
@@ -83,7 +92,7 @@ def console_info(workload_id: uuid.UUID, user: User = Depends(get_current_user),
         embedded = "disabled"
     else:
         try:
-            load_pve_credentials(db, target, "console")
+            _console_creds(db, target)
         except CredentialNotConfigured:
             embedded = "no_credential"
     if w.is_missing:
@@ -110,9 +119,9 @@ def create_console_ticket(
     if w.is_missing or w.status != "running":
         raise HTTPException(409, "The console is only available while the guest is running.")
     try:
-        creds = load_pve_credentials(db, target, "console")
+        creds = _console_creds(db, target)
     except CredentialNotConfigured:
-        raise HTTPException(409, "No 'console' credential is saved for this PVE target (Credentials page).")
+        raise HTTPException(409, "No 'console' or 'maintenance' credential is saved for this PVE target (Credentials page).")
     if not ct.ticket_rate_ok(_r(), str(user.id)):
         raise HTTPException(429, "Too many console requests. Wait a minute and try again.")
 
@@ -165,7 +174,7 @@ def _revalidate(session_id: str, user_id: str, workload_id: str) -> tuple[bool, 
         node = db.query(Node).filter(Node.id == w.node_id).one_or_none()
         cluster = db.query(Cluster).filter(Cluster.id == w.cluster_id).one_or_none()
         target = db.query(PveTarget).filter(PveTarget.id == cluster.pve_target_id).one_or_none()
-        creds = load_pve_credentials(db, target, "console")
+        creds = _console_creds(db, target)
         return True, "", {
             "email": user.email, "workload_id": w.id, "node_id": node.id, "cluster_id": cluster.id,
             "auth": f"PVEAPIToken={creds.token_user}!{creds.token_id}={creds.token_secret}",

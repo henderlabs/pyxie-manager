@@ -17,7 +17,7 @@ const EMBEDDED_HINT: Record<ConsoleInfo["embedded"], string> = {
   ready: "",
   admin_only: "The embedded console is for admin accounts. Use Open in PVE below.",
   disabled: "The embedded console is switched off. An admin can turn it on in Settings.",
-  no_credential: "No 'console' credential is saved yet (Credentials page). Use Open in PVE meanwhile.",
+  no_credential: "No credential is saved for this PVE target (Credentials page). Use Open in PVE meanwhile.",
   not_running: "The console is available while the guest is running.",
   unavailable: "This guest is not currently visible to PVE.",
 };
