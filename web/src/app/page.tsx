@@ -4,6 +4,7 @@ import type { AuditEvent, DashboardSummary, Finding, ProtectionResultRow, Recomm
 import { Card, CardTitle, PageHeader } from "@/components/Card";
 import StatusBadge from "@/components/StatusBadge";
 import RebootBanner from "@/components/RebootBanner";
+import QuickStartBanner from "@/components/QuickStartBanner";
 import DashboardNodesList from "@/components/DashboardNodesList";
 import { HalfGauge } from "@/components/HalfGauge";
 import { BalanceGauge, NodeBalanceStrip } from "@/components/ClusterBalance";
@@ -48,6 +49,7 @@ export default async function DashboardPage() {
   return (
     <div>
       <PageHeader title="Dashboard" subtitle="What needs my attention right now?" icon={<DashboardIcon className="w-5 h-5" />} />
+      <QuickStartBanner />
 
       <div className="flex flex-wrap gap-3 mb-4 empty:mb-0">
         {nodesInMaintenance.length > 0 && (
