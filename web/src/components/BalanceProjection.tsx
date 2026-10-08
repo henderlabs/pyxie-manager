@@ -6,8 +6,9 @@ type ProjectedNode = { node_id: string; name: string; mem_total_bytes: number; b
 type PlanLine = {
   workload_id: string; vmid: number; name: string | null; memory_bytes?: number | null;
   source_node_id?: string; source_node?: string; destination_node_id: string; destination_node: string;
-  transport?: string;
+  transport?: string; pinned_node?: string | null;
 };
+type LeftAlone = { workload_id: string; vmid: number; name: string | null; node: string | null; reason: "pinned" | "do_not_move" };
 type BlockedMove = {
   workload_id: string; vmid: number; name: string | null; memory_bytes?: number | null;
   source_node: string; blocked_node: string; blocking_reasons: string[]; improvement: number;
@@ -23,6 +24,8 @@ export default function BalanceProjection({ op }: { op: Operation }) {
   const nodes = (r.projected_memory as ProjectedNode[] | undefined) || [];
   const plan = (r.migrate_plan as PlanLine[] | undefined) || [];
   const blocked = (r.blocked_moves as BlockedMove[] | undefined) || [];
+  const leftAlone = (r.left_alone as LeftAlone[] | undefined) || [];
+  const leftAloneTotal = (r.left_alone_total as number | undefined) ?? leftAlone.length;
   const blockedTotal = (r.blocked_moves_total as number | undefined) ?? blocked.length;
   if (nodes.length === 0 && plan.length === 0 && blocked.length === 0) return null;
 
@@ -74,6 +77,11 @@ export default function BalanceProjection({ op }: { op: Operation }) {
               <span className="min-w-0">
                 <span className="text-text">{m.name || `vmid ${m.vmid}`}</span>
                 <span className="text-muted">: {m.source_node || "?"} → {m.destination_node}{m.memory_bytes ? ` (${formatBytes(m.memory_bytes)})` : ""}</span>
+                {m.pinned_node && (
+                  <span className="ml-2 px-1.5 py-0.5 rounded text-xs bg-accent/15 text-accent" title="Pinned host: a soft pin set on the workload page">
+                    {m.pinned_node === m.destination_node ? "moving to its pin" : `pinned to ${m.pinned_node}`}
+                  </span>
+                )}
               </span>
               <span className="shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-good/15 text-good">Passed</span>
             </li>
@@ -101,6 +109,13 @@ export default function BalanceProjection({ op }: { op: Operation }) {
           ))}
           {blockedTotal > blocked.length && <li className="py-2 text-xs text-muted">{blockedTotal - blocked.length} more refused moves not shown.</li>}
           {moves.length === 0 && blocked.length === 0 && <li className="py-2 text-muted">No moves.</li>}
+          {leftAlone.length > 0 && (
+            <li className="py-2 text-xs text-muted">
+              <span className="text-text">Left alone on purpose:</span>{" "}
+              {leftAlone.map((l) => `${l.name || "vmid " + l.vmid} (${l.reason === "pinned" ? `pinned to ${l.node}` : "do not move"})`).join(", ")}
+              {leftAloneTotal > leftAlone.length ? `, and ${leftAloneTotal - leftAlone.length} more` : ""}.
+            </li>
+          )}
         </ul>
       </div>
     </div>

@@ -214,6 +214,7 @@ type MigratePlanItem = {
   current_storage?: string | null;
   source_node?: string;
   memory_bytes?: number | null;
+  pinned_node?: string | null;
   // "shutdown_in_place" opts a workload that DOES have a clean auto-found
   // destination out of migrating at all -- just power it off for the
   // maintenance window and back on here afterward (node.exit_maintenance's
@@ -432,6 +433,11 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
             {op.operation_type_id === "cluster.rebalance" && item.source_node && (
               <span className="text-muted shrink-0 hidden sm:inline">
                 from {item.source_node}{item.memory_bytes ? ` · ${formatBytes(item.memory_bytes)}` : ""}
+              </span>
+            )}
+            {op.operation_type_id === "cluster.rebalance" && item.pinned_node && (
+              <span className="shrink-0 px-1.5 py-0.5 rounded text-xs bg-accent/15 text-accent" title="Pinned host: a soft pin set on the workload page">
+                {item.pinned_node === item.destination_node ? "moving to its pin" : `pinned to ${item.pinned_node}`}
               </span>
             )}
             {item.current_storage && (

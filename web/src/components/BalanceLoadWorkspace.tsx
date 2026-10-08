@@ -141,6 +141,8 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, 
   const b = computeBalance(nodes);
   const avg = b ? b.memAvg : null;
   const guests = (id: string) => workloads.filter((w) => w.node_id === id && w.status === "running").length;
+  const pinnedHere = (id: string) => workloads.filter((w) => w.type === "vm" && w.node_id === id && w.status === "running" && w.preferred_node_id === id).length;
+  const lockedElsewhere = (id: string) => workloads.filter((w) => w.type === "vm" && w.node_id === id && w.status === "running" && w.preferred_node_id !== id && w.do_not_move).length;
   const heavy = live.filter((n) => loadOf(n, avg).label === "Heavy");
   const selectable = live.filter((n) => n.status === "online" && !n.maintenance_mode);
   const previewed = ops.length > 0;
@@ -187,8 +189,11 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, 
                       <span className="block h-full rounded" style={{ width: `${mem ?? 0}%`, background: colorForPct(mem) }} />
                     </span>
                   </span>
-                  <span className="w-44 shrink-0 text-xs text-muted tabular-nums">
+                  <span className="w-56 shrink-0 text-xs text-muted tabular-nums">
                     memory {mem === null ? "—" : Math.round(mem) + "%"} · cpu {n.cpu_usage_pct === null ? "—" : Math.round(n.cpu_usage_pct) + "%"} · {guests(n.id)} guests
+                    {pinnedHere(n.id) + lockedElsewhere(n.id) > 0 && (
+                      <span className="text-accent" title="Pinned to this host or marked Do not move: Balance Load leaves these alone"> · {pinnedHere(n.id) + lockedElsewhere(n.id)} locked</span>
+                    )}
                   </span>
                   <span className={`w-14 shrink-0 text-center px-2 py-0.5 rounded text-xs font-medium ${l.cls}`}>{l.label}</span>
                 </label>
@@ -215,8 +220,8 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, 
         <p className="text-sm text-muted mb-3">
           Balance Load scores every running VM against every eligible node and proposes moves that make memory use more even.
           Each move is checked against affinity rules, memory headroom, CPU compatibility, HA and maintenance mode, then
-          checked again at the moment it runs. Nothing moves until you approve, and you can change any destination or
-          set a line to &ldquo;Don&apos;t move&rdquo;.
+          checked again at the moment it runs. Guests pinned to the host they are on, or marked Do not move, are left alone.
+          Nothing moves until you approve, and you can change any destination or set a line to &ldquo;Don&apos;t move&rdquo;.
         </p>
         {isAdmin && (
           <button

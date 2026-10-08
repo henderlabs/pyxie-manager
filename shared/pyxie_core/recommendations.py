@@ -250,10 +250,21 @@ def _rightsizing_recommendations(assessments: list[dict], capacity_reports: list
     return recs
 
 
+def left_alone_reason(wl) -> str | None:
+    """Why Balance Load never considers this guest: marked Do not move, or sitting on the host it is pinned to.
+    A pin is the soft "Pinned host" on the workload page; balancing will not move a guest away from it
+    (Maintenance still can, and placement still prefers the pin when it chooses)."""
+    if getattr(wl, "do_not_move", False):
+        return "do_not_move"
+    if wl.preferred_node_id is not None and wl.preferred_node_id == wl.node_id:
+        return "pinned"
+    return None
+
+
 def _placement_recommendations(
     db: Session, source_node_ids: set | None = None, blocked_out: list | None = None, *,
     cluster_ids: set | None = None, metric: str | None = None, min_improvement: float | None = None,
-    max_moves: int | None = None, skip_workload_ids: set | None = None,
+    max_moves: int | None = None, skip_workload_ids: set | None = None, left_alone_out: list | None = None,
 ) -> list[dict]:
     """DRS-style proactive load-balancing: for each running VM, re-run the
     exact same scoring engine the interactive migration form's 'recommend'
@@ -324,7 +335,15 @@ def _placement_recommendations(
                     break
                 if source_node_ids is not None and wl.node_id not in source_node_ids:
                     continue
-                if wl.do_not_move or (skip_workload_ids and wl.id in skip_workload_ids):
+                reason = left_alone_reason(wl)
+                if reason:
+                    if left_alone_out is not None:
+                        left_alone_out.append({
+                            "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "memory_bytes": wl.memory_bytes,
+                            "node": node_by_id[wl.node_id].name if wl.node_id in node_by_id else None, "reason": reason,
+                        })
+                    continue
+                if skip_workload_ids and wl.id in skip_workload_ids:
                     continue
                 # Exclude offline/maintenance-mode nodes as destinations --
                 # always keep the workload's own current node in the set so

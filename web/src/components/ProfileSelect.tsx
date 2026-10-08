@@ -145,7 +145,7 @@ export function PreferredHostSelect({
       title={error || undefined}
       onChange={(e) => change(e.target.value)}
     >
-      <option value="none">no preference</option>
+      <option value="none">not pinned</option>
       {clusterNodes.map((n) => (
         <option key={n.id} value={n.id}>
           {n.name}

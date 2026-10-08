@@ -162,8 +162,9 @@ def dry_run_balance(
     (only_if_moves) leaves no empty operation behind."""
     source_node_ids = set(node_ids) if node_ids else None
     blocked_moves: list[dict] = []
+    left_alone: list[dict] = []
     recs = _placement_recommendations(
-        db, source_node_ids=source_node_ids, blocked_out=blocked_moves,
+        db, source_node_ids=source_node_ids, blocked_out=blocked_moves, left_alone_out=left_alone,
         cluster_ids={cluster_id} if cluster_id else None, min_improvement=min_improvement,
         max_moves=max_moves, skip_workload_ids=skip_workload_ids,
     )
@@ -177,6 +178,7 @@ def dry_run_balance(
         migrate_plan.append({
             "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
             "memory_bytes": wl.memory_bytes,
+            "pinned_node": wl.preferred_node.name if wl.preferred_node_id and wl.preferred_node else None,
             "source_node_id": str(wl.node_id), "source_node": ev["current_node"],
             "improvement": ev.get("improvement"),
             "destination_node_id": ev["suggested_node_id"], "destination_node": ev["suggested_node"],
@@ -223,6 +225,8 @@ def dry_run_balance(
         "migrate_plan": migrate_plan,
         "blocked_moves": sorted(blocked_moves, key=lambda b: -b["improvement"])[:MAX_BLOCKED_SHOWN],
         "blocked_moves_total": len(blocked_moves),
+        "left_alone": sorted(left_alone, key=lambda x: -(x.get("memory_bytes") or 0))[:MAX_BLOCKED_SHOWN * 2],
+        "left_alone_total": len(left_alone),
         "projected_memory": project_node_memory(db, migrate_plan),
     }
     ctx = {**(op.context or {}), "migrate_plan": migrate_plan}
