@@ -1,0 +1,29 @@
+[
+ {
+  "name": "dashboard",
+  "path": "/"
+ },
+ {
+  "name": "dashboard-balance",
+  "path": "/",
+  "clip": "(()=>{const f=(t)=>[...document.querySelectorAll('h2,h3,div,span,p')].find(e=>e.children.length===0&&e.textContent.trim().toUpperCase().startsWith(t));const card=(e)=>{let n=e;while(n&&!(getComputedStyle(n).borderTopWidth!=='0px'&&n.getBoundingClientRect().width>400))n=n.parentElement;return n;};const a=card(f('CLUSTER RESOURCE USAGE')).getBoundingClientRect(),b=card(f('HOST LOAD')).getBoundingClientRect();const x=Math.min(a.x,b.x)-12,y=a.y-12;return {x,y,width:Math.max(a.right,b.right)-x+12,height:b.bottom-y+12};})()"
+ },
+ {
+  "name": "rightsizing",
+  "path": "/operations/recommendations"
+ },
+ {
+  "name": "maintenance",
+  "path": "/operations/maintenance"
+ },
+ {
+  "name": "affinity-rules",
+  "path": "/operations/affinity-rules"
+ },
+ {
+  "name": "balance-load",
+  "path": "/operations/balance",
+  "run": "[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Select heavy nodes').click();new Promise(r=>setTimeout(r,1500)).then(()=>[...document.querySelectorAll('button')].find(b=>b.textContent.includes('Preview Balance Load')).click())",
+  "runWait": 9000
+ }
+]
