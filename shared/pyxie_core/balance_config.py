@@ -2,6 +2,7 @@
 
 No imports of the workflows here, so the planner can read the settings without a cycle."""
 
+import math
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -149,17 +150,31 @@ def in_window(windows: list[dict], local_now: datetime) -> bool:
     return False
 
 
+def weighted_spread(values: list[float], weights: list[float]) -> float:
+    """Size-aware spread in percentage points: twice the weighted standard deviation. Two equal nodes at 90% and 10%
+    give 80, the same as the plain busiest-minus-quietest gap, but a small quiet node among large ones counts for
+    little, and a lone busy node among many even ones still shows."""
+    total = sum(weights)
+    mean = sum(v * w for v, w in zip(values, weights)) / total
+    return 2.0 * math.sqrt(sum(w * (v - mean) ** 2 for v, w in zip(values, weights)) / total)
+
+
 def balance_score(nodes) -> float | None:
-    """Same score as the Dashboard gauge: 100 minus the gap between busiest and quietest live node (memory always;
-    CPU once the busiest is past 50%). None when fewer than two nodes have data."""
+    """Same score as the Dashboard gauge: 100 minus the size-weighted spread of live nodes (memory always; CPU once the
+    busiest node is past 50%). Each node counts in proportion to its memory size, so a small node sitting at a different
+    percentage does not make a cluster that is as even as its sizes allow read as uneven. None when fewer than two
+    nodes have data. Keep in step with computeBalance() in web/src/components/ClusterBalance.tsx."""
     live = [n for n in nodes if n.status == "online" and not n.maintenance_mode and n.mem_usage_pct is not None]
     if len(live) < 2:
         return None
-    mem = [n.mem_usage_pct for n in live]
-    cpu = [n.cpu_usage_pct for n in live if n.cpu_usage_pct is not None]
-    cpu_gap = (max(cpu) - min(cpu)) if cpu and max(cpu) >= 50 else 0
-    gap = max(max(mem) - min(mem), cpu_gap)
-    return max(0.0, min(100.0, 100 - gap))
+    sizes = [float(getattr(n, "mem_total_bytes", None) or 0.0) for n in live]
+    weights = sizes if all(s > 0 for s in sizes) else [1.0] * len(live)
+    mem_gap = weighted_spread([n.mem_usage_pct for n in live], weights)
+    cpu_pairs = [(n.cpu_usage_pct, w) for n, w in zip(live, weights) if n.cpu_usage_pct is not None]
+    cpu_gap = 0.0
+    if cpu_pairs and max(v for v, _ in cpu_pairs) >= 50:
+        cpu_gap = weighted_spread([v for v, _ in cpu_pairs], [w for _, w in cpu_pairs])
+    return max(0.0, min(100.0, 100 - max(mem_gap, cpu_gap)))
 
 
 def utcnow() -> datetime:

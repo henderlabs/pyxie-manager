@@ -8,24 +8,42 @@ type NodeLoad = {
   status: string;
   cpu_usage_pct: number | null;
   mem_usage_pct: number | null;
+  mem_total_bytes?: number | null;
   maintenance_mode: boolean;
 };
 
-// Balance = 100 minus the gap, in percentage points, between the busiest and the quietest
-// node. Memory always counts (it is what limits where a VM can move); CPU only counts once
+// Twice the weighted standard deviation, in percentage points. Two equal nodes at 90% and 10% give 80, the same as the
+// plain busiest-minus-quietest gap, but a small quiet node among large ones counts for little.
+function weightedSpread(values: number[], weights: number[]): number {
+  const total = weights.reduce((a, b) => a + b, 0);
+  const mean = values.reduce((a, v, i) => a + v * weights[i], 0) / total;
+  return 2 * Math.sqrt(values.reduce((a, v, i) => a + weights[i] * (v - mean) ** 2, 0) / total);
+}
+
+// Balance = 100 minus the size-weighted spread of node load, in percentage points. Each node counts in proportion
+// to its memory size, so a small node at a different percentage does not make a cluster that is as even as its
+// sizes allow read as uneven. Memory always counts (it is what limits where a VM can move); CPU only counts once
 // the busiest node is past 50%, because a 0%-to-20% CPU spread on an idle cluster is noise.
 // Nodes that are offline or in maintenance mode are left out: they are empty on purpose.
+// Keep in step with balance_score() in shared/pyxie_core/balance_config.py.
 export function computeBalance(nodes: NodeLoad[]) {
   const live = nodes.filter((n) => n.status === "online" && !n.maintenance_mode && n.mem_usage_pct !== null);
   if (live.length < 2) return null;
   const mem = live.map((n) => n.mem_usage_pct as number);
-  const cpu = live.map((n) => n.cpu_usage_pct).filter((v): v is number => v !== null);
+  const sizes = live.map((n) => n.mem_total_bytes || 0);
+  const weights = sizes.every((s) => s > 0) ? sizes : sizes.map(() => 1);
+  const cpuPairs = live
+    .map((n, i) => [n.cpu_usage_pct, weights[i]] as const)
+    .filter((p): p is readonly [number, number] => p[0] !== null);
+  const cpu = cpuPairs.map((p) => p[0]);
   const memMin = Math.min(...mem);
   const memMax = Math.max(...mem);
   const cpuMin = cpu.length ? Math.min(...cpu) : 0;
   const cpuMax = cpu.length ? Math.max(...cpu) : 0;
-  const cpuGap = cpuMax >= 50 ? cpuMax - cpuMin : 0;
-  const gap = Math.max(memMax - memMin, cpuGap);
+  const memGap = weightedSpread(mem, weights);
+  const cpuGap = cpuPairs.length && cpuMax >= 50 ? weightedSpread(cpu, cpuPairs.map((p) => p[1])) : 0;
+  const gap = Math.max(memGap, cpuGap);
+  const wTotal = weights.reduce((a, b) => a + b, 0);
   const score = Math.min(Math.max(100 - gap, 0), 100);
   const word = score >= 80 ? "Even" : score >= 60 ? "Uneven" : "Skewed";
   return {
@@ -35,7 +53,7 @@ export function computeBalance(nodes: NodeLoad[]) {
     memMax,
     cpuMin,
     cpuMax,
-    memAvg: mem.reduce((a, b) => a + b, 0) / mem.length,
+    memAvg: mem.reduce((a, v, i) => a + v * weights[i], 0) / wTotal, // the cluster's real memory use, not an average of percentages
     cpuAvg: cpu.length ? cpu.reduce((a, b) => a + b, 0) / cpu.length : 0,
     counted: live.length,
   };
@@ -51,7 +69,7 @@ export function BalanceGauge({ nodes, icon }: { nodes: NodeLoad[]; icon?: React.
       ticks={[60, 80]}
       scale="balance"
       detail={b ? `${b.word} · memory ${Math.round(b.memMin)}–${Math.round(b.memMax)}%` : null}
-      title="100 minus the gap between the busiest and quietest node (memory, plus CPU once a node passes 50%). Nodes in maintenance or offline are left out."
+      title="100 minus how far node load strays from the cluster average, counting each node in proportion to its memory size (memory, plus CPU once a node passes 50%). Nodes in maintenance or offline are left out."
     />
   );
 }
