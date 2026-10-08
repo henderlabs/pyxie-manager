@@ -20,9 +20,10 @@ from sqlalchemy.orm import Session
 
 from .audit import write_audit_event
 from .balance_config import (
-    PRESETS, balance_score, get_config, get_state, hours_ago, in_window, resolve_metric, save_config, save_state, utcnow,
+    MIN_HISTORY_HOURS, PRESETS, balance_score, get_config, get_state, hours_ago, in_window, resolve_metric, save_config, save_state,
+    smoothed_loads, smoothed_view, utcnow,
 )
-from .balance_workflow import approve as approve_balance, dry_run_balance
+from .balance_workflow import approve as approve_balance, dry_run_balance, projected_memory_rows
 from .models import AppSettings, Cluster, Node, Operation, ResourceLock, Workload
 from .notifications import dispatch_event
 from .operations_engine import enter_stage
@@ -34,6 +35,44 @@ LIVE_STATUSES = ("pending", "dry_run", "awaiting_approval", "approved", "revalid
 STALE_PLAN_HOURS = 12.0  # a plan nobody approved is replaced by a fresh one rather than left to block automatic balancing
 AUTO_APPROVE_MEMORY_CEILING_PCT = 80.0  # an auto-approved move may not leave any node fuller than this
 AUTO_APPROVE_MOVES_PER_RUN = 1  # one move at a time, then re-evaluate from fresh data
+BACKMOVE_HOURS = 72.0  # a guest never goes back to a host it left this recently
+SETTLED_MOVES = 2  # a guest that has moved this many times in SETTLED_WINDOW_DAYS is left where it is
+SETTLED_WINDOW_DAYS = 7
+
+
+def flapping_guests(rows: list[tuple], now, *, backmove_hours: float = BACKMOVE_HOURS, settled_moves: int = SETTLED_MOVES,
+                    window_days: float = SETTLED_WINDOW_DAYS) -> tuple[dict, dict]:
+    """The loop breaker. rows are (workload_id, completed_at, source_node_id) for completed live migrations.
+    Returns (settled, avoid): settled maps a guest to how many times it moved in the window (leave it alone);
+    avoid maps a guest to the hosts it left in the last backmove_hours (never plan it back onto them).
+    A guest that keeps being moved is the sign the balance it is chasing does not exist. Pure: no database."""
+    settled: dict = {}
+    avoid: dict = {}
+    counts: dict = {}
+    for wid, done, source in rows:
+        if done is None:
+            continue
+        age_h = (now - done).total_seconds() / 3600.0
+        if age_h <= window_days * 24.0:
+            counts[wid] = counts.get(wid, 0) + 1
+        if age_h <= backmove_hours and source is not None:
+            avoid.setdefault(wid, set()).add(source)
+    settled = {wid: n for wid, n in counts.items() if n >= settled_moves}
+    return settled, avoid
+
+
+def _move_history(db: Session, cluster_id, now) -> list[tuple]:
+    since = now - timedelta(days=SETTLED_WINDOW_DAYS)
+    out = []
+    for wid, done, ctx in (
+        db.query(Operation.workload_id, Operation.completed_at, Operation.context)
+        .filter(Operation.operation_type_id == "vm.live_migrate", Operation.cluster_id == cluster_id, Operation.status == "completed",
+                Operation.completed_at >= since, Operation.workload_id.isnot(None))
+        .all()
+    ):
+        src = (ctx or {}).get("source_node_id")
+        out.append((wid, done, _uuid(src) if src else None))
+    return out
 
 
 def stale_waiting_plan(status: str, context: dict | None, age_hours: float, cluster_id) -> bool:
@@ -185,15 +224,27 @@ def evaluate_cluster(db: Session, cluster: Cluster, *, now=None, enqueue=None) -
         return _skip(db, cluster, state, now, "a Balance Load plan is already waiting or running")
 
     nodes = db.query(Node).filter(Node.cluster_id == cluster.id, Node.is_missing.is_(False)).all()
-    score = balance_score(nodes)
+    # Judge by each node's busy level over the last week, not by right now, so a server that is only busy in business
+    # hours never looks idle at night. Without enough history auto-approve waits; recommend falls back to live numbers.
+    loads, enough = smoothed_loads(db, nodes, now)
+    if auto and not enough:
+        return _skip(db, cluster, state, now, f"not enough load history yet (needs {int(MIN_HISTORY_HOURS)} h on every node)")
+    scored = smoothed_view(nodes, loads) if enough else nodes
+    score = balance_score(scored)
     if score is None:
         return _skip(db, cluster, state, now, "not enough nodes with live data")
+    basis = "busy-hours score" if enough else "score"
     if score >= preset["trigger_score"]:
-        return _skip(db, cluster, state, now, f"balanced enough (score {round(score)}, acts below {preset['trigger_score']})", balance_score=round(score))
+        return _skip(db, cluster, state, now, f"balanced enough ({basis} {round(score)}, acts below {preset['trigger_score']})", balance_score=round(score))
 
     metric = resolve_metric(cfg["metric"], nodes)
     node_ids = {n.id for n in nodes if str(n.id) in set(cfg["node_ids"])} or None
     skip_ids = _recently_moved(db, cluster.id, preset["guest_cooldown_hours"], now)
+    skip_reasons = {wid: "recent" for wid in skip_ids}
+    settled, avoid = flapping_guests(_move_history(db, cluster.id, now), now)
+    for wid in settled:
+        skip_ids.add(wid)
+        skip_reasons[wid] = "settled"
     if auto and cfg["level"] == "conservative":  # the gentlest level never touches guests that cannot tolerate downtime
         skip_ids |= {w.id for w in db.query(Workload.id).filter(Workload.cluster_id == cluster.id, Workload.downtime_tolerance == "low").all()}
     max_moves = AUTO_APPROVE_MOVES_PER_RUN if auto else preset["max_moves"]
@@ -205,6 +256,8 @@ def evaluate_cluster(db: Session, cluster: Cluster, *, now=None, enqueue=None) -
             "min_benefit": preset["min_benefit"], "max_moves": max_moves, "auto_mode": cfg["mode"],
         },
         min_improvement=preset["min_benefit"], max_moves=max_moves, skip_workload_ids=skip_ids, only_if_moves=True,
+        skip_reasons=skip_reasons, avoid_nodes=avoid,
+        load_pct_override={n.id: n.mem_usage_pct for n in scored} if enough else None,
     )
     if op is None:
         return _skip(db, cluster, state, now, "no move is worth making at this level", balance_score=round(score))
@@ -216,8 +269,12 @@ def evaluate_cluster(db: Session, cluster: Cluster, *, now=None, enqueue=None) -
     if auto:
         involved = {m["destination_node_id"] for m in plan} | {m["source_node_id"] for m in plan if m.get("source_node_id")}
         writes = bool(db.query(AppSettings.pve_mutations_enabled).filter(AppSettings.id == 1).scalar())
+        busy_projection = projected_memory_rows(
+            [{"node_id": str(n.id), "name": n.name, "mem_total_bytes": n.mem_total_bytes, "mem_usage_pct": n.mem_usage_pct}
+             for n in scored if n.mem_total_bytes and n.mem_usage_pct is not None], plan,
+        )
         blockers = auto_approve_blockers(
-            plan, (op.dry_run_result or {}).get("projected_memory", []), writes_enabled=writes,
+            plan, busy_projection, writes_enabled=writes,
             busy_nodes=_nodes_busy(db, {_uuid(i) for i in involved}, now),
         )
         if enqueue is None:

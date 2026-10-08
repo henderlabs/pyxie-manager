@@ -3,11 +3,13 @@
 No imports of the workflows here, so the planner can read the settings without a cycle."""
 
 import math
-from datetime import datetime, timezone
+from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from .models import Policy
+from .models import MetricPoint, Policy
 
 CONFIG_KEY = "balance.auto"
 STATE_KEY = "balance.auto_state"
@@ -116,6 +118,60 @@ def save_state(db: Session, cluster_id, state: dict) -> None:
     else:
         row.value = state
     db.commit()
+
+
+# Automatic balancing judges the cluster by each node's BUSY level over the last week, not by right now: a server
+# that is only busy in business hours must not look idle at 3 a.m. and attract guests it cannot carry at 10 a.m.
+SMOOTH_DAYS = 7
+SMOOTH_QUANTILE = 0.9
+MIN_HISTORY_HOURS = 24.0
+
+
+def smooth_from_rows(rows: list[tuple], now: datetime) -> dict:
+    """rows are (node_id, metric, quantile_value, first_sampled_at) from the metric history. Returns
+    {node_id: {"mem_pct", "cpu_pct", "hours"}} where hours is how much history backs the numbers (capped at the window)."""
+    out: dict = {}
+    for node_id, metric, value, first in rows:
+        slot = out.setdefault(node_id, {"mem_pct": None, "cpu_pct": None, "hours": 0.0})
+        if metric in ("mem_pct", "cpu_pct") and value is not None:
+            slot[metric] = float(value)
+        if first is not None:
+            hrs = min((now - first).total_seconds() / 3600.0, SMOOTH_DAYS * 24.0)
+            slot["hours"] = hrs if slot["hours"] == 0.0 else min(slot["hours"], hrs)
+    return out
+
+
+def smoothed_loads(db: Session, nodes, now: datetime) -> tuple[dict, bool]:
+    """Per node id: busy-level memory and CPU (7-day 90th percentile). Second value: does every live node have at
+    least MIN_HISTORY_HOURS of history, so the numbers can be trusted."""
+    live = [n for n in nodes if n.status == "online" and not n.maintenance_mode]
+    ids = [n.id for n in live]
+    rows = []
+    if ids:
+        rows = (
+            db.query(MetricPoint.object_id, MetricPoint.metric, func.percentile_cont(SMOOTH_QUANTILE).within_group(MetricPoint.value), func.min(MetricPoint.sampled_at))
+            .filter(MetricPoint.object_type == "node", MetricPoint.object_id.in_(ids), MetricPoint.metric.in_(("mem_pct", "cpu_pct")),
+                    MetricPoint.sampled_at >= now - timedelta(days=SMOOTH_DAYS), MetricPoint.value.isnot(None))
+            .group_by(MetricPoint.object_id, MetricPoint.metric).all()
+        )
+    loads = smooth_from_rows(rows, now)
+    enough = bool(live) and all(n.id in loads and loads[n.id]["mem_pct"] is not None and loads[n.id]["hours"] >= MIN_HISTORY_HOURS for n in live)
+    return loads, enough
+
+
+def smoothed_view(nodes, loads: dict) -> list:
+    """The same nodes with their busy-level numbers standing in for the live ones, so balance_score() and the
+    memory projection can be reused unchanged."""
+    out = []
+    for n in nodes:
+        s = loads.get(n.id)
+        if s is None or s["mem_pct"] is None:
+            continue
+        out.append(SimpleNamespace(
+            id=n.id, name=n.name, status=n.status, maintenance_mode=n.maintenance_mode, mem_total_bytes=n.mem_total_bytes,
+            mem_usage_pct=s["mem_pct"], cpu_usage_pct=s["cpu_pct"] if s["cpu_pct"] is not None else n.cpu_usage_pct,
+        ))
+    return out
 
 
 def swaps_imbalance(src_pct: float, dst_pct: float, memory_bytes: int, dst_total_bytes: int) -> tuple[bool, float]:

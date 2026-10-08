@@ -97,7 +97,7 @@ def projected_memory_rows(nodes: list[dict], migrate_plan: list[dict]) -> list[d
 def dry_run_balance(
     db: Session, *, actor: str, node_ids: list | None = None, cluster_id=None, extra_context: dict | None = None,
     min_improvement: float | None = None, max_moves: int | None = None, skip_workload_ids: set | None = None,
-    only_if_moves: bool = False,
+    only_if_moves: bool = False, skip_reasons: dict | None = None, avoid_nodes: dict | None = None, load_pct_override: dict | None = None,
 ) -> Operation | None:
     """The plan is built first and the operation created after, so an automatic run that finds nothing
     (only_if_moves) leaves no empty operation behind."""
@@ -106,6 +106,7 @@ def dry_run_balance(
     left_alone: list[dict] = []
     recs = _placement_recommendations(
         db, source_node_ids=source_node_ids, blocked_out=blocked_moves, left_alone_out=left_alone,
+        skip_reasons=skip_reasons, avoid_nodes=avoid_nodes, load_pct_override=load_pct_override,
         cluster_ids={cluster_id} if cluster_id else None, min_improvement=min_improvement,
         max_moves=max_moves, skip_workload_ids=skip_workload_ids,
     )

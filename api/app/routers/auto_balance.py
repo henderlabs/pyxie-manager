@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from pyxie_core.audit import write_audit_event
 from pyxie_core.auto_balance import AUTOMATIC_ACTOR, LIVE_STATUSES
 from pyxie_core.balance_config import (
-    PRESETS, ConfigError, balance_score, get_config, get_state, resolve_metric, save_config, utcnow,
+    PRESETS, ConfigError, balance_score, get_config, get_state, resolve_metric, save_config, smoothed_loads, smoothed_view, utcnow,
 )
 from pyxie_core.models import AppSettings, Cluster, Node, Operation, Workload
 
@@ -33,6 +33,8 @@ def _cluster_view(db: Session, cluster: Cluster) -> dict:
     cfg = get_config(db, cluster.id)
     nodes = db.query(Node).filter(Node.cluster_id == cluster.id, Node.is_missing.is_(False)).order_by(Node.name).all()
     score = balance_score(nodes)
+    loads, history_ok = smoothed_loads(db, nodes, utcnow())
+    busy = balance_score(smoothed_view(nodes, loads)) if history_ok else None
     pending = [
         o for o in db.query(Operation).filter(
             Operation.operation_type_id == "cluster.rebalance", Operation.status.in_(LIVE_STATUSES), Operation.dismissed.is_(False)).all()
@@ -54,6 +56,8 @@ def _cluster_view(db: Session, cluster: Cluster) -> dict:
         "preset": PRESETS[cfg["level"]], "presets": PRESETS,
         "nodes": [{"id": str(n.id), "name": n.name} for n in nodes],
         "balance_score": None if score is None else round(score),
+        "busy_score": None if busy is None else round(busy),  # the 7-day busy-level score automatic balancing actually acts on
+        "history_ok": history_ok,
         "resolved_metric": resolve_metric(cfg["metric"], nodes),
         "pending_operation_id": str(pending[0].id) if pending else None,
         "writes_enabled": bool(db.query(AppSettings.pve_mutations_enabled).filter(AppSettings.id == 1).scalar()),
