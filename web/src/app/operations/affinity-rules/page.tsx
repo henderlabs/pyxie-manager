@@ -1,5 +1,5 @@
 import { apiFetch } from "@/lib/api";
-import type { Workload } from "@/lib/api";
+import type { Node, Workload } from "@/lib/api";
 import { PageHeader } from "@/components/Card";
 import AffinityRuleManager from "@/components/AffinityRuleManager";
 import { LinkIcon } from "@/components/Icons";
@@ -16,9 +16,10 @@ type AffinityRule = {
 };
 
 export default async function AffinityRulesPage() {
-  const [rules, workloads] = await Promise.all([
+  const [rules, workloads, nodes] = await Promise.all([
     apiFetch<AffinityRule[]>("/api/placement/affinity-rules"),
     apiFetch<Workload[]>("/api/workloads"),
+    apiFetch<Node[]>("/api/nodes"),
   ]);
 
   return (
@@ -28,7 +29,7 @@ export default async function AffinityRulesPage() {
         subtitle="PyXie-level keep-together / keep-apart placement rules -- enforced by the migration placement engine independent of PVE's own HA affinity"
         icon={<LinkIcon className="w-5 h-5" />}
       />
-      <AffinityRuleManager initialRules={rules} workloads={workloads} />
+      <AffinityRuleManager initialRules={rules} workloads={workloads} nodes={nodes} />
     </div>
   );
 }
