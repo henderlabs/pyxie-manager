@@ -26,7 +26,7 @@ export default async function AffinityRulesPage() {
     <div>
       <PageHeader
         title="Affinity Rules"
-        subtitle="PyXie-level keep-together / keep-apart placement rules -- enforced by the migration placement engine independent of PVE's own HA affinity"
+        subtitle="Rules PyXie checks before it places or moves a guest. They are separate from Proxmox's own HA affinity rules."
         icon={<LinkIcon className="w-5 h-5" />}
       />
       <AffinityRuleManager initialRules={rules} workloads={workloads} nodes={nodes} />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import type { Node, Workload } from "@/lib/api";
 import { Card, CardTitle } from "@/components/Card";
 
@@ -29,7 +30,32 @@ export function ruleSentence(r: PlacementRule, byId: Map<string, Workload>): str
   const apart = r.rule_type === "keep_apart";
   const names = (r.workload_ids || []).map((id) => byId.get(id)?.name || "a missing guest");
   const who = r.scope_type === "tag_group" ? `Guests tagged "${r.tag}"` : names.length === 2 ? `${names[0]} and ${names[1]}` : names.join(", ");
-  return `${who} must stay on ${apart ? "different nodes" : "the same node"}${r.strict ? "" : " (a preference, not a hard block)"}`;
+  return `${who} ${r.strict ? "must" : "should"} stay on ${apart ? "different nodes" : "the same node"}${r.strict ? "" : " (a preference, not a hard block)"}`;
+}
+
+/** The "must stay on different nodes" half of the sentence, for views that draw the guest names themselves. */
+export function ruleTail(r: PlacementRule): string {
+  return `${r.strict ? "must" : "should"} stay on ${r.rule_type === "keep_apart" ? "different nodes" : "the same node"}${r.strict ? "" : " (a preference, not a hard block)"}`;
+}
+
+/** A guest as a colored pill (the rule's color; grey without a rule), linking to the guest. Shared by the placement card and the rules list. */
+export function GuestPill({ w, color, dots = [], flag = null, title }: { w: Workload; color?: string; dots?: string[]; flag?: "broken" | "unmet" | null; title?: string }) {
+  const stopped = w.status !== "running";
+  return (
+    <Link
+      href={`/infrastructure/workloads/${w.id}`}
+      title={title ?? `Open ${w.name || "guest"}`}
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs hover:brightness-125 ${stopped ? "opacity-60" : ""} ${flag === "broken" ? "ring-2 ring-bad" : flag === "unmet" ? "ring-2 ring-warn" : ""} ${color ? "text-text" : "text-muted border-border bg-surface2"}`}
+      style={color ? { borderColor: color, background: `${color}22` } : undefined}
+    >
+      {w.name || `vmid ${w.vmid}`}
+      {dots.map((c, i) => (
+        <span key={i} className="w-1.5 h-1.5 rounded-full" style={{ background: c }} />
+      ))}
+      {flag === "broken" && <span className="text-bad font-semibold">!</span>}
+      {flag === "unmet" && <span className="text-warn font-semibold">!</span>}
+    </Link>
+  );
 }
 
 /** Which guests a rule covers: the named pair, or everything carrying its tag. Missing guests never count. */
@@ -53,7 +79,7 @@ export function ruleViolation(r: PlacementRule, members: Workload[], nodeName: (
   }
   const nodes = new Set(members.map((m) => m.node_id));
   if (nodes.size <= 1) return null;
-  return `${members.map((m) => `${m.name || "vmid " + m.vmid} on ${nodeName(m.node_id)}`).join(", ")}: not together`;
+  return `they are spread over ${nodes.size} nodes (${members.map((m) => `${m.name || "vmid " + m.vmid} on ${nodeName(m.node_id)}`).join(", ")})`;
 }
 
 export function ruleStatus(r: PlacementRule, workloads: Workload[], nodes: Node[]) {
@@ -71,35 +97,32 @@ export default function AffinityPlacement({ rules, workloads, nodes }: { rules: 
 
   const info = rules.map((r, i) => {
     const members = ruleMembers(r, workloads);
-    return { rule: r, color: PALETTE[i % PALETTE.length], members, problem: ruleViolation(r, members, nodeName) };
+    return { rule: r, color: PALETTE[(rules.length - 1 - i) % PALETTE.length], members, problem: ruleViolation(r, members, nodeName) };
   });
   const rulesOf = new Map<string, typeof info>();
   for (const x of info) for (const m of x.members) rulesOf.set(m.id, [...(rulesOf.get(m.id) || []), x]);
-  const brokenIds = new Set<string>();
-  for (const x of info) if (x.problem) for (const m of x.members) brokenIds.add(m.id);
+  const brokenIds = new Set<string>(); // a hard rule is broken
+  const unmetIds = new Set<string>(); // only a soft preference is unmet
+  for (const x of info) if (x.problem) for (const m of x.members) (x.rule.strict ? brokenIds : unmetIds).add(m.id);
 
   const live = workloads.filter((w) => !(w as Workload & { is_missing?: boolean }).is_missing);
   const others = live.filter((w) => !rulesOf.has(w.id));
   const violations = info.filter((x) => x.problem);
+  const anyHard = violations.some((x) => x.rule.strict);
 
   function chip(w: Workload) {
     const rs = rulesOf.get(w.id) || [];
-    const color = rs[0]?.color;
     const broken = brokenIds.has(w.id);
-    const stopped = w.status !== "running";
+    const unmet = !broken && unmetIds.has(w.id);
     return (
-      <span
+      <GuestPill
         key={w.id}
-        title={rs.length ? rs.map((x) => ruleLabel(x.rule, byId)).join(" | ") : "No affinity rule"}
-        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs ${stopped ? "opacity-60" : ""} ${broken ? "ring-2 ring-bad" : ""} ${color ? "text-text" : "text-muted border-border bg-surface2"}`}
-        style={color ? { borderColor: color, background: `${color}22` } : undefined}
-      >
-        {w.name || `vmid ${w.vmid}`}
-        {rs.slice(1).map((x) => (
-          <span key={x.rule.id} className="w-1.5 h-1.5 rounded-full" style={{ background: x.color }} />
-        ))}
-        {broken && <span className="text-bad font-semibold">!</span>}
-      </span>
+        w={w}
+        color={rs[0]?.color}
+        dots={rs.slice(1).map((x) => x.color)}
+        flag={broken ? "broken" : unmet ? "unmet" : null}
+        title={`${rs.length ? rs.map((x) => ruleLabel(x.rule, byId)).join(" | ") : "No affinity rule"} (open ${w.name || "guest"})`}
+      />
     );
   }
 
@@ -107,10 +130,10 @@ export default function AffinityPlacement({ rules, workloads, nodes }: { rules: 
     <Card className="mb-4">
       <CardTitle>Where the guests sit now</CardTitle>
       {violations.length > 0 && (
-        <div className="mb-3 rounded border border-bad/40 bg-bad/10 px-3 py-2 text-sm text-bad">
+        <div className={`mb-3 rounded border px-3 py-2 text-sm ${anyHard ? "border-bad/40 bg-bad/10 text-bad" : "border-warn/40 bg-warn/10 text-warn"}`}>
           {violations.map((x) => (
             <div key={x.rule.id}>
-              {ruleLabel(x.rule, byId)}: {x.problem}.
+              {ruleSentence(x.rule, byId)}, but {x.problem}.
             </div>
           ))}
           <div className="text-xs text-muted mt-1">PyXie never moves a guest on its own to fix this. Rules are checked on every new move.</div>
@@ -123,7 +146,7 @@ export default function AffinityPlacement({ rules, workloads, nodes }: { rules: 
           const rest = here.filter((w) => !rulesOf.has(w.id));
           return (
             <div key={n.id} className="border border-border rounded-lg p-3 bg-surface2/40 min-h-[96px]">
-              <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">
+              <div className="text-xs font-semibold tracking-wider text-muted mb-2">
                 {n.name} <span className="font-normal normal-case">· {here.length} guests</span>
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -141,7 +164,7 @@ export default function AffinityPlacement({ rules, workloads, nodes }: { rules: 
         </button>
       )}
       <p className="text-xs text-muted mt-3">
-        Each colored chip belongs to the rule with the same color swatch below; grey guests have no rule; a small dot means a guest is in more than one rule; a red <span className="text-bad">!</span> means its rule is broken right now. Migrations, evacuations and Balance Load check these rules first, and again against live state when each move runs.
+        Each colored chip belongs to the rule with the same color swatch below; grey guests have no rule; a small dot means a guest is in more than one rule; a red <span className="text-bad">!</span> means its rule is broken right now (an amber <span className="text-warn">!</span> means a soft preference is not met). Click a guest to open it. Migrations, evacuations and Balance Load check these rules first, and again against live state when each move runs.
       </p>
     </Card>
   );
