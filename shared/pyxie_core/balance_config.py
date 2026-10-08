@@ -109,6 +109,14 @@ def save_state(db: Session, cluster_id, state: dict) -> None:
     db.commit()
 
 
+def swaps_imbalance(src_pct: float, dst_pct: float, memory_bytes: int, dst_total_bytes: int) -> tuple[bool, float]:
+    """Would moving a guest of this size leave the destination fuller than the source is right now?
+    The scorer ranks destinations by headroom and can send a big guest to a small quiet node so that node ends
+    up fuller than the one the guest left: that swaps the imbalance instead of curing it. Returns (swaps, dst_after_pct)."""
+    after = dst_pct + memory_bytes / dst_total_bytes * 100.0
+    return after > src_pct + 0.05, after
+
+
 def resolve_metric(setting: str, nodes) -> str:
     """'most_limited' becomes whichever of memory and CPU is running hotter on the busiest live node, so the
     cluster is balanced on the resource that will run out first. Memory wins ties and missing data: it is

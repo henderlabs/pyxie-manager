@@ -189,8 +189,8 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, 
                       <span className="block h-full rounded" style={{ width: `${mem ?? 0}%`, background: colorForPct(mem) }} />
                     </span>
                   </span>
-                  <span className="w-56 shrink-0 text-xs text-muted tabular-nums">
-                    memory {mem === null ? "—" : Math.round(mem) + "%"} · cpu {n.cpu_usage_pct === null ? "—" : Math.round(n.cpu_usage_pct) + "%"} · {guests(n.id)} guests
+                  <span className="w-64 shrink-0 text-xs text-muted tabular-nums">
+                    memory {mem === null ? "—" : Math.round(mem) + "%"}{n.mem_total_bytes ? ` of ${Math.round(n.mem_total_bytes / 1024 ** 3)} GB` : ""} · cpu {n.cpu_usage_pct === null ? "—" : Math.round(n.cpu_usage_pct) + "%"} · {guests(n.id)} guests
                     {pinnedHere(n.id) + lockedElsewhere(n.id) > 0 && (
                       <span className="text-accent" title="Pinned to this host or marked Do not move: Balance Load leaves these alone"> · {pinnedHere(n.id) + lockedElsewhere(n.id)} locked</span>
                     )}
