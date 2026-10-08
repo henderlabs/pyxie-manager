@@ -17,6 +17,7 @@ export type AutoBalanceView = {
   balance_score: number | null;
   resolved_metric: string;
   pending_operation_id: string | null;
+  waiting_operation_id?: string | null;
   history: { operation_id: string; created_at: string; status: string; moves: number; level: string | null; balance_score: number | null }[];
 };
 
@@ -79,7 +80,7 @@ function Cluster({ initial }: { initial: AutoBalanceView }) {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-sm">
-        <span className="text-text font-medium">{view.cluster_name}</span>
+        <span className="text-text font-medium">Cluster {view.cluster_name}</span>
         <span className={`px-2 py-0.5 rounded text-xs font-medium ${cfg.mode === "recommend" ? "bg-good/15 text-good" : "bg-muted/15 text-muted"}`}>
           {view.config.mode === "recommend" ? (paused ? "Paused" : "Recommend only") : "Off"}
         </span>

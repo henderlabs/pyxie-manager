@@ -56,6 +56,65 @@ class BalanceWorkflowError(Exception):
 MAX_BLOCKED_SHOWN = 10
 
 
+def drop_unhelpful_moves(nodes: list[dict], migrate_plan: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Keep a move only if it leaves the destination no fuller than the source is right now.
+
+    The scorer ranks destinations by headroom and can happily send a big guest to a small, quiet node
+    so that the small node ends up fuller than the one the guest left: that swaps the imbalance instead
+    of curing it. Moves are checked in plan order against a running projection (each kept move counts
+    for the next). nodes are {node_id, name, mem_total_bytes, mem_usage_pct}. Returns (kept, dropped) where
+    each dropped entry is a blocked_moves-shaped dict with kind="no_gain"."""
+    pct = {n["node_id"]: float(n["mem_usage_pct"]) for n in nodes}
+    total = {n["node_id"]: n["mem_total_bytes"] for n in nodes}
+    names = {n["node_id"]: n["name"] for n in nodes}
+    kept: list[dict] = []
+    dropped: list[dict] = []
+    for item in migrate_plan:
+        src, dst = item.get("source_node_id"), item.get("destination_node_id")
+        mem = int(item.get("memory_bytes") or 0)
+        if src not in pct or dst not in pct or not mem:
+            kept.append(item)
+            continue
+        dst_after = pct[dst] + mem / total[dst] * 100.0
+        if dst_after > pct[src] + 0.05:
+            dropped.append({
+                "workload_id": item["workload_id"], "vmid": item.get("vmid"), "name": item.get("name"),
+                "memory_bytes": mem, "source_node_id": src, "source_node": names[src],
+                "blocked_node_id": dst, "blocked_node": names[dst],
+                "blocking_reasons": [
+                    f"it would leave {names[dst]} at {round(dst_after)}% memory, fuller than {names[src]} is now "
+                    f"({round(pct[src])}%), so it would swap the imbalance instead of fixing it"
+                ],
+                "improvement": item.get("improvement") or 0.0, "planned_instead": None, "kind": "no_gain",
+            })
+            continue
+        pct[src] -= mem / total[src] * 100.0
+        pct[dst] = dst_after
+        kept.append(item)
+    return kept, dropped
+
+
+def _projection_nodes(db: Session) -> list[dict]:
+    nodes = [
+        n for n in db.query(Node).filter(Node.is_missing.is_(False)).order_by(Node.name).all()
+        if n.mem_total_bytes and n.mem_usage_pct is not None and n.status == "online" and not n.maintenance_mode
+    ]
+    return [{"node_id": str(n.id), "name": n.name, "mem_total_bytes": n.mem_total_bytes, "mem_usage_pct": n.mem_usage_pct} for n in nodes]
+
+
+def _plan_balances_memory(db: Session, migrate_plan: list[dict]) -> bool:
+    """False only when the cluster is being balanced on CPU alone: the memory guard would be the wrong test then."""
+    from .balance_config import get_config, resolve_metric
+    first = next((i for i in migrate_plan if i.get("source_node_id")), None)
+    if first is None:
+        return True
+    node = db.query(Node).filter(Node.id == first["source_node_id"]).one_or_none()
+    if node is None or node.cluster_id is None:
+        return True
+    cluster_nodes = db.query(Node).filter(Node.cluster_id == node.cluster_id, Node.is_missing.is_(False)).all()
+    return resolve_metric(get_config(db, node.cluster_id)["metric"], cluster_nodes) != "cpu"
+
+
 def project_node_memory(db: Session, migrate_plan: list[dict]) -> list[dict]:
     """Per-node memory today vs. after the plan's own moves, for the Balance Load preview.
 
@@ -134,6 +193,15 @@ def dry_run_balance(
             "transport": "live",
         })
 
+    if migrate_plan and _plan_balances_memory(db, migrate_plan):
+        migrate_plan, no_gain = drop_unhelpful_moves(_projection_nodes(db), migrate_plan)
+        if no_gain:
+            dropped_ids = {d["workload_id"] for d in no_gain}
+            for b in blocked_moves:  # "sent to X instead" is no longer true for a guest whose move was dropped
+                if b["workload_id"] in dropped_ids:
+                    b["planned_instead"] = None
+            blocked_moves.extend(no_gain)
+
     if only_if_moves and not migrate_plan:
         return None
     op = create_operation(
@@ -146,7 +214,9 @@ def dry_run_balance(
         [f"{len(migrate_plan)} workload(s) would move to improve cluster balance -- each move is still reviewed "
          "and approved individually before it happens, same as every other migration here."]
         if migrate_plan else
-        ["nothing scores meaningfully better elsewhere right now -- already balanced."]
+        ["no move would make memory use more even right now -- see the list of refused moves for why."
+         if any(b.get("kind") == "no_gain" for b in blocked_moves) else
+         "nothing scores meaningfully better elsewhere right now -- already balanced."]
     )
     dry_run_result = {
         "node": None, "reasons": reasons, "eligible": True, "blocking_safety_rules": [],

@@ -12,6 +12,7 @@ type BlockedMove = {
   workload_id: string; vmid: number; name: string | null; memory_bytes?: number | null;
   source_node: string; blocked_node: string; blocking_reasons: string[]; improvement: number;
   planned_instead: string | null;
+  kind?: "no_gain";
 };
 
 /** Memory by node, today vs. after the plan, with every planned move and every refused one listed.
@@ -39,7 +40,7 @@ export default function BalanceProjection({ op }: { op: Operation }) {
   });
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-3">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-3 items-start">
       <div className="border border-border rounded-lg p-4 bg-surface">
         <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Memory by node: now → after plan</div>
         <div className="space-y-3">
@@ -84,10 +85,16 @@ export default function BalanceProjection({ op }: { op: Operation }) {
                   <span className="text-text">{b.name || `vmid ${b.vmid}`}</span>
                   <span className="text-muted">: {b.source_node} → {b.blocked_node}{b.memory_bytes ? ` (${formatBytes(b.memory_bytes)})` : ""}</span>
                 </span>
-                <span className="shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-bad/15 text-bad">Blocked</span>
+                {b.kind === "no_gain" ? (
+                  <span className="shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-muted/15 text-muted">No gain</span>
+                ) : b.planned_instead ? (
+                  <span className="shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-warn/15 text-warn">Redirected</span>
+                ) : (
+                  <span className="shrink-0 px-2 py-0.5 rounded text-xs font-medium bg-bad/15 text-bad">Blocked</span>
+                )}
               </div>
               <p className="text-xs text-muted mt-1">
-                {b.blocking_reasons.map((x) => x.replace(/^BLOCKED:?\s*/i, "").replace(/\.?$/, ".")).join(" ")}
+                {b.blocking_reasons.map((x) => x.replace(/^BLOCKED:?\s*/i, "").replace(/^./, (c) => c.toUpperCase()).replace(/\.?$/, ".")).join(" ")}
                 {b.planned_instead ? ` Sent to ${b.planned_instead} instead.` : " It stays where it is."}
               </p>
             </li>

@@ -29,6 +29,12 @@ def _cluster_view(db: Session, cluster: Cluster) -> dict:
             Operation.operation_type_id == "cluster.rebalance", Operation.status.in_(LIVE_STATUSES), Operation.dismissed.is_(False)).all()
         if (o.context or {}).get("automatic") and (o.context or {}).get("cluster_id") == str(cluster.id)
     ]
+    waiting = [
+        o for o in db.query(Operation).filter(
+            Operation.operation_type_id == "cluster.rebalance", Operation.status.in_(LIVE_STATUSES), Operation.dismissed.is_(False))
+        .order_by(Operation.created_at.desc()).all()
+        if (o.context or {}).get("mode") != "bulk_migrate"
+    ]
     recent = [
         o for o in db.query(Operation).filter(Operation.operation_type_id == "cluster.rebalance", Operation.created_by == AUTOMATIC_ACTOR)
         .order_by(Operation.created_at.desc()).limit(40).all()
@@ -41,6 +47,7 @@ def _cluster_view(db: Session, cluster: Cluster) -> dict:
         "balance_score": None if score is None else round(score),
         "resolved_metric": resolve_metric(cfg["metric"], nodes),
         "pending_operation_id": str(pending[0].id) if pending else None,
+        "waiting_operation_id": str(waiting[0].id) if waiting else None,
         "history": [
             {"operation_id": str(o.id), "created_at": o.created_at.isoformat(), "status": o.status,
              "moves": len((o.dry_run_result or {}).get("migrate_plan", [])), "level": (o.context or {}).get("level"),

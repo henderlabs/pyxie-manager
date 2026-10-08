@@ -11,7 +11,7 @@ export default async function BalanceLoadPage({ searchParams }: { searchParams: 
     apiFetch<Workload[]>("/api/workloads"),
     apiFetch<AutoBalanceView[]>("/api/auto-balance"),
   ]);
-  const pending = auto.find((c) => c.pending_operation_id)?.pending_operation_id;
+  const pending = auto.find((c) => c.waiting_operation_id)?.waiting_operation_id ?? auto.find((c) => c.pending_operation_id)?.pending_operation_id;
   return (
     <div>
       <PageHeader

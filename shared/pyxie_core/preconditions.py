@@ -95,7 +95,7 @@ def revalidate_live_migration(
             if headroom < expected_memory_bytes:
                 reasons.append(
                     f"destination {target_node} no longer has sufficient headroom "
-                    f"({headroom} bytes free, needs {expected_memory_bytes})"
+                    f"({max(headroom, 0) / 1024 ** 3:.1f} GB free, needs {expected_memory_bytes / 1024 ** 3:.1f} GB)"
                 )
 
     # No other active task already touching this VM. source="active" +

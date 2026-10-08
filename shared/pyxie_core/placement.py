@@ -298,7 +298,7 @@ def recommend_destinations(
         if headroom is not None and workload.memory_bytes and headroom < workload.memory_bytes:
             blocked = True
             blocking_reasons.append(
-                f"insufficient memory headroom ({headroom} bytes free"
+                f"insufficient memory headroom ({max(headroom, 0) / 1024 ** 3:.1f} GB free"
                 + (", including other moves already planned onto it in this same batch" if (simulated_added_bytes or {}).get(node.id) else "")
                 + ")"
             )
