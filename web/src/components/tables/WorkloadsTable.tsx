@@ -541,9 +541,9 @@ export default function WorkloadsTable({
           defaultHidden: true,
         },
         {
-          header: "Preferred Host",
+          header: "Pinned Host",
           tooltip:
-            "Which node this workload should default to living on. A soft preference, not a hard pin: it strongly favors this node in every migration/maintenance/evacuate/rebalance recommendation, but never overrides a real hard block (insufficient memory, CPU compatibility, trust tier, affinity rules) -- those still exclude it the same as any other candidate. 'no preference' leaves placement to cluster-balance and tier scoring alone, as today.",
+            "Soft pin: the node this workload should live on. Balance Load and automatic balancing never move it away from the pin, and every migration, maintenance and evacuation recommendation strongly favors this node. A real hard block (insufficient memory, CPU compatibility, trust tier, affinity rules) still wins, and Maintenance can still move it. 'not pinned' leaves placement to cluster-balance and tier scoring alone.",
           render: (w) => (
             <PreferredHostSelect
               workloadId={w.id}
