@@ -33,7 +33,7 @@ The older native systemd install (no Docker) is still supported but is the legac
 
 ## Screenshots
 
-Captured from the running app against a fictional demo dataset (no real hostnames, VM names or accounts).
+Captured from the running app against a fictional demo dataset (no real hostnames, VM names or accounts). The dataset and capture scripts are in [`ops/demo/`](ops/demo/README.md), so they can be regenerated each release.
 
 **Dashboard** -- cluster resource usage, host load, and what needs attention right now:
 
@@ -47,11 +47,15 @@ Captured from the running app against a fictional demo dataset (no real hostname
 
 ![Rightsizing](docs/screenshots/rightsizing.png)
 
-**Maintenance** -- node evacuation, guest lifecycle, host updates, Balance Load and full maintenance runs, every action previewed before approval:
+**Maintenance** -- node evacuation, guest lifecycle, host updates and full maintenance runs, every action previewed before approval:
 
 ![Maintenance](docs/screenshots/maintenance.png)
 
-**Affinity Rules** -- keep-together and keep-apart placement rules, enforced on migrations, evacuations and rebalancing:
+**Balance Load** -- node load and a suggestion up front, then a preview with memory per node before and after the plan, each planned move checked on its own, and any move a rule refused explained:
+
+![Balance Load](docs/screenshots/balance-load.png)
+
+**Affinity Rules** -- where every guest sits now, and each keep-together / keep-apart rule in plain words with its current status; enforced on migrations, evacuations and rebalancing:
 
 ![Affinity Rules](docs/screenshots/affinity-rules.png)
 
