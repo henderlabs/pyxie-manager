@@ -10,8 +10,10 @@ The web app and API never get any control over Docker. A small script on the **h
 
 | Cron | What it does |
 |---|---|
-| every 30 min: `updater.py check` | `git fetch --tags`; writes `update/status.json`; the first time it sees a newer release it records an in-app notification and e-mails the recipients of the enabled rules under Settings > Notifications (same relay as the backup alerts) |
+| daily at 06:17: `updater.py check` | `git fetch --tags`; writes `update/status.json`; the first time it sees a newer release it records an in-app notification and e-mails the recipients of the enabled rules under Settings > Notifications (same relay as the backup alerts) |
 | every minute: `updater.py poll` | if the app dropped `update/request.json`, carries it out |
+
+"Check now" on Settings > Updates still works at any time: it drops a `check` request that the every-minute `poll` carries out. Hosts installed before v0.32.1 check every 30 minutes until `ops/docker/install-updater.sh` is run again (it replaces the old crontab lines and changes nothing else).
 
 The API container mounts `./update` at `/update`. It reads `status.json`, `state.json`, `update.log`,
 `history.jsonl`, and may write exactly one file, `request.json`
