@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import type { Workload } from "@/lib/api";
+import type { Node, Workload } from "@/lib/api";
 import { Card, CardTitle, EmptyState } from "@/components/Card";
 import { useMe } from "@/lib/useMe";
 import WorkloadSearchSelect from "@/components/WorkloadSearchSelect";
+import AffinityPlacement, { PALETTE, ruleSentence, ruleStatus } from "@/components/AffinityPlacement";
 
 type Rule = {
   id: string;
@@ -19,7 +20,7 @@ type Rule = {
 
 const EMPTY_FORM = { ruleType: "keep_apart", scopeType: "tag_group", workloadA: "", workloadB: "", tag: "", strict: true, description: "" };
 
-export default function AffinityRuleManager({ initialRules, workloads }: { initialRules: Rule[]; workloads: Workload[] }) {
+export default function AffinityRuleManager({ initialRules, workloads, nodes }: { initialRules: Rule[]; workloads: Workload[]; nodes: Node[] }) {
   const [rules, setRules] = useState(initialRules);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -100,6 +101,11 @@ export default function AffinityRuleManager({ initialRules, workloads }: { initi
 
   return (
     <>
+      <p className="text-sm text-muted mb-4 max-w-3xl">
+        A <span className="text-text">keep apart</span> rule stops guests from sharing a node (for example two domain controllers, so one host failing can&apos;t take both). A{" "}
+        <span className="text-text">keep together</span> rule keeps guests on one node (for example an app and its cache). Below: where every guest sits today, then the rules, each with its current status.
+      </p>
+      <AffinityPlacement rules={rules} workloads={workloads} nodes={nodes} />
       {isAdmin && (
       <Card className="mb-4">
         <CardTitle>{editingId ? "Edit Rule" : "New Rule"}</CardTitle>
@@ -184,24 +190,21 @@ export default function AffinityRuleManager({ initialRules, workloads }: { initi
           <EmptyState message="No affinity rules defined yet." />
         ) : (
           <div className="divide-y divide-border">
-            {rules.map((r) => (
-              <div key={r.id} className="flex items-center justify-between py-2.5">
-                <div>
-                  <div className="text-sm text-text">
-                    {r.rule_type === "keep_apart" ? "Keep apart" : "Keep together"}
-                    {" · "}
-                    {r.scope_type === "tag_group"
-                      ? `tag: ${r.tag}`
-                      : (r.workload_ids || [])
-                          .map((id) => {
-                            const w = workloadById.get(id);
-                            return w ? (w.name ? `${w.name} (vmid ${w.vmid})` : `vmid ${w.vmid}`) : id;
-                          })
-                          .join(" + ")}
-                    {!r.strict && " · soft"}
-                  </div>
+            {rules.map((r, i) => {
+              const st = ruleStatus(r, workloads, nodes);
+              return (
+              <div key={r.id} className="flex items-center justify-between gap-3 py-3">
+                <span className="w-1.5 self-stretch rounded shrink-0" style={{ background: PALETTE[i % PALETTE.length] }} />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm text-text">{ruleSentence(r, workloadById)}</div>
                   {r.description && <div className="text-xs text-muted">{r.description}</div>}
+                  <div className="text-xs text-muted mt-0.5">
+                    Right now: {st.members.length === 0 ? "no guests match" : st.members.map((m) => `${m.name || "vmid " + m.vmid} on ${st.nodeName(m.node_id)}`).join(", ")}
+                  </div>
                 </div>
+                <span className={`shrink-0 px-2 py-0.5 rounded text-xs font-medium ${st.problem ? "bg-bad/15 text-bad" : st.members.length < 2 ? "bg-muted/15 text-muted" : "bg-good/15 text-good"}`}>
+                  {st.problem ? "Broken" : st.members.length < 2 ? "Nothing to check" : "Holding"}
+                </span>
                 {isAdmin && (
                 <div className="flex items-center gap-3">
                   <button onClick={() => startEdit(r)} className="text-xs text-accent hover:underline">
@@ -213,7 +216,8 @@ export default function AffinityRuleManager({ initialRules, workloads }: { initi
                 </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Card>

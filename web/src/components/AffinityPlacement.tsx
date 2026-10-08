@@ -15,13 +15,21 @@ export type PlacementRule = {
 };
 
 // One color per rule, cycled. Fixed hues (not theme tokens) so a rule keeps its color in light and dark mode.
-const PALETTE = ["#f97316", "#3b82f6", "#a855f7", "#14b8a6", "#ec4899", "#eab308", "#22c55e", "#06b6d4"];
+export const PALETTE = ["#f97316", "#3b82f6", "#a855f7", "#14b8a6", "#ec4899", "#eab308", "#22c55e", "#06b6d4"];
 
 export function ruleLabel(r: PlacementRule, byId: Map<string, Workload>): string {
   if (r.description) return r.description;
   const kind = r.rule_type === "keep_apart" ? "Keep apart" : "Keep together";
   if (r.scope_type === "tag_group") return `${kind}: tag ${r.tag}`;
   return `${kind}: ${(r.workload_ids || []).map((id) => byId.get(id)?.name || id).join(" + ")}`;
+}
+
+/** The rule in plain words, e.g. "db-01 and db-02 must stay on different nodes". */
+export function ruleSentence(r: PlacementRule, byId: Map<string, Workload>): string {
+  const apart = r.rule_type === "keep_apart";
+  const names = (r.workload_ids || []).map((id) => byId.get(id)?.name || "a missing guest");
+  const who = r.scope_type === "tag_group" ? `Guests tagged "${r.tag}"` : names.length === 2 ? `${names[0]} and ${names[1]}` : names.join(", ");
+  return `${who} must stay on ${apart ? "different nodes" : "the same node"}${r.strict ? "" : " (a preference, not a hard block)"}`;
 }
 
 /** Which guests a rule covers: the named pair, or everything carrying its tag. Missing guests never count. */
@@ -48,8 +56,14 @@ export function ruleViolation(r: PlacementRule, members: Workload[], nodeName: (
   return `${members.map((m) => `${m.name || "vmid " + m.vmid} on ${nodeName(m.node_id)}`).join(", ")}: not together`;
 }
 
+export function ruleStatus(r: PlacementRule, workloads: Workload[], nodes: Node[]) {
+  const nodeName = (id: string) => nodes.find((n) => n.id === id)?.name || "unknown node";
+  const members = ruleMembers(r, workloads);
+  return { members, problem: ruleViolation(r, members, nodeName), nodeName };
+}
+
 export default function AffinityPlacement({ rules, workloads, nodes }: { rules: PlacementRule[]; workloads: Workload[]; nodes: Node[] }) {
-  const [showOthers, setShowOthers] = useState(false);
+  const [showOthers, setShowOthers] = useState(true);
   const byId = new Map(workloads.map((w) => [w.id, w]));
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const nodeName = (id: string) => nodeById.get(id)?.name || "unknown node";
@@ -92,17 +106,6 @@ export default function AffinityPlacement({ rules, workloads, nodes }: { rules: 
   return (
     <Card className="mb-4">
       <CardTitle>Where the guests sit now</CardTitle>
-      {rules.length > 0 && (
-        <div className="flex flex-wrap gap-x-4 gap-y-1.5 mb-3 text-xs">
-          {info.map((x) => (
-            <span key={x.rule.id} className="inline-flex items-center gap-1.5 text-text">
-              <span className="w-2.5 h-2.5 rounded-sm" style={{ background: x.color }} />
-              {ruleLabel(x.rule, byId)}
-              <span className={x.problem ? "text-bad font-medium" : "text-good"}>{x.problem ? "Broken" : x.members.length < 2 ? "Nothing to check" : "Holding"}</span>
-            </span>
-          ))}
-        </div>
-      )}
       {violations.length > 0 && (
         <div className="mb-3 rounded border border-bad/40 bg-bad/10 px-3 py-2 text-sm text-bad">
           {violations.map((x) => (
@@ -134,11 +137,11 @@ export default function AffinityPlacement({ rules, workloads, nodes }: { rules: 
       </div>
       {others.length > 0 && (
         <button onClick={() => setShowOthers((v) => !v)} className="text-xs text-accent hover:underline mt-3">
-          {showOthers ? "Hide guests without a rule" : `Show the ${others.length} guests without a rule`}
+          {showOthers ? `Hide the ${others.length} guests without a rule` : `Show the ${others.length} guests without a rule`}
         </button>
       )}
       <p className="text-xs text-muted mt-3">
-        Colored chips belong to a rule (the color is the rule&apos;s); a small dot marks a guest in more than one rule; red <span className="text-bad">!</span> marks a guest whose rule is currently broken; grey guests have no rule. Migrations, evacuations and Balance Load check these rules first, and again against live state when each move runs.
+        Each colored chip belongs to the rule with the same color swatch below; grey guests have no rule; a small dot means a guest is in more than one rule; a red <span className="text-bad">!</span> means its rule is broken right now. Migrations, evacuations and Balance Load check these rules first, and again against live state when each move runs.
       </p>
     </Card>
   );
