@@ -11,7 +11,7 @@ import MetricChart from "@/components/MetricChart";
 import WorkloadLifecycleButtons from "@/components/WorkloadLifecycleButtons";
 import MigrateWorkloadAction from "@/components/MigrateWorkloadAction";
 import ConsoleViewer, { useConsoleInfo } from "@/components/ConsoleViewer";
-import { PreferredHostSelect, ProfileSelect, StoragePreferenceSelect } from "@/components/ProfileSelect";
+import { DoNotMoveToggle, PreferredHostSelect, ProfileSelect, StoragePreferenceSelect } from "@/components/ProfileSelect";
 import { formatBytes, formatUptime, formatRelativeTime } from "@/lib/format";
 import { onOperationsChanged } from "@/lib/operationsBus";
 import {
@@ -314,6 +314,7 @@ export function WorkloadDetailPanel({
                 <div className="flex items-center justify-between" title="How much outage this workload can absorb; 'low' favours the best, most-trusted nodes."><span className="text-muted">Downtime tolerance</span><ProfileSelect workloadId={w.id} field="downtime_tolerance" value={pv.downtime_tolerance} options={["low", "standard", "high"]} highlightWhen="low" onChanged={(v) => changeProfile({ downtime_tolerance: v })} /></div>
                 <div className="flex items-center justify-between" title="Where this workload's disk goes when migrated. 'auto' follows where it lives today."><span className="text-muted">Storage preference</span><StoragePreferenceSelect workloadId={w.id} value={pv.storage_preference} onChanged={(v) => changeProfile({ storage_preference: v })} /></div>
                 <div className="flex items-center justify-between" title="A soft preference for which node this workload lives on; never overrides a hard block."><span className="text-muted">Preferred host</span><PreferredHostSelect workloadId={w.id} clusterNodes={clusterNodes} value={pv.preferred_node_id} onChanged={(v) => changeProfile({ preferred_node_id: v })} /></div>
+                <div className="flex items-center justify-between" title="Balance Load and automatic balancing never move this guest. Evacuating a node for maintenance still does."><span className="text-muted">Do not move</span><DoNotMoveToggle workloadId={w.id} value={!!w.do_not_move} /></div>
                 {w.placement_notes && <div className="text-muted whitespace-pre-wrap pt-1">{w.placement_notes}</div>}
               </div>
             </Card>

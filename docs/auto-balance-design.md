@@ -12,6 +12,18 @@ Status: **proposal, nothing built.** Written 2026-10-08 for discussion; no code 
 
 The sections below are updated to match; the remaining open questions are at the end.
 
+## Phase 1 as built (v0.33.0, recommend only)
+
+Shipped: per-cluster settings on the Balance Load page (mode Off / Recommend only; level Conservative / Moderate / Aggressive;
+balance on Most limited / Memory / CPU / Both; take guests from the whole cluster or chosen nodes; allowed time windows;
+pause for 24 h); a worker step after each recommendation pass that prepares ONE `cluster.rebalance` plan awaiting approval
+("PyXie (automatic)") when the balance score is below the level's trigger; the per-guest **Do not move** flag (workload detail);
+a notification through the existing rules (category `balance`); audit events for settings changes and plan creation.
+The same metric setting also drives manual Balance Load (default: most limited resource).
+
+Not yet (phase 2 or later): auto-approve and its warnings, smoothed-memory trigger, per-tag do-not-move, blackout dates,
+advanced per-number overrides. Settings live in cluster-scoped policies `balance.auto` / `balance.auto_state`.
+
 ## Goal
 
 Balance Load today is a human-driven preview: you open the page, review a plan, approve it. The proposal is a

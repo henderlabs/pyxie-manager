@@ -139,6 +139,7 @@ export type Workload = {
   placement_notes: string | null;
   storage_preference: string | null;
   preferred_node_id: string | null;
+  do_not_move?: boolean;
   last_seen: string;
   is_missing: boolean;
 };

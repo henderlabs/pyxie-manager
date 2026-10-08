@@ -179,6 +179,8 @@ class Workload(Base):
     # workload<->node) and not a node tier (those classify a node in
     # general, they don't let a workload point at one).
     preferred_node_id = Column(UUID(as_uuid=True), ForeignKey("nodes.id"), nullable=True)
+    # Never moved by Balance Load or automatic balancing (evacuation for maintenance still moves it).
+    do_not_move = Column(Boolean, nullable=False, default=False, server_default="false")
     first_seen = Column(DateTime(timezone=True), default=now_utc, nullable=False)
     last_seen = Column(DateTime(timezone=True), default=now_utc, nullable=False)
     is_missing = Column(Boolean, nullable=False, default=False)

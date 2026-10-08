@@ -255,7 +255,7 @@ class DestinationCandidate:
 
 def recommend_destinations(
     db: Session, client, workload: Workload, candidate_nodes: list[Node],
-    *, simulated_added_bytes: dict | None = None,
+    *, simulated_added_bytes: dict | None = None, metric: str = "both",
 ) -> list[DestinationCandidate]:
     """simulated_added_bytes, when given, is a running {node_id: bytes}
     tally of memory already committed to each candidate EARLIER IN THIS
@@ -357,9 +357,11 @@ def recommend_destinations(
         # Falls back to the allocation-based % only when live stats aren't
         # populated yet (node just discovered, no poll cycle completed).
         if node.cpu_usage_pct is not None and node.mem_usage_pct is not None:
-            free_pct = 100 - ((node.cpu_usage_pct + node.mem_usage_pct) / 2)
+            # metric: which load the balance is judged on (Balance Load setting; "both" is the long-standing behavior)
+            used_pct = node.mem_usage_pct if metric == "memory" else node.cpu_usage_pct if metric == "cpu" else (node.cpu_usage_pct + node.mem_usage_pct) / 2
+            free_pct = 100 - used_pct
             score += (free_pct - 50) * 1.2  # centered so a 50%-free node is neutral
-            reasons.append(f"{round(free_pct)}% free (live CPU+RAM)")
+            reasons.append(f"{round(free_pct)}% free (live {'RAM' if metric == 'memory' else 'CPU' if metric == 'cpu' else 'CPU+RAM'})")
         elif node.mem_total_bytes and headroom is not None:
             balance_pct = 100 * headroom / node.mem_total_bytes
             score += (balance_pct - 50) * 1.2

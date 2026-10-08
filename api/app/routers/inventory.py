@@ -468,6 +468,7 @@ class WorkloadPlacementProfileUpdate(BaseModel):
     downtime_tolerance: str | None = None  # low | standard | high
     placement_notes: str | None = None  # PyXie-only free text -- why, not synced from/to PVE
     storage_preference: str | None = "__unset__"  # 'local' | 'shared' | null -- sentinel default lets a real null clear it explicitly
+    do_not_move: bool | None = None  # never moved by Balance Load / automatic balancing
     preferred_node_id: str | None = "__unset__"  # sticky soft preferred host (node UUID string), or null to clear it -- kept as str (not uuid.UUID) so the "__unset__" sentinel default doesn't fail UUID validation; parsed below
 
 
@@ -498,7 +499,10 @@ def set_workload_placement_profile(
         "sensitivity": wl.sensitivity, "downtime_tolerance": wl.downtime_tolerance,
         "placement_notes": wl.placement_notes, "storage_preference": wl.storage_preference,
         "preferred_node_id": str(wl.preferred_node_id) if wl.preferred_node_id else None,
+        "do_not_move": wl.do_not_move,
     }
+    if payload.do_not_move is not None:
+        wl.do_not_move = payload.do_not_move
     if payload.sensitivity is not None:
         wl.sensitivity = payload.sensitivity
     if payload.downtime_tolerance is not None:
@@ -519,6 +523,7 @@ def set_workload_placement_profile(
             "sensitivity": wl.sensitivity, "downtime_tolerance": wl.downtime_tolerance,
             "placement_notes": wl.placement_notes, "storage_preference": wl.storage_preference,
             "preferred_node_id": str(wl.preferred_node_id) if wl.preferred_node_id else None,
+            "do_not_move": wl.do_not_move,
         },
     )
     return wl
