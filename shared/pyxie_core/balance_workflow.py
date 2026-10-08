@@ -52,6 +52,48 @@ class BalanceWorkflowError(Exception):
     pass
 
 
+# The preview lists the refusals worth reading, not every guest an environment-wide check (say, an unreadable VM config) refused.
+MAX_BLOCKED_SHOWN = 10
+
+
+def project_node_memory(db: Session, migrate_plan: list[dict]) -> list[dict]:
+    """Per-node memory today vs. after the plan's own moves, for the Balance Load preview.
+
+    "Today" is each node's live memory use; "after" debits the allocated memory of every
+    workload leaving it and credits every one arriving (lines set to "Don't move" are ignored).
+    Only nodes that are online and not in maintenance are listed: those are the ones the balance
+    is about. A projection, not a measurement: the guests' real use differs from what they are
+    allocated, which is also what the planner's own simulation counts."""
+    nodes = [
+        n for n in db.query(Node).filter(Node.is_missing.is_(False)).order_by(Node.name).all()
+        if n.mem_total_bytes and n.mem_usage_pct is not None and n.status == "online" and not n.maintenance_mode
+    ]
+    return projected_memory_rows(
+        [{"node_id": str(n.id), "name": n.name, "mem_total_bytes": n.mem_total_bytes, "mem_usage_pct": n.mem_usage_pct} for n in nodes],
+        migrate_plan,
+    )
+
+
+def projected_memory_rows(nodes: list[dict], migrate_plan: list[dict]) -> list[dict]:
+    """Pure core of project_node_memory(): nodes are {node_id, name, mem_total_bytes, mem_usage_pct}."""
+    delta: dict[str, int] = {}
+    for item in plan_items_to_move(migrate_plan):
+        mem = int(item.get("memory_bytes") or 0)
+        if item.get("source_node_id"):
+            delta[item["source_node_id"]] = delta.get(item["source_node_id"], 0) - mem
+        delta[item["destination_node_id"]] = delta.get(item["destination_node_id"], 0) + mem
+    out = []
+    for n in nodes:
+        used = n["mem_total_bytes"] * n["mem_usage_pct"] / 100.0
+        after = max(0.0, used + delta.get(n["node_id"], 0))
+        out.append({
+            "node_id": n["node_id"], "name": n["name"], "mem_total_bytes": n["mem_total_bytes"],
+            "before_pct": round(n["mem_usage_pct"], 1),
+            "after_pct": round(min(after / n["mem_total_bytes"] * 100.0, 100.0), 1),
+        })
+    return out
+
+
 def dry_run_balance(db: Session, *, actor: str, node_ids: list | None = None) -> Operation:
     op = create_operation(
         db, "cluster.rebalance",
@@ -60,7 +102,8 @@ def dry_run_balance(db: Session, *, actor: str, node_ids: list | None = None) ->
     )
 
     source_node_ids = set(node_ids) if node_ids else None
-    recs = _placement_recommendations(db, source_node_ids=source_node_ids)
+    blocked_moves: list[dict] = []
+    recs = _placement_recommendations(db, source_node_ids=source_node_ids, blocked_out=blocked_moves)
 
     migrate_plan = []
     for r in recs:
@@ -70,6 +113,9 @@ def dry_run_balance(db: Session, *, actor: str, node_ids: list | None = None) ->
         ev = r["evidence"]
         migrate_plan.append({
             "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
+            "memory_bytes": wl.memory_bytes,
+            "source_node_id": str(wl.node_id), "source_node": ev["current_node"],
+            "improvement": ev.get("improvement"),
             "destination_node_id": ev["suggested_node_id"], "destination_node": ev["suggested_node"],
             "destination_storage_id": ev["suggested_storage"]["id"] if ev.get("suggested_storage") else None,
             "currently_on_shared": ev.get("currently_on_shared", False),
@@ -93,6 +139,9 @@ def dry_run_balance(db: Session, *, actor: str, node_ids: list | None = None) ->
     dry_run_result = {
         "node": None, "reasons": reasons, "eligible": True, "blocking_safety_rules": [],
         "migrate_plan": migrate_plan,
+        "blocked_moves": sorted(blocked_moves, key=lambda b: -b["improvement"])[:MAX_BLOCKED_SHOWN],
+        "blocked_moves_total": len(blocked_moves),
+        "projected_memory": project_node_memory(db, migrate_plan),
     }
     ctx = {**(op.context or {}), "migrate_plan": migrate_plan}
     if not migrate_plan:

@@ -150,7 +150,6 @@ export default function NodeActionsForm({
   // back or restarts, leaving the node empty -- full maintenance needs
   // the option to return VMs back or leave it empty.
   const [leaveEmpty, setLeaveEmpty] = useState(false);
-  const [balancePending, setBalancePending] = useState(false);
   const me = useMe();
   const isAdmin = me === undefined || me?.is_admin === true;
 
@@ -223,35 +222,6 @@ export default function NodeActionsForm({
       setError((e as Error).message);
     } finally {
       setPending(false);
-    }
-  }
-
-  // Doesn't require a node selection (unlike every other action here) --
-  // no selection means "evaluate every running VM cluster-wide", matching
-  // /api/recommendations/balance-load-plan's own default. When nodes ARE
-  // selected, it evaluates only the VMs currently on THOSE nodes as move
-  // candidates -- destinations are never restricted to the selection:
-  // balance the VMs ON the selected nodes, without confining where they
-  // can go.
-  async function runBalanceLoad() {
-    setBalancePending(true);
-    setError(null);
-    setOps([]);
-    notifyOperationsChanged();
-    try {
-      const res = await fetch("/api/operations/cluster-rebalance/dry-run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ node_ids: selectedNodeIds.length > 0 ? selectedNodeIds : null }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Balance Load failed");
-      setOps([data as Operation]);
-      notifyOperationsChanged();
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setBalancePending(false);
     }
   }
 
@@ -506,31 +476,16 @@ export default function NodeActionsForm({
         </label>
       </div>
       <div>
-        {/* Doesn't fit neatly under "Maintenance mode" or the per-node
-            "Actions" above -- it's cluster-wide by default, only scoped to
-            selected node(s) as an option -- so it gets its own row rather
-            than crowding into either. Revisit once there's
-            a better home for it. */}
         <label className="block text-xs text-muted mb-1.5">Balance</label>
-        {isAdmin && (
-        <button
-          onClick={runBalanceLoad}
-          disabled={balancePending}
-          title={
-            selectedNodeIds.length > 0
-              ? "Evaluate the VMs on the selected node(s) and propose better homes for them anywhere eligible in the cluster."
-              : "Evaluate every running VM cluster-wide and propose moves that would improve overall balance."
-          }
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
+        <Link
+          href={selectedNodeIds.length === 1 ? `/operations/balance?node=${selectedNodeIds[0]}` : "/operations/balance"}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10"
         >
           <MigrateIcon className="w-4 h-4" />
-          {balancePending ? "Evaluating…" : "Balance Load"}
-        </button>
-        )}
+          Balance Load
+        </Link>
         <p className="text-xs text-muted mt-1.5">
-          <span className="font-medium text-text">Balance Load:</span> {selectedNodeIds.length > 0
-            ? "proposes moving VMs off the selected node(s) onto a better-scoring node elsewhere in the cluster."
-            : "proposes moving any VM cluster-wide onto a better-scoring node -- select node(s) above to scope it to just those."}
+          <span className="font-medium text-text">Balance Load</span> has its own page now: preview which VMs would move where, with memory per node before and after.
         </p>
       </div>
       <p className="text-xs text-muted">
