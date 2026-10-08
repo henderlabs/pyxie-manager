@@ -12,12 +12,21 @@ from pyxie_core.auto_balance import AUTOMATIC_ACTOR, LIVE_STATUSES
 from pyxie_core.balance_config import (
     PRESETS, ConfigError, balance_score, get_config, get_state, resolve_metric, save_config, utcnow,
 )
-from pyxie_core.models import Cluster, Node, Operation
+from pyxie_core.models import AppSettings, Cluster, Node, Operation, Workload
 
 from ..auth_deps import get_current_user, require_admin
 from ..deps import get_db
 
 router = APIRouter(prefix="/api/auto-balance", tags=["auto-balance"], dependencies=[Depends(get_current_user)])
+
+
+def _locked_guests(db: Session, cluster: Cluster) -> dict:
+    """Running VMs automatic balancing will never touch: marked Do not move, or sitting on the host they are pinned to."""
+    vms = db.query(Workload).filter(Workload.cluster_id == cluster.id, Workload.is_missing.is_(False), Workload.status == "running", Workload.type == "vm").all()
+    return {
+        "do_not_move": sum(1 for w in vms if w.do_not_move),
+        "pinned": sum(1 for w in vms if not w.do_not_move and w.preferred_node_id is not None and w.preferred_node_id == w.node_id),
+    }
 
 
 def _cluster_view(db: Session, cluster: Cluster) -> dict:
@@ -47,10 +56,12 @@ def _cluster_view(db: Session, cluster: Cluster) -> dict:
         "balance_score": None if score is None else round(score),
         "resolved_metric": resolve_metric(cfg["metric"], nodes),
         "pending_operation_id": str(pending[0].id) if pending else None,
+        "writes_enabled": bool(db.query(AppSettings.pve_mutations_enabled).filter(AppSettings.id == 1).scalar()),
+        "locked_guests": _locked_guests(db, cluster),
         "waiting_operation_id": str(waiting[0].id) if waiting else None,
         "history": [
             {"operation_id": str(o.id), "created_at": o.created_at.isoformat(), "status": "dismissed" if o.dismissed else o.status,
-             "moves": len((o.dry_run_result or {}).get("migrate_plan", [])), "level": (o.context or {}).get("level"),
+             "moves": len((o.dry_run_result or {}).get("migrate_plan", [])), "level": (o.context or {}).get("level"), "auto_approved": bool((o.context or {}).get("auto_approved")),
              "balance_score": (o.context or {}).get("balance_score")}
             for o in recent
         ],
@@ -68,6 +79,9 @@ class AutoBalanceUpdate(BaseModel):
     metric: str = "most_limited"
     node_ids: list[str] = []
     windows: list[dict] = []
+    # Auto-approve only: the admin's confirmation (and, for Aggressive, the second one).
+    acknowledged: bool = False
+    acknowledged_aggressive: bool = False
 
 
 def _cluster_or_404(db: Session, cluster_id: uuid.UUID) -> Cluster:
@@ -84,8 +98,15 @@ def update_auto_balance(cluster_id: uuid.UUID, payload: AutoBalanceUpdate, db: S
     valid_nodes = {str(n.id) for n in db.query(Node).filter(Node.cluster_id == cluster_id).all()}
     if any(i not in valid_nodes for i in payload.node_ids):
         raise HTTPException(400, "node_ids must be nodes in this cluster")
+    cfg_in = {**payload.model_dump(exclude={"acknowledged", "acknowledged_aggressive"}), "paused_until": before.get("paused_until")}
+    if payload.mode == "auto_approve":
+        prev = before.get("ack") if before["mode"] == "auto_approve" else None
+        if payload.acknowledged:
+            cfg_in["ack"] = {"by": user.email, "at": utcnow().isoformat(), "aggressive": bool(payload.acknowledged_aggressive) or bool(prev and prev.get("aggressive"))}
+        elif prev:
+            cfg_in["ack"] = prev  # editing other settings of an already-confirmed cluster keeps its confirmation
     try:
-        after = save_config(db, cluster_id, {**payload.model_dump(), "paused_until": before.get("paused_until")})
+        after = save_config(db, cluster_id, cfg_in)
     except ConfigError as e:
         raise HTTPException(400, str(e))
     write_audit_event(

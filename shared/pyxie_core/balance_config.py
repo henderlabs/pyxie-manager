@@ -12,7 +12,7 @@ from .models import Policy
 CONFIG_KEY = "balance.auto"
 STATE_KEY = "balance.auto_state"
 
-MODES = ("off", "recommend")  # "auto_approve" is phase 2, not accepted yet
+MODES = ("off", "recommend", "auto_approve")
 METRICS = ("most_limited", "memory", "cpu", "both")
 
 # One preset per aggressiveness level. Every number errs toward doing nothing.
@@ -27,6 +27,7 @@ DEFAULT_CONFIG = {
     "node_ids": [],  # empty = every node in the cluster
     "windows": [],  # empty = any time; else [{"days": [0..6, Mon=0], "start": "HH:MM", "end": "HH:MM"}]
     "paused_until": None,  # ISO timestamp
+    "ack": None,  # who confirmed auto-approve, when, and (for Aggressive) the second confirmation; only kept while mode is auto_approve
 }
 
 
@@ -54,7 +55,7 @@ def validate_config(cfg: dict) -> dict:
     """Returns a clean copy or raises ConfigError with a message meant for the person saving it."""
     out = {**DEFAULT_CONFIG}
     if cfg.get("mode", "off") not in MODES:
-        raise ConfigError("mode must be 'off' or 'recommend'")
+        raise ConfigError("mode must be 'off', 'recommend' or 'auto_approve'")
     out["mode"] = cfg.get("mode", "off")
     if cfg.get("level", "moderate") not in PRESETS:
         raise ConfigError("level must be conservative, moderate or aggressive")
@@ -82,6 +83,13 @@ def validate_config(cfg: dict) -> dict:
         clean.append({"days": days, "start": w["start"], "end": w["end"]})
     out["windows"] = clean
     out["paused_until"] = cfg.get("paused_until")
+    if out["mode"] == "auto_approve":
+        ack = cfg.get("ack")
+        if not isinstance(ack, dict) or not ack.get("by") or not ack.get("at"):
+            raise ConfigError("auto-approve needs the confirmation that PyXie may move guests on its own")
+        if out["level"] == "aggressive" and not ack.get("aggressive"):
+            raise ConfigError("the Aggressive level needs its own second confirmation")
+        out["ack"] = {"by": str(ack["by"]), "at": str(ack["at"]), "aggressive": bool(ack.get("aggressive"))}
     return out
 
 
