@@ -16,7 +16,8 @@ import logging
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy.orm import Session
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, aliased
 
 from .audit import write_audit_event
 from .balance_config import (
@@ -61,13 +62,30 @@ def flapping_guests(rows: list[tuple], now, *, backmove_hours: float = BACKMOVE_
     return settled, avoid
 
 
+# Maintenance mode empties a node on purpose and brings it back empty. Those moves are not balancing, so they never count toward
+# "recently moved", "never go back" or "settled": after maintenance, guests may be balanced straight back onto the node.
+MAINTENANCE_PARENT_TYPES = ("node.evacuate", "node.enter_maintenance", "maintenance.run")
+
+
+def _balancing_migrations(db: Session, *columns):
+    """Completed live migrations that were NOT part of a maintenance operation (a manual single Move or a Balance Load child)."""
+    parent = aliased(Operation)
+    return (
+        db.query(*columns)
+        .outerjoin(parent, Operation.parent_operation_id == parent.id)
+        .filter(
+            Operation.operation_type_id == "vm.live_migrate", Operation.status == "completed", Operation.workload_id.isnot(None),
+            or_(parent.operation_type_id.is_(None), parent.operation_type_id.notin_(MAINTENANCE_PARENT_TYPES)),
+        )
+    )
+
+
 def _move_history(db: Session, cluster_id, now) -> list[tuple]:
     since = now - timedelta(days=SETTLED_WINDOW_DAYS)
     out = []
     for wid, done, ctx in (
-        db.query(Operation.workload_id, Operation.completed_at, Operation.context)
-        .filter(Operation.operation_type_id == "vm.live_migrate", Operation.cluster_id == cluster_id, Operation.status == "completed",
-                Operation.completed_at >= since, Operation.workload_id.isnot(None))
+        _balancing_migrations(db, Operation.workload_id, Operation.completed_at, Operation.context)
+        .filter(Operation.cluster_id == cluster_id, Operation.completed_at >= since)
         .all()
     ):
         src = (ctx or {}).get("source_node_id")
@@ -121,14 +139,7 @@ def _live_rebalance_ops(db: Session) -> list[Operation]:
 
 def _recently_moved(db: Session, cluster_id, cooldown_hours: float, now) -> set:
     since = now - timedelta(hours=cooldown_hours)
-    rows = (
-        db.query(Operation.workload_id)
-        .filter(
-            Operation.operation_type_id == "vm.live_migrate", Operation.cluster_id == cluster_id,
-            Operation.status == "completed", Operation.completed_at >= since, Operation.workload_id.isnot(None),
-        )
-        .all()
-    )
+    rows = _balancing_migrations(db, Operation.workload_id).filter(Operation.cluster_id == cluster_id, Operation.completed_at >= since).all()
     return {r[0] for r in rows}
 
 
