@@ -298,7 +298,7 @@ def _placement_recommendations(
     "evaluate every running VM cluster-wide", unchanged.
     """
     recs: list[dict] = []
-    from .balance_config import get_config, resolve_metric
+    from .balance_config import get_config, resolve_metric, swaps_imbalance
 
     threshold = PLACEMENT_IMPROVEMENT_THRESHOLD if min_improvement is None else min_improvement
     for cluster in db.query(Cluster).filter(Cluster.is_missing.is_(False)).all():
@@ -319,6 +319,14 @@ def _placement_recommendations(
 
         node_by_id = {n.id: n for n in nodes}
         simulated_added_bytes = {n.id: 0 for n in nodes}
+        # Running memory % per node as kept moves are applied, for the "never swap the imbalance" check below.
+        sim_pct = {n.id: float(n.mem_usage_pct) for n in nodes if n.mem_usage_pct is not None and n.mem_total_bytes}
+        guard_on = cluster_metric != "cpu"
+
+        def _swaps(wl, cand) -> tuple[bool, float]:
+            if not guard_on or not wl.memory_bytes or wl.node_id not in sim_pct or cand.node_id not in sim_pct:
+                return False, 0.0
+            return swaps_imbalance(sim_pct[wl.node_id], sim_pct[cand.node_id], wl.memory_bytes, node_by_id[cand.node_id].mem_total_bytes)
 
         with client:
             workloads = (
@@ -379,6 +387,18 @@ def _placement_recommendations(
                 best = ranked[0]
                 if current is None:
                     continue
+                swap_dropped = None
+                if not best.blocked and best.node_id != wl.node_id:
+                    swaps, after_pct = _swaps(wl, best)
+                    if swaps:
+                        # The scorer's favourite would just move the problem: remember why, and try the next best
+                        # destination instead. A rejected move is never added to the simulated load, so it cannot
+                        # use up headroom that other guests could have had.
+                        swap_dropped = (best, after_pct)
+                        best = next(
+                            (c for c in ranked if not c.blocked and c.node_id != wl.node_id and c is not swap_dropped[0] and not _swaps(wl, c)[0]),
+                            current,
+                        )
                 moving = not best.blocked and best.node_id != wl.node_id
                 improvement = _adjusted_score(best) - _adjusted_score(current)
                 moving = moving and improvement >= threshold
@@ -402,10 +422,26 @@ def _placement_recommendations(
                                 "improvement": round(alt_gain, 1),
                                 "planned_instead": best.node_name if moving else None,
                             })
+                if swap_dropped is not None and blocked_out is not None:
+                    dropped, after_pct = swap_dropped
+                    blocked_out.append({
+                        "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "memory_bytes": wl.memory_bytes,
+                        "source_node_id": str(wl.node_id), "source_node": current.node_name,
+                        "blocked_node_id": str(dropped.node_id), "blocked_node": dropped.node_name,
+                        "blocking_reasons": [
+                            f"it would leave {dropped.node_name} at {round(after_pct)}% memory, fuller than {current.node_name} "
+                            f"is now ({round(sim_pct[wl.node_id])}%), so it would swap the imbalance instead of fixing it"
+                        ],
+                        "improvement": round(_adjusted_score(dropped) - _adjusted_score(current), 1),
+                        "planned_instead": best.node_name if moving else None, "kind": "no_gain",
+                    })
                 if not moving:
                     continue
 
                 note_planned_move(simulated_added_bytes, wl, best.node_id)
+                if wl.memory_bytes and wl.node_id in sim_pct and best.node_id in sim_pct:
+                    sim_pct[wl.node_id] -= wl.memory_bytes / node_by_id[wl.node_id].mem_total_bytes * 100.0
+                    sim_pct[best.node_id] += wl.memory_bytes / node_by_id[best.node_id].mem_total_bytes * 100.0
 
                 # Storage decision, same source of truth every other
                 # migration path (evacuation, maintenance, the manual "Move

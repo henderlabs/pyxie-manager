@@ -81,7 +81,7 @@ function Cluster({ initial }: { initial: AutoBalanceView }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="text-text font-medium">Cluster {view.cluster_name}</span>
-        <span className={`px-2 py-0.5 rounded text-xs font-medium ${cfg.mode === "recommend" ? "bg-good/15 text-good" : "bg-muted/15 text-muted"}`}>
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${view.config.mode === "recommend" && !paused ? "bg-good/15 text-good" : "bg-muted/15 text-muted"}`}>
           {view.config.mode === "recommend" ? (paused ? "Paused" : "Recommend only") : "Off"}
         </span>
         {view.balance_score !== null && <span className="text-muted">balance score now {view.balance_score}</span>}

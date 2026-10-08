@@ -124,7 +124,7 @@ def evaluate_cluster(db: Session, cluster: Cluster, *, now=None) -> dict:
                   "metric": metric, "balance_score": round(score)},
     )
     dispatch_event(
-        db, severity="info", category="balance", recovered=False, observed_at=now,
+        db, severity="warning", category="balance", recovered=False, observed_at=now,
         title=f"Automatic Balance Load plan ready for {cluster.name}: {moves} move(s), balance score {round(score)}. Review it on the Balance Load page.",
     )
     return {"cluster": cluster.name, "result": "plan_created", "moves": moves, "operation_id": str(op.id)}

@@ -49,7 +49,7 @@ def _cluster_view(db: Session, cluster: Cluster) -> dict:
         "pending_operation_id": str(pending[0].id) if pending else None,
         "waiting_operation_id": str(waiting[0].id) if waiting else None,
         "history": [
-            {"operation_id": str(o.id), "created_at": o.created_at.isoformat(), "status": o.status,
+            {"operation_id": str(o.id), "created_at": o.created_at.isoformat(), "status": "dismissed" if o.dismissed else o.status,
              "moves": len((o.dry_run_result or {}).get("migrate_plan", [])), "level": (o.context or {}).get("level"),
              "balance_score": (o.context or {}).get("balance_score")}
             for o in recent

@@ -70,7 +70,7 @@ export default function BalanceProjection({ op }: { op: Operation }) {
       </div>
 
       <div className="border border-border rounded-lg p-4 bg-surface">
-        <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-3">Planned moves, each checked on its own</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-3">{moves.length > 0 ? "Planned moves, each checked on its own" : "No moves made. Considered and refused:"}</div>
         <ul className="divide-y divide-border text-sm">
           {moves.map((m) => (
             <li key={m.workload_id} className="flex items-center justify-between gap-3 py-2">

@@ -1,40 +1,29 @@
 """Balance Load planner guard: never swap the imbalance. Pure logic: no database."""
 
-from pyxie_core.balance_workflow import drop_unhelpful_moves
+from pyxie_core.balance_config import swaps_imbalance
 
 GB = 1024 ** 3
-# The lab shape that exposed it: two big busy nodes, two small quiet ones.
-NODES = [
-    {"node_id": "big", "name": "st-big", "mem_total_bytes": 64 * GB, "mem_usage_pct": 62},
-    {"node_id": "small", "name": "st-small", "mem_total_bytes": 32 * GB, "mem_usage_pct": 30},
-    {"node_id": "mid", "name": "st-mid", "mem_total_bytes": 128 * GB, "mem_usage_pct": 40},
-]
 
 
-def move(src, dst, gb, wid="w1"):
-    return {"workload_id": wid, "vmid": 100, "name": wid, "memory_bytes": gb * GB, "source_node_id": src,
-            "destination_node_id": dst, "improvement": 20.0}
+def test_move_that_makes_the_destination_fuller_than_the_source_swaps_the_imbalance():
+    # The lab shape: a 16 GB guest from a 62% node onto a quiet 32 GB node (30%) would leave that node at 80%.
+    swaps, after = swaps_imbalance(62, 30, 16 * GB, 32 * GB)
+    assert swaps is True and round(after) == 80
 
 
-def test_move_that_makes_the_destination_fuller_than_the_source_is_dropped():
-    kept, dropped = drop_unhelpful_moves(NODES, [move("big", "small", 16)])  # small: 30% -> 80%, big is 62%
-    assert kept == []
-    assert dropped[0]["kind"] == "no_gain" and dropped[0]["blocked_node"] == "st-small"
-    assert "80%" in dropped[0]["blocking_reasons"][0] and "62%" in dropped[0]["blocking_reasons"][0]
+def test_move_to_a_roomy_quiet_node_is_fine():
+    swaps, after = swaps_imbalance(62, 40, 16 * GB, 128 * GB)
+    assert swaps is False and round(after) == 52
 
 
-def test_move_to_a_roomy_quiet_node_is_kept():
-    kept, dropped = drop_unhelpful_moves(NODES, [move("big", "mid", 16)])  # mid: 40% -> 52%
-    assert len(kept) == 1 and dropped == []
+def test_landing_exactly_level_with_the_source_is_allowed():
+    assert swaps_imbalance(50, 30, 20 * GB, 100 * GB)[0] is False
 
 
-def test_earlier_kept_moves_count_for_later_ones():
-    plan = [move("big", "mid", 20, "a"), move("big", "mid", 20, "b")]  # first: mid 40->56, big 62->31; second: mid 56->72, above big
-    kept, dropped = drop_unhelpful_moves(NODES, plan)
-    assert [m["workload_id"] for m in kept] == ["a"] and [d["workload_id"] for d in dropped] == ["b"]
-
-
-def test_unknown_nodes_or_sizes_are_left_alone():
-    plan = [move("gone", "mid", 8), {**move("big", "mid", 0), "memory_bytes": None}]
-    kept, dropped = drop_unhelpful_moves(NODES, plan)
-    assert len(kept) == 2 and dropped == []
+def test_rule_uses_the_running_percentages_so_earlier_moves_count():
+    # After one 20 GB move off a 62% node, the source is at ~31%; a second 20 GB move onto the same node would pass it.
+    first = swaps_imbalance(62, 40, 20 * GB, 128 * GB)
+    assert first[0] is False
+    src_after = 62 - 20 / 64 * 100
+    dst_after = first[1]
+    assert swaps_imbalance(src_after, dst_after, 20 * GB, 128 * GB)[0] is True
