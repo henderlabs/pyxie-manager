@@ -30,7 +30,7 @@ function agoText(iso?: string | null) {
   return m < 1 ? "just now" : m < 90 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
 }
 
-export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, pendingOperationId }: { nodes: Node[]; workloads: Workload[]; initialNodeId?: string; pendingOperationId?: string }) {
+export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, pendingOperationId, autoSummary }: { nodes: Node[]; workloads: Workload[]; initialNodeId?: string; pendingOperationId?: string; autoSummary?: { mode: string; level: string; trigger: number } }) {
   const [selected, setSelected] = useState<string[]>(initialNodeId ? [initialNodeId] : []);
   const [ops, setOps] = useState<Operation[]>([]);
   const [busy, setBusy] = useState(false);
@@ -153,7 +153,7 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card>
           <CardTitle>Cluster balance</CardTitle>
-          <BalanceGauge nodes={nodes} icon={<ClusterIcon />} />
+          <BalanceGauge nodes={nodes} icon={<ClusterIcon />} trigger={autoSummary && autoSummary.mode !== "off" ? autoSummary.trigger : null} />
           {b && (
             <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs mt-3">
               <dt className="text-muted">Memory, cluster average</dt><dd className="text-text text-right tabular-nums">{Math.round(b.memAvg)}%</dd>
@@ -161,6 +161,13 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, 
               <dt className="text-muted">Nodes counted</dt><dd className="text-text text-right tabular-nums">{b.counted} of {nodes.length}</dd>
               <dt className="text-muted">Running guests</dt><dd className="text-text text-right tabular-nums">{workloads.filter((w) => w.status === "running").length}</dd>
             </dl>
+          )}
+          {b && autoSummary && (
+            <p className="text-xs text-muted mt-3" title="The scores below which automatic balancing prepares a plan: Conservative 60, Moderate 70, Aggressive 80.">
+              {autoSummary.mode === "off"
+                ? "Automatic balancing is off."
+                : `Automatic balancing (${autoSummary.level}) prepares a plan below ${autoSummary.trigger}. ${b.score >= autoSummary.trigger ? "This cluster is above that, so it leaves things alone." : "This cluster is below it, so a plan is due."}`}
+            </p>
           )}
           <p className="text-xs text-muted mt-3">
             {!b
