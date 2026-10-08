@@ -1,6 +1,16 @@
 # Automatic load balancing (DRS-style): design proposal
 
-Status: **proposal, nothing built.** Written 2026-10-08 for discussion; no code changes accompany it.
+Status: **proposal, nothing built.** Written 2026-10-08 for discussion; no code changes accompany it. Updated the same day with Phil's first answers (see "Decisions so far").
+
+## Decisions so far (Phil, 2026-10-08)
+
+- **Auto-approve is wanted**, not just recommend-only: available, but with clear warnings and an explicit choice of aggressiveness. Recommend-only still ships first.
+- **Do-not-move flag: yes.** A guest (and, as an extension, a tag) can be marked so automatic balancing never moves it.
+- **Time window: selectable and customizable** (days and hours, more than one window), not a fixed night-only rule.
+- **What the planner balances is selectable: CPU, memory, or both.** The default is the **most limited resource**: whichever of CPU and memory has the least headroom on the busiest node, so the cluster is balanced on the thing that will run out first. Memory still wins ties, because it is what limits where a VM can move.
+- **Scope is selectable**: the whole cluster by default, or a chosen set of nodes (and later tags), and per cluster rather than one global switch.
+
+The sections below are updated to match; the remaining open questions are at the end.
 
 ## Goal
 
@@ -38,6 +48,22 @@ Nothing in this proposal weakens any of those. Automatic mode is a new *caller* 
 3. **Auto-approve (opt-in, second phase).** The same plan is approved by the system, under the extra limits below.
    Enabled per cluster by an admin, behind its own confirmation, and only available when mode 2 has been running
    for a while (see open questions).
+
+### Warnings for auto-approve
+
+Turning on auto-approve shows, before it can be saved: what it will do on its own (live-migrate running VMs without asking),
+the selected level's numbers in plain words ("up to 4 moves per run, at most every 2 hours"), the window it may act in, the
+guests excluded by the do-not-move flag, and a reminder that the global write kill switch and Pause stop it at any time.
+The Aggressive level adds a second confirmation. The card keeps a visible "Automatic: approves on its own" badge while it is on.
+
+### What it balances and where
+
+- **Metric:** Most limited resource (default), Memory, CPU, or Both. "Most limited" picks, per run, the resource with the
+  least headroom on the busiest node; the plan is then scored on that one. "Both" requires a move to help neither metric
+  worsen past its ceiling.
+- **Scope:** the whole cluster (default) or selected nodes, per cluster.
+- **Window:** one or more allowed day/time ranges, in the app's timezone; outside them the job only recommends.
+- **Do-not-move:** per guest now (the wish list's G1), per tag as a follow-up; also honored by manual Balance Load suggestions.
 
 ### Aggressiveness levels
 
@@ -112,16 +138,13 @@ Balancing every few minutes on noisy numbers causes ping-pong. Mitigations, all 
 
 ## Open questions for Phil
 
-1. **Auto-approve at all?** Is recommend-only enough, or do you want phase 2? If yes, should it be allowed on a
-   production cluster, or only on clusters you mark as "lab"?
-2. **Do-not-auto-move flag.** The wish list has "G1: don't auto-move". Should it be per guest, per tag, or both? Is
-   it also the way to opt a guest out of manual Balance Load suggestions?
-3. **Windows.** Should automatic runs be limited to a schedule (nights only), or is "any time under the cooldowns" fine?
+1. **Auto-approve on production.** Decided: wanted, with warnings. Still open: allowed on every cluster, or only ones marked "lab" until trusted?
+2. **Do-not-move flag.** Decided: yes, per guest. Open: per tag as well (proposed follow-up)? Also hides the guest from manual suggestions?
+3. **Windows.** Decided: customizable. Open: just allowed windows, or also blackout dates (change freezes)?
 4. **Level names and numbers.** Are Conservative/Moderate/Aggressive the right words, and are the starting numbers
    (above) sensible to you? A fourth "Custom" preset?
-5. **CPU.** Memory is what limits where a VM can move, and the balance gauge counts CPU only above 50% on the busiest
-   node. Is memory-led balancing what you want, or should CPU get an equal vote?
-6. **Scope of "automatic" in the UI.** Per cluster (proposed), or one global switch? Cre-pyxie has several clusters.
+5. **CPU vs memory.** Decided: selectable, default most-limited resource. Open: should the gauge on the Dashboard follow the same choice?
+6. **Scope.** Decided: selectable. Open: is per-cluster plus a node selection enough, or do you also want tag-based scope?
 7. **Notifications.** Email via the existing rules only, or also an in-app banner on the Dashboard while an automatic
    plan is waiting?
 8. **Failure policy.** On a failed automatic move: stop and alert (proposed), or also disable automatic mode until a
