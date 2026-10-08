@@ -47,6 +47,14 @@ Illustrative mockups; the data shown is fictional.
 
 ![Maintenance](docs/screenshots/mockup-maintenance.png)
 
+**Balance Load** -- a rebalance preview: memory by node before and after, every move checked one at a time, and blocked moves explained:
+
+![Balance Load](docs/screenshots/mockup-balance-load.png)
+
+**Affinity Rules** -- keep-together and keep-apart rules, enforced on migrations, evacuations and rebalancing:
+
+![Affinity Rules](docs/screenshots/mockup-affinity-rules.png)
+
 <details>
 <summary>Screenshots of the running app (demo data)</summary>
 
