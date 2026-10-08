@@ -25,7 +25,19 @@ log = logging.getLogger(__name__)
 
 AUTOMATIC_ACTOR = "PyXie (automatic)"
 LIVE_STATUSES = ("pending", "dry_run", "awaiting_approval", "approved", "revalidating", "executing", "monitoring", "verifying")
-STALE_PLAN_HOURS = 12.0  # an automatic plan nobody looked at is replaced by a fresh one rather than left to rot
+STALE_PLAN_HOURS = 12.0  # a plan nobody approved is replaced by a fresh one rather than left to block automatic balancing
+
+
+def stale_waiting_plan(status: str, context: dict | None, age_hours: float, cluster_id) -> bool:
+    """Is this waiting plan old enough to be cleared out of the way of an automatic run?
+    An automatic plan counts for its own cluster only. A Balance Load plan someone previewed and walked away from
+    counts too. A Bulk Migrate plan never does: someone picked those exact guests on purpose."""
+    ctx = context or {}
+    if status != "awaiting_approval" or age_hours < STALE_PLAN_HOURS or ctx.get("mode") == "bulk_migrate":
+        return False
+    if ctx.get("automatic"):
+        return ctx.get("cluster_id") == str(cluster_id)
+    return True
 
 
 def _live_rebalance_ops(db: Session) -> list[Operation]:
@@ -84,8 +96,9 @@ def evaluate_cluster(db: Session, cluster: Cluster, *, now=None) -> dict:
     for op in _live_rebalance_ops(db):
         automatic = bool((op.context or {}).get("automatic"))
         age = hours_ago(op.created_at.isoformat(), now) or 0
-        if automatic and op.status == "awaiting_approval" and age >= STALE_PLAN_HOURS and (op.context or {}).get("cluster_id") == str(cluster.id):
-            enter_stage(db, op, status="cancelled", error=f"Replaced: nobody reviewed this automatic plan within {int(STALE_PLAN_HOURS)} hours.", actor=AUTOMATIC_ACTOR)
+        if stale_waiting_plan(op.status, op.context, age, cluster.id):
+            kind = "automatic" if automatic else "Balance Load"
+            enter_stage(db, op, status="cancelled", error=f"Replaced: nobody approved this {kind} plan within {int(STALE_PLAN_HOURS)} hours.", actor=AUTOMATIC_ACTOR)
             op.dismissed = True
             db.commit()
             continue
