@@ -7,7 +7,7 @@ import { onBadgesChanged } from "@/lib/operationsBus";
 import { PackageIcon,
   DashboardIcon, HealthIcon, LightbulbIcon, WrenchIcon, LinkIcon, ShieldIcon, GaugeIcon,
   ServerIcon, WorkloadIcon, StorageIcon, NetworkIcon, PlugIcon, KeyIcon,
-  ScrollIcon, ReportIcon, SlidersIcon, GearIcon, UsersIcon, BellIcon, MailIcon,
+  ScrollIcon, ReportIcon, MigrateIcon, SlidersIcon, GearIcon, UsersIcon, BellIcon, MailIcon,
 } from "@/components/Icons";
 
 type NavItem = {
@@ -46,6 +46,7 @@ const SECTIONS: NavSection[] = [
       { label: "Health", href: "/operations/health", icon: <HealthIcon /> },
       { label: "Rightsizing", href: "/operations/recommendations", icon: <LightbulbIcon /> },
       { label: "Maintenance", href: "/operations/maintenance", icon: <WrenchIcon /> },
+      { label: "Balance Load", href: "/operations/balance", icon: <MigrateIcon /> },
       { label: "Affinity Rules", href: "/operations/affinity-rules", icon: <LinkIcon /> },
       { label: "Protection", href: "/operations/protection", icon: <ShieldIcon /> },
       { label: "Capacity", href: "/operations/capacity", icon: <GaugeIcon /> },

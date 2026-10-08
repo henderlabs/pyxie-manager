@@ -250,7 +250,7 @@ def _rightsizing_recommendations(assessments: list[dict], capacity_reports: list
     return recs
 
 
-def _placement_recommendations(db: Session, source_node_ids: set | None = None) -> list[dict]:
+def _placement_recommendations(db: Session, source_node_ids: set | None = None, blocked_out: list | None = None) -> list[dict]:
     """DRS-style proactive load-balancing: for each running VM, re-run the
     exact same scoring engine the interactive migration form's 'recommend'
     auto-fill already uses (placement.py), including THIS workload's own
@@ -343,10 +343,32 @@ def _placement_recommendations(db: Session, source_node_ids: set | None = None) 
                 ranked = rank_with_simulated_load(candidates, node_by_id, simulated_added_bytes)
                 current = next((c for c in ranked if c.node_id == wl.node_id), None)
                 best = ranked[0]
-                if current is None or best.blocked or best.node_id == wl.node_id:
+                if current is None:
                     continue
+                moving = not best.blocked and best.node_id != wl.node_id
                 improvement = _adjusted_score(best) - _adjusted_score(current)
-                if improvement < PLACEMENT_IMPROVEMENT_THRESHOLD:
+                moving = moving and improvement >= PLACEMENT_IMPROVEMENT_THRESHOLD
+                if blocked_out is not None:
+                    # Balance Load preview: a destination that would have been a real
+                    # improvement but a hard rule (keep-apart, headroom, ...) refused it,
+                    # so the operator sees why a guest is not moving where it looks best.
+                    alt = max(
+                        (c for c in ranked if c.blocked and c.node_id != wl.node_id),
+                        key=lambda c: c.score, default=None,
+                    )
+                    if alt is not None:
+                        alt_gain = alt.score - current.score
+                        if alt_gain >= PLACEMENT_IMPROVEMENT_THRESHOLD and (not moving or alt.score > best.score):
+                            blocked_out.append({
+                                "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
+                                "memory_bytes": wl.memory_bytes,
+                                "source_node_id": str(wl.node_id), "source_node": current.node_name,
+                                "blocked_node_id": str(alt.node_id), "blocked_node": alt.node_name,
+                                "blocking_reasons": alt.blocking_reasons,
+                                "improvement": round(alt_gain, 1),
+                                "planned_instead": best.node_name if moving else None,
+                            })
+                if not moving:
                     continue
 
                 note_planned_move(simulated_added_bytes, wl, best.node_id)

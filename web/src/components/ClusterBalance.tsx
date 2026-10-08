@@ -124,7 +124,7 @@ export function NodeBalanceStrip({ nodes }: { nodes: NodeLoad[] }) {
             </>
           )}
         </span>
-        <Link href="/operations/maintenance" className="text-accent hover:underline">
+        <Link href="/operations/balance" className="text-accent hover:underline">
           Balance Load →
         </Link>
       </div>
