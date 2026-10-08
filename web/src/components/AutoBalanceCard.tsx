@@ -18,6 +18,8 @@ export type AutoBalanceView = {
   presets: Record<string, { trigger_score: number; min_benefit: number; max_moves: number; cluster_cooldown_hours: number; guest_cooldown_hours: number }>;
   nodes: { id: string; name: string }[];
   balance_score: number | null;
+  busy_score?: number | null;
+  history_ok?: boolean;
   resolved_metric: string;
   pending_operation_id: string | null;
   waiting_operation_id?: string | null;
@@ -95,7 +97,11 @@ function Cluster({ initial }: { initial: AutoBalanceView }) {
         <span className={`px-2 py-0.5 rounded text-xs font-medium ${paused || view.config.mode === "off" ? "bg-muted/15 text-muted" : savedAuto ? "bg-warn/15 text-warn" : "bg-good/15 text-good"}`}>
           {view.config.mode === "off" ? "Off" : paused ? "Paused" : savedAuto ? "Automatic: approves on its own" : "Recommend only"}
         </span>
-        {view.balance_score !== null && <span className="text-muted">balance score now {view.balance_score}</span>}
+        {view.balance_score !== null && (
+          <span className="text-muted" title="Right now. Automatic balancing acts on the busy-hours score below, which looks at each node's busy level over the last 7 days.">
+            balance score now {view.balance_score}{view.busy_score != null ? ` · busy-hours score ${view.busy_score}` : view.history_ok === false ? " · not enough history yet for a busy-hours score" : ""}
+          </span>
+        )}
       </div>
 
       <div>
@@ -116,7 +122,8 @@ function Cluster({ initial }: { initial: AutoBalanceView }) {
             <div className="font-medium text-warn">Before you turn this on: PyXie will move running guests without asking you.</div>
             <ul className="list-disc pl-5 text-xs text-muted space-y-1">
               <li>It live-migrates <span className="text-text">one guest at a time</span>. After each move finishes it waits at least {hours(preset.cluster_cooldown_hours)}, then plans the next move from fresh numbers. A guest it moved is left alone for {hours(preset.guest_cooldown_hours)}.</li>
-              <li>It only acts when the balance score is below {preset.trigger_score}, and only for moves worth {preset.min_benefit}+ points.</li>
+              <li>It only acts when the <span className="text-text">busy-hours score</span> is below {preset.trigger_score}, and only for moves worth {preset.min_benefit}+ points. That score uses each node&apos;s busy level over the last 7 days, not the number right now, so a server that is only busy in business hours is never treated as idle at night. It waits for 24 hours of history on every node.</li>
+              <li>A guest is never moved back to a host it left in the last 3 days, and a guest that has already moved twice in a week is left alone, so nothing bounces between hosts.</li>
               <li>{cfg.windows.length === 0 ? "It may act at any time of day." : `It acts only inside the time window${cfg.windows.length === 1 ? "" : "s"} below.`}</li>
               <li>{locked > 0 ? `${locked} running guest${locked === 1 ? " is" : "s are"} marked Do not move or pinned to their host and will never be touched.` : "No guest is marked Do not move or pinned to its host right now, so every running VM can be moved."}</li>
               <li>It never moves guests off a node in maintenance, never approves a plan that also changes storage, and never approves a move that would leave any node above 80% memory. Those plans wait for you instead.</li>
@@ -153,7 +160,7 @@ function Cluster({ initial }: { initial: AutoBalanceView }) {
                 className={`text-left rounded border px-3 py-2 ${cfg.level === l.id ? "border-accent bg-accent/10" : "border-border hover:bg-surface2/60"}`}>
                 <div className="text-sm font-medium text-text">{l.label}</div>
                 <div className="text-xs text-muted mt-0.5">
-                  Acts when balance score is below {p.trigger_score}. Only moves worth {p.min_benefit}+ points, up to {p.max_moves} per plan, at most one plan every {hours(p.cluster_cooldown_hours)}; a moved guest is left alone for {hours(p.guest_cooldown_hours)}.
+                  Acts when balance score is below {p.trigger_score}. Only moves worth {p.min_benefit}+ points, {auto ? "one move at a time" : `up to ${p.max_moves} per plan`}, at most one plan every {hours(p.cluster_cooldown_hours)}; a moved guest is left alone for {hours(p.guest_cooldown_hours)}.
                 </div>
               </button>
             );

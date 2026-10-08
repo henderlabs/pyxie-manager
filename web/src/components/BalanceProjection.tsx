@@ -8,7 +8,7 @@ type PlanLine = {
   source_node_id?: string; source_node?: string; destination_node_id: string; destination_node: string;
   transport?: string; pinned_node?: string | null;
 };
-type LeftAlone = { workload_id: string; vmid: number; name: string | null; node: string | null; reason: "pinned" | "do_not_move" };
+type LeftAlone = { workload_id: string; vmid: number; name: string | null; node: string | null; reason: "pinned" | "do_not_move" | "recent" | "settled" };
 type BlockedMove = {
   workload_id: string; vmid: number; name: string | null; memory_bytes?: number | null;
   source_node: string; blocked_node: string; blocking_reasons: string[]; improvement: number;
@@ -112,7 +112,7 @@ export default function BalanceProjection({ op }: { op: Operation }) {
           {leftAlone.length > 0 && (
             <li className="py-2 text-xs text-muted">
               <span className="text-text">Left alone on purpose:</span>{" "}
-              {leftAlone.map((l) => `${l.name || "vmid " + l.vmid} (${l.reason === "pinned" ? `pinned to ${l.node}` : "do not move"})`).join(", ")}
+              {leftAlone.map((l) => `${l.name || "vmid " + l.vmid} (${l.reason === "pinned" ? `pinned to ${l.node}` : l.reason === "settled" ? "moved twice this week, left where it is" : l.reason === "recent" ? "moved recently" : "do not move"})`).join(", ")}
               {leftAloneTotal > leftAlone.length ? `, and ${leftAloneTotal - leftAlone.length} more` : ""}.
             </li>
           )}

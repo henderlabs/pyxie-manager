@@ -265,6 +265,7 @@ def _placement_recommendations(
     db: Session, source_node_ids: set | None = None, blocked_out: list | None = None, *,
     cluster_ids: set | None = None, metric: str | None = None, min_improvement: float | None = None,
     max_moves: int | None = None, skip_workload_ids: set | None = None, left_alone_out: list | None = None,
+    skip_reasons: dict | None = None, avoid_nodes: dict | None = None, load_pct_override: dict | None = None,
 ) -> list[dict]:
     """DRS-style proactive load-balancing: for each running VM, re-run the
     exact same scoring engine the interactive migration form's 'recommend'
@@ -320,7 +321,7 @@ def _placement_recommendations(
         node_by_id = {n.id: n for n in nodes}
         simulated_added_bytes = {n.id: 0 for n in nodes}
         # Running memory % per node as kept moves are applied, for the "never swap the imbalance" check below.
-        sim_pct = {n.id: float(n.mem_usage_pct) for n in nodes if n.mem_usage_pct is not None and n.mem_total_bytes}
+        sim_pct = {n.id: float((load_pct_override or {}).get(n.id, n.mem_usage_pct)) for n in nodes if (load_pct_override or {}).get(n.id, n.mem_usage_pct) is not None and n.mem_total_bytes}
         guard_on = cluster_metric != "cpu"
 
         def _swaps(wl, cand) -> tuple[bool, float]:
@@ -352,6 +353,11 @@ def _placement_recommendations(
                         })
                     continue
                 if skip_workload_ids and wl.id in skip_workload_ids:
+                    if left_alone_out is not None and (skip_reasons or {}).get(wl.id):
+                        left_alone_out.append({
+                            "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name, "memory_bytes": wl.memory_bytes,
+                            "node": node_by_id[wl.node_id].name if wl.node_id in node_by_id else None, "reason": skip_reasons[wl.id],
+                        })
                     continue
                 # Exclude offline/maintenance-mode nodes as destinations --
                 # always keep the workload's own current node in the set so
@@ -363,7 +369,8 @@ def _placement_recommendations(
                 # this call site was passing every node, unfiltered, straight
                 # through -- found live when a maintenance-mode node still
                 # showed up as a suggested destination on the Dashboard).
-                candidate_nodes = [n for n in nodes if n.id == wl.node_id or (n.status == "online" and not n.maintenance_mode)]
+                avoid = (avoid_nodes or {}).get(wl.id, set())  # hosts this guest recently left: it must not bounce back
+                candidate_nodes = [n for n in nodes if n.id == wl.node_id or (n.status == "online" and not n.maintenance_mode and n.id not in avoid)]
                 try:
                     candidates = recommend_destinations(db, client, wl, candidate_nodes, simulated_added_bytes=simulated_added_bytes, metric=cluster_metric)
                 except Exception:
