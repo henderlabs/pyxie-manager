@@ -99,6 +99,13 @@ def generate_recommendations_job():
     return _run_logged("recommendation_generation", lambda db: generate_recommendations(db))
 
 
+def auto_balance_job():
+    """Phase 1 of automatic balancing: creates a plan awaiting approval when a cluster set to \"recommend\" is out of balance. Never approves or runs anything."""
+    from pyxie_core.auto_balance import evaluate_all
+
+    return _run_logged("auto_balance", lambda db: {"clusters": evaluate_all(db)})
+
+
 def collect_reporting_job(actor: str = "schedule"):
     """Reporting-page inventory (disks/NICs/snapshots/guest IPs). Runs on the
     low-priority 'analysis' queue so a long pass can never delay discovery
@@ -221,3 +228,4 @@ def run_all():
     sync_protection_targets()
     evaluate_findings_job()
     generate_recommendations_job()
+    auto_balance_job()

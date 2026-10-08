@@ -13,6 +13,7 @@ from .routers import (
     console,
     host_kit,
     setup,
+    auto_balance,
     feedback,
     auth,
     findings,
@@ -109,6 +110,7 @@ app.include_router(host_kit.admin_router)
 app.include_router(host_kit.public_router)
 app.include_router(setup.router)
 app.include_router(feedback.router)
+app.include_router(auto_balance.router)
 
 
 @app.get("/api/health")

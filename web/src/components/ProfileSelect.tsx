@@ -154,3 +154,30 @@ export function PreferredHostSelect({
     </select>
   );
 }
+
+/** "Do not move": Balance Load and automatic balancing never move this guest (evacuating a node for maintenance still does). */
+export function DoNotMoveToggle({ workloadId, value }: { workloadId: string; value: boolean }) {
+  const [on, setOn] = useState(value);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const me = useMe();
+  const isAdmin = me === undefined || me?.is_admin === true;
+  async function change(next: boolean) {
+    setSaving(true);
+    setError(null);
+    try {
+      await patchPlacementProfile(workloadId, { do_not_move: next });
+      setOn(next);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <label className="inline-flex items-center gap-1.5 text-xs" title={error || undefined}>
+      <input type="checkbox" checked={on} disabled={saving || !isAdmin} onChange={(e) => change(e.target.checked)} />
+      <span className={error ? "text-bad" : on ? "text-warn" : "text-muted"}>{error || (on ? "never moved" : "can be moved")}</span>
+    </label>
+  );
+}

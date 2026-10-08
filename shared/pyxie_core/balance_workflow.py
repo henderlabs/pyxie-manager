@@ -94,16 +94,20 @@ def projected_memory_rows(nodes: list[dict], migrate_plan: list[dict]) -> list[d
     return out
 
 
-def dry_run_balance(db: Session, *, actor: str, node_ids: list | None = None) -> Operation:
-    op = create_operation(
-        db, "cluster.rebalance",
-        context={"node_ids": [str(n) for n in node_ids] if node_ids else None},
-        created_by=actor,
-    )
-
+def dry_run_balance(
+    db: Session, *, actor: str, node_ids: list | None = None, cluster_id=None, extra_context: dict | None = None,
+    min_improvement: float | None = None, max_moves: int | None = None, skip_workload_ids: set | None = None,
+    only_if_moves: bool = False,
+) -> Operation | None:
+    """The plan is built first and the operation created after, so an automatic run that finds nothing
+    (only_if_moves) leaves no empty operation behind."""
     source_node_ids = set(node_ids) if node_ids else None
     blocked_moves: list[dict] = []
-    recs = _placement_recommendations(db, source_node_ids=source_node_ids, blocked_out=blocked_moves)
+    recs = _placement_recommendations(
+        db, source_node_ids=source_node_ids, blocked_out=blocked_moves,
+        cluster_ids={cluster_id} if cluster_id else None, min_improvement=min_improvement,
+        max_moves=max_moves, skip_workload_ids=skip_workload_ids,
+    )
 
     migrate_plan = []
     for r in recs:
@@ -129,6 +133,14 @@ def dry_run_balance(db: Session, *, actor: str, node_ids: list | None = None) ->
             # storage, so an operator may want to switch this per item).
             "transport": "live",
         })
+
+    if only_if_moves and not migrate_plan:
+        return None
+    op = create_operation(
+        db, "cluster.rebalance", cluster_id=cluster_id,
+        context={"node_ids": [str(n) for n in node_ids] if node_ids else None, **(extra_context or {})},
+        created_by=actor,
+    )
 
     reasons = (
         [f"{len(migrate_plan)} workload(s) would move to improve cluster balance -- each move is still reviewed "

@@ -250,7 +250,11 @@ def _rightsizing_recommendations(assessments: list[dict], capacity_reports: list
     return recs
 
 
-def _placement_recommendations(db: Session, source_node_ids: set | None = None, blocked_out: list | None = None) -> list[dict]:
+def _placement_recommendations(
+    db: Session, source_node_ids: set | None = None, blocked_out: list | None = None, *,
+    cluster_ids: set | None = None, metric: str | None = None, min_improvement: float | None = None,
+    max_moves: int | None = None, skip_workload_ids: set | None = None,
+) -> list[dict]:
     """DRS-style proactive load-balancing: for each running VM, re-run the
     exact same scoring engine the interactive migration form's 'recommend'
     auto-fill already uses (placement.py), including THIS workload's own
@@ -283,13 +287,20 @@ def _placement_recommendations(db: Session, source_node_ids: set | None = None, 
     "evaluate every running VM cluster-wide", unchanged.
     """
     recs: list[dict] = []
+    from .balance_config import get_config, resolve_metric
+
+    threshold = PLACEMENT_IMPROVEMENT_THRESHOLD if min_improvement is None else min_improvement
     for cluster in db.query(Cluster).filter(Cluster.is_missing.is_(False)).all():
+        if cluster_ids is not None and cluster.id not in cluster_ids:
+            continue
         target = db.query(PveTarget).filter(PveTarget.id == cluster.pve_target_id).one_or_none()
         if target is None:
             continue
         nodes = db.query(Node).filter(Node.cluster_id == cluster.id, Node.is_missing.is_(False)).all()
         if len(nodes) < 2:
             continue
+        cluster_metric = resolve_metric(metric or get_config(db, cluster.id)["metric"], nodes)
+        cluster_recs_start = len(recs)
         try:
             client, _cred = build_pve_client(db, target)
         except Exception:
@@ -309,7 +320,11 @@ def _placement_recommendations(db: Session, source_node_ids: set | None = None, 
                 .all()
             )
             for wl in workloads:
+                if max_moves is not None and len(recs) - cluster_recs_start >= max_moves:
+                    break
                 if source_node_ids is not None and wl.node_id not in source_node_ids:
+                    continue
+                if wl.do_not_move or (skip_workload_ids and wl.id in skip_workload_ids):
                     continue
                 # Exclude offline/maintenance-mode nodes as destinations --
                 # always keep the workload's own current node in the set so
@@ -323,7 +338,7 @@ def _placement_recommendations(db: Session, source_node_ids: set | None = None, 
                 # showed up as a suggested destination on the Dashboard).
                 candidate_nodes = [n for n in nodes if n.id == wl.node_id or (n.status == "online" and not n.maintenance_mode)]
                 try:
-                    candidates = recommend_destinations(db, client, wl, candidate_nodes, simulated_added_bytes=simulated_added_bytes)
+                    candidates = recommend_destinations(db, client, wl, candidate_nodes, simulated_added_bytes=simulated_added_bytes, metric=cluster_metric)
                 except Exception:
                     continue
                 if not candidates:
@@ -347,7 +362,7 @@ def _placement_recommendations(db: Session, source_node_ids: set | None = None, 
                     continue
                 moving = not best.blocked and best.node_id != wl.node_id
                 improvement = _adjusted_score(best) - _adjusted_score(current)
-                moving = moving and improvement >= PLACEMENT_IMPROVEMENT_THRESHOLD
+                moving = moving and improvement >= threshold
                 if blocked_out is not None:
                     # Balance Load preview: a destination that would have been a real
                     # improvement but a hard rule (keep-apart, headroom, ...) refused it,
@@ -358,7 +373,7 @@ def _placement_recommendations(db: Session, source_node_ids: set | None = None, 
                     )
                     if alt is not None:
                         alt_gain = alt.score - current.score
-                        if alt_gain >= PLACEMENT_IMPROVEMENT_THRESHOLD and (not moving or alt.score > best.score):
+                        if alt_gain >= threshold and (not moving or alt.score > best.score):
                             blocked_out.append({
                                 "workload_id": str(wl.id), "vmid": wl.vmid, "name": wl.name,
                                 "memory_bytes": wl.memory_bytes,

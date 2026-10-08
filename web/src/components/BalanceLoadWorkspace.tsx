@@ -24,7 +24,7 @@ function loadOf(n: Node, avg: number | null): Load {
   return { label: "Even", cls: "bg-good/15 text-good" };
 }
 
-export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId }: { nodes: Node[]; workloads: Workload[]; initialNodeId?: string }) {
+export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, pendingOperationId }: { nodes: Node[]; workloads: Workload[]; initialNodeId?: string; pendingOperationId?: string }) {
   const [selected, setSelected] = useState<string[]>(initialNodeId ? [initialNodeId] : []);
   const [ops, setOps] = useState<Operation[]>([]);
   const [busy, setBusy] = useState(false);
@@ -32,6 +32,15 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId }
   const [error, setError] = useState<string | null>(null);
   const me = useMe();
   const isAdmin = me === undefined || me?.is_admin === true;
+
+  // A plan prepared by automatic balancing is waiting for approval: show it straight away.
+  useEffect(() => {
+    if (!pendingOperationId) return;
+    fetch(`/api/operations/${pendingOperationId}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((op: Operation | null) => op && setOps([op]))
+      .catch(() => {});
+  }, [pendingOperationId]);
 
   async function evaluate() {
     setBusy(true);
