@@ -110,7 +110,7 @@ export default function AffinityPlacement({ rules, workloads, nodes }: { rules: 
               {ruleLabel(x.rule, byId)}: {x.problem}.
             </div>
           ))}
-          <div className="text-xs text-muted mt-1">Existing placements aren&apos;t moved automatically. Rules are enforced on every new move; Balance Load and migrations will not make these worse.</div>
+          <div className="text-xs text-muted mt-1">PyXie never moves a guest on its own to fix this. Rules are checked on every new move.</div>
         </div>
       )}
       <div className="grid gap-3" style={{ gridTemplateColumns: `repeat(${Math.min(Math.max(sortedNodes.length, 1), 4)}, minmax(0, 1fr))` }}>
