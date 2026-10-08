@@ -212,6 +212,8 @@ type MigratePlanItem = {
   candidates?: PlanCandidate[];
   currently_on_shared?: boolean;
   current_storage?: string | null;
+  source_node?: string;
+  memory_bytes?: number | null;
   // "shutdown_in_place" opts a workload that DOES have a clean auto-found
   // destination out of migrating at all -- just power it off for the
   // maintenance window and back on here afterward (node.exit_maintenance's
@@ -389,7 +391,7 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
     <div className="mb-3 border border-border rounded">
       <div className="flex items-center justify-between gap-2 px-2 py-1.5 border-b border-border">
         <div className="text-xs font-medium text-text">
-          {totalCount} workload{totalCount === 1 ? "" : "s"} on this host
+          {totalCount} workload{totalCount === 1 ? "" : "s"}{op.operation_type_id === "cluster.rebalance" ? "" : " on this host"}
           {plan.length > 0 && (
             <>
               {" "}— {plan.filter((i) => i.transport !== "skip").length} to move (change the destination below if you don't agree with the pick)
@@ -427,6 +429,11 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
             <span className={`text-text truncate flex-1 min-w-0 ${item.transport === "skip" ? "line-through" : ""}`}>
               {item.name || `vmid ${item.vmid}`}
             </span>
+            {op.operation_type_id === "cluster.rebalance" && item.source_node && (
+              <span className="text-muted shrink-0 hidden sm:inline">
+                from {item.source_node}{item.memory_bytes ? ` · ${formatBytes(item.memory_bytes)}` : ""}
+              </span>
+            )}
             {item.current_storage && (
               <span
                 className="text-muted shrink-0 hidden sm:inline"

@@ -239,7 +239,7 @@ def _evaluate_migration_hard_blocks(
             if workload.memory_bytes and dest_headroom < workload.memory_bytes:
                 reasons.append(
                     f"destination {destination_node.name} does not have enough memory headroom "
-                    f"({dest_headroom} bytes free, needs {workload.memory_bytes})"
+                    f"({max(dest_headroom, 0) / 1024 ** 3:.1f} GB free, needs {workload.memory_bytes / 1024 ** 3:.1f} GB)"
                     + (" -- proceeding anyway, manually confirmed" if confirm_override_headroom else "")
                 )
                 # Headroom is the one SAFE-* check here that's a resource

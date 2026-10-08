@@ -102,7 +102,7 @@ const RECENT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 // The standalone Migrations page retired 2026-09-11 -- live migrations
 // (Balance Load, the Workloads "Move" action, or anything else) now show
 // up on Maintenance's own operations log alongside everything else.
-function pageFor(operationTypeId: string): string {
+function pageFor(operationTypeId: string, context?: Record<string, unknown> | null): string {
   // This used to route
   // EVERY operation type to Maintenance, including backup-membership
   // operations that live on the Protection page -- clicking through
@@ -113,6 +113,10 @@ function pageFor(operationTypeId: string): string {
   }
   if (operationTypeId === "workload.network_vlan_change") {
     return "/infrastructure/network";
+  }
+  // Bulk Migrate is a cluster.rebalance too, but it is started from (and reviewed on) Maintenance.
+  if (operationTypeId === "cluster.rebalance" && context?.mode !== "bulk_migrate") {
+    return "/operations/balance";
   }
   return "/operations/maintenance";
 }
@@ -242,7 +246,7 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
 
   return (
     <a
-      href={pageFor(op.operation_type_id)}
+      href={pageFor(op.operation_type_id, op.context)}
       className="block px-3 py-2 hover:bg-surface2/60 border-b border-border/60"
     >
       <div className="flex items-center justify-between gap-2">

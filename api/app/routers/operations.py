@@ -770,6 +770,8 @@ class BalanceRequest(BaseModel):
     # instead of running the balance scoring pass.
     workload_ids: list[uuid.UUID] | None = None
     destination_node_id: uuid.UUID | None = None
+    # Balance Load page: throw away the plan that is waiting (never one that is running) and build a fresh one.
+    replace: bool = False
 
 
 @router.post("/cluster-rebalance/dry-run", dependencies=[Depends(require_admin)])
@@ -796,6 +798,14 @@ def create_balance_dry_run(payload: BalanceRequest, user=Depends(get_current_use
         except BalanceWorkflowError as exc:
             raise HTTPException(400, str(exc))
         return _serialize(op)
+    if existing is not None and payload.replace and existing.status == "awaiting_approval":
+        existing.dismissed = True
+        db.commit()
+        write_audit_event(
+            db, event_category="operation", event_type="cluster.rebalance.dismissed", actor=user.email, actor_type="user",
+            metadata={"operation_id": str(existing.id), "reason": "replaced by a new Balance Load preview"},
+        )
+        existing = None
     if existing is not None:
         return _serialize(existing)
     op = dry_run_balance(db, actor=user.email, node_ids=payload.node_ids)

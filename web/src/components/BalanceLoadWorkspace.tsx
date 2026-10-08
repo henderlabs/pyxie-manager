@@ -24,33 +24,46 @@ function loadOf(n: Node, avg: number | null): Load {
   return { label: "Even", cls: "bg-good/15 text-good" };
 }
 
+function agoText(iso?: string | null) {
+  if (!iso) return "earlier";
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  return m < 1 ? "just now" : m < 90 ? `${m} min ago` : m < 2880 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`;
+}
+
 export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, pendingOperationId }: { nodes: Node[]; workloads: Workload[]; initialNodeId?: string; pendingOperationId?: string }) {
   const [selected, setSelected] = useState<string[]>(initialNodeId ? [initialNodeId] : []);
   const [ops, setOps] = useState<Operation[]>([]);
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [earlier, setEarlier] = useState(false); // the plan on screen was loaded from before this visit
   const me = useMe();
   const isAdmin = me === undefined || me?.is_admin === true;
 
-  // A plan prepared by automatic balancing is waiting for approval: show it straight away.
+  // A plan that is already waiting for approval (yours from earlier, or one automatic balancing prepared): show it straight away.
   useEffect(() => {
     if (!pendingOperationId) return;
     fetch(`/api/operations/${pendingOperationId}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((op: Operation | null) => op && setOps([op]))
+      .then((op: Operation | null) => {
+        if (!op) return;
+        setOps([op]);
+        setEarlier(true);
+      })
       .catch(() => {});
   }, [pendingOperationId]);
 
   async function evaluate() {
     setBusy(true);
     setError(null);
+    const replacing = ops.some((o) => o.status === "awaiting_approval");
     setOps([]);
+    setEarlier(false);
     try {
       const res = await fetch("/api/operations/cluster-rebalance/dry-run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ node_ids: selected.length > 0 ? selected : null }),
+        body: JSON.stringify({ node_ids: selected.length > 0 ? selected : null, replace: replacing }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Balance Load failed");
@@ -131,6 +144,7 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, 
   const heavy = live.filter((n) => loadOf(n, avg).label === "Heavy");
   const selectable = live.filter((n) => n.status === "online" && !n.maintenance_mode);
   const previewed = ops.length > 0;
+  const waitingPlan = ops.find((o) => o.status === "awaiting_approval");
 
   return (
     <div className="space-y-4">
@@ -211,14 +225,23 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, 
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50"
           >
             <MigrateIcon className="w-4 h-4" />
-            {busy ? "Evaluating…" : selected.length > 0 ? `Preview Balance Load for ${selected.length} node${selected.length === 1 ? "" : "s"}` : "Preview Balance Load"}
+            {busy
+              ? "Evaluating…"
+              : `${waitingPlan ? "Replace the plan below with a new preview" : "Preview Balance Load"}${selected.length > 0 ? ` for ${selected.length} node${selected.length === 1 ? "" : "s"}` : ""}`}
           </button>
         )}
+        {waitingPlan && <p className="text-xs text-muted mt-2">A plan is already waiting for approval below. A new preview discards it (nothing has moved) and re-reads the cluster.</p>}
       </Card>
 
       {error && <div className="text-sm text-bad">{error}</div>}
       {ops.map((op) => (
         <div key={op.id}>
+          {earlier && op.status === "awaiting_approval" && (
+            <div className="mb-3 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-text">
+              This plan was prepared {agoText(op.created_at)}{op.created_by ? ` by ${op.created_by}` : ""} and is still waiting for approval.
+              The numbers are from then; use <em>Re-score</em> in the plan or start a new preview to refresh them.
+            </div>
+          )}
           <BalanceProjection op={op} />
           <OperationCard
             op={op}
