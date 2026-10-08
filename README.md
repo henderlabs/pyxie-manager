@@ -33,38 +33,27 @@ The older native systemd install (no Docker) is still supported but is the legac
 
 ## Screenshots
 
-Illustrative mockups; the data shown is fictional.
+Captured from the running app against a fictional demo dataset (no real hostnames, VM names or accounts).
 
-**Dashboard** -- cluster resource usage, environment health, and what needs attention right now:
-
-![Dashboard](docs/screenshots/mockup-dashboard.png)
-
-**Rightsizing** -- evidence-backed sizing suggestions, triaged with acknowledge and dismiss:
-
-![Rightsizing](docs/screenshots/mockup-rightsizing.png)
-
-**Maintenance** -- node evacuation, host updates and reboots, every action previewed and approved before it runs:
-
-![Maintenance](docs/screenshots/mockup-maintenance.png)
-
-**Balance Load** -- a rebalance preview: memory by node before and after, every move checked one at a time, and blocked moves explained:
-
-![Balance Load](docs/screenshots/mockup-balance-load.png)
-
-**Affinity Rules** -- keep-together and keep-apart rules, enforced on migrations, evacuations and rebalancing:
-
-![Affinity Rules](docs/screenshots/mockup-affinity-rules.png)
-
-<details>
-<summary>Screenshots of the running app (demo data)</summary>
+**Dashboard** -- cluster resource usage, host load, and what needs attention right now:
 
 ![Dashboard](docs/screenshots/dashboard.png)
 
+**Cluster balance** -- the balance gauge and per-node host load (outer arc memory, inner arc CPU), with a link into Balance Load:
+
+![Cluster balance](docs/screenshots/balance.png)
+
+**Rightsizing** -- per-workload observation status with evidence-backed sizing suggestions:
+
 ![Rightsizing](docs/screenshots/rightsizing.png)
+
+**Maintenance** -- node evacuation, guest lifecycle, host updates, Balance Load and full maintenance runs, every action previewed before approval:
 
 ![Maintenance](docs/screenshots/maintenance.png)
 
-</details>
+**Affinity Rules** -- keep-together and keep-apart placement rules, enforced on migrations, evacuations and rebalancing:
+
+![Affinity Rules](docs/screenshots/affinity-rules.png)
 
 ## Versioning
 
