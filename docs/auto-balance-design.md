@@ -24,6 +24,25 @@ The same metric setting also drives manual Balance Load (default: most limited r
 Not yet (phase 2 or later): auto-approve and its warnings, smoothed-memory trigger, per-tag do-not-move, blackout dates,
 advanced per-number overrides. Settings live in cluster-scoped policies `balance.auto` / `balance.auto_state`.
 
+## Phase 2 as built (v0.35.0, auto-approve)
+
+Phil's decisions (2026-10-08): allowed on any cluster behind an explicit confirmation; after a failed or blocked move it stops, alerts and
+drops the cluster back to Recommend only; all three levels, with Aggressive needing a second confirmation; plans that also change storage
+are left for a person; and **one move at a time, re-evaluated from fresh data before the next**.
+
+- Mode `auto_approve` per cluster. Saving it needs `ack` (who, when, and for Aggressive a second flag); the ack is kept only while the mode
+  is `auto_approve`, so every re-enable asks again. The Balance Load card shows a warning panel with the level's real numbers, the window,
+  how many guests are locked (Do not move or pinned), and the write-switch status.
+- Each run plans exactly **one** move. If it passes the gates it is approved as "PyXie (automatic)" and queued on the normal operations queue.
+  The next move waits for the level's cluster cooldown counted from when the previous move **finished**, and is planned from fresh data.
+- Gates that leave the plan waiting for a person instead (the reason is in the card, the audit event and the notification): global write
+  switch off, a move that is not live, a storage change, any node above 80% memory after the move, a node locked by another operation.
+- Conservative also never plans guests with `downtime_tolerance = low`. Do-not-move, pins, maintenance nodes, affinity, headroom, CPU
+  compatibility and HA are the planner's own hard rules, unchanged.
+- First failed or blocked automatic move: `balance.auto_stopped` audit event, a critical notification (category `balance`), mode back to
+  `recommend`. Nothing retries unattended.
+- Not built: a second concurrent migration for Aggressive, smoothed-memory trigger, per-tag do-not-move, blackout dates.
+
 ## Goal
 
 Balance Load today is a human-driven preview: you open the page, review a plan, approve it. The proposal is a

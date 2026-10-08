@@ -100,10 +100,14 @@ def generate_recommendations_job():
 
 
 def auto_balance_job():
-    """Phase 1 of automatic balancing: creates a plan awaiting approval when a cluster set to \"recommend\" is out of balance. Never approves or runs anything."""
+    """Automatic balancing: prepares a plan when a cluster set to recommend or auto_approve is out of balance. Only auto_approve
+    clusters have it approved and queued here (one move at a time); recommend clusters wait for a person."""
     from pyxie_core.auto_balance import evaluate_all
 
-    return _run_logged("auto_balance", lambda db: {"clusters": evaluate_all(db)})
+    def enqueue(op):
+        operations_queue.enqueue("worker.jobs.execute_operation_job", str(op.id), job_timeout=10800)
+
+    return _run_logged("auto_balance", lambda db: {"clusters": evaluate_all(db, enqueue=enqueue)})
 
 
 def collect_reporting_job(actor: str = "schedule"):
