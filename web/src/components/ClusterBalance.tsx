@@ -45,7 +45,7 @@ export function computeBalance(nodes: NodeLoad[]) {
   const gap = Math.max(memGap, cpuGap);
   const wTotal = weights.reduce((a, b) => a + b, 0);
   const score = Math.min(Math.max(100 - gap, 0), 100);
-  const word = score >= 80 ? "Even" : score >= 60 ? "Uneven" : "Skewed";
+  const word = score >= 80 ? "Even" : score >= 60 ? "A little uneven" : "Skewed";
   return {
     score,
     word,
@@ -59,14 +59,14 @@ export function computeBalance(nodes: NodeLoad[]) {
   };
 }
 
-export function BalanceGauge({ nodes, icon }: { nodes: NodeLoad[]; icon?: React.ReactNode }) {
+export function BalanceGauge({ nodes, icon, trigger }: { nodes: NodeLoad[]; icon?: React.ReactNode; trigger?: number | null }) {
   const b = computeBalance(nodes);
   return (
     <HalfGauge
       value={b ? b.score : null}
       label="Cluster balance"
       icon={icon}
-      ticks={[60, 80]}
+      ticks={trigger && ![60, 80].includes(trigger) ? [60, trigger, 80] : [60, 80]}
       scale="balance"
       detail={b ? `${b.word} · memory ${Math.round(b.memMin)}–${Math.round(b.memMax)}%` : null}
       title="100 minus how far node load strays from the cluster average, counting each node in proportion to its memory size (memory, plus CPU once a node passes 50%). Nodes in maintenance or offline are left out."
