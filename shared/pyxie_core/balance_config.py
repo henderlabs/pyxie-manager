@@ -174,12 +174,20 @@ def smoothed_view(nodes, loads: dict) -> list:
     return out
 
 
-def swaps_imbalance(src_pct: float, dst_pct: float, memory_bytes: int, dst_total_bytes: int) -> tuple[bool, float]:
-    """Would moving a guest of this size leave the destination fuller than the source is right now?
-    The scorer ranks destinations by headroom and can send a big guest to a small quiet node so that node ends
-    up fuller than the one the guest left: that swaps the imbalance instead of curing it. Returns (swaps, dst_after_pct)."""
-    after = dst_pct + memory_bytes / dst_total_bytes * 100.0
-    return after > src_pct + 0.05, after
+MIN_GAP_GAIN = 5.0  # a move must narrow the gap between the two nodes by at least this many percentage points
+
+
+def swaps_imbalance(src_pct: float, dst_pct: float, memory_bytes: int, dst_total_bytes: int, src_total_bytes: int | None = None) -> tuple[bool, float]:
+    """Would this move just swap the imbalance instead of curing it? True when the destination would end fuller than the
+    source is now, OR when the gap between the two nodes would not narrow by at least MIN_GAP_GAIN points. The second
+    test catches the quiet case the first misses: on equal-size nodes a 10 GB guest taken from a 63% node and put on a
+    31% node leaves them at 31% and 63%, the same 32-point gap the other way round, and is the seed of a back-and-forth.
+    Returns (swaps, dst_after_pct)."""
+    src_total_bytes = src_total_bytes or dst_total_bytes
+    dst_after = dst_pct + memory_bytes / dst_total_bytes * 100.0
+    src_after = src_pct - memory_bytes / src_total_bytes * 100.0
+    gain = (src_pct - dst_pct) - abs(src_after - dst_after)
+    return (dst_after > src_pct + 0.05 or gain < MIN_GAP_GAIN), dst_after
 
 
 def resolve_metric(setting: str, nodes) -> str:

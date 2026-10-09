@@ -19,6 +19,7 @@ export type AutoBalanceView = {
   nodes: { id: string; name: string }[];
   balance_score: number | null;
   busy_score?: number | null;
+  revoke_note?: string;
   history_ok?: boolean;
   resolved_metric: string;
   pending_operation_id: string | null;
@@ -57,6 +58,7 @@ function Cluster({ initial }: { initial: AutoBalanceView }) {
   const [saved, setSaved] = useState(false);
   const [ackOk, setAckOk] = useState(false);
   const [ackAggressive, setAckAggressive] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const me = useMe();
   const isAdmin = me === undefined || me?.is_admin === true;
   const preset = view.presets[cfg.level];
@@ -73,12 +75,16 @@ function Cluster({ initial }: { initial: AutoBalanceView }) {
     setBusy(true);
     setError(null);
     setSaved(false);
+    setNotice(null);
     try {
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
       setView(data as AutoBalanceView);
       setCfg((data as AutoBalanceView).config);
+      setAckOk(false);
+      setAckAggressive(false);
+      setNotice((data as AutoBalanceView).revoke_note ?? null);
       setSaved(true);
     } catch (e) {
       setError((e as Error).message);
@@ -123,6 +129,7 @@ function Cluster({ initial }: { initial: AutoBalanceView }) {
             <ul className="list-disc pl-5 text-xs text-muted space-y-1">
               <li>It live-migrates <span className="text-text">one guest at a time</span>. After each move finishes it waits at least {hours(preset.cluster_cooldown_hours)}, then plans the next move from fresh numbers. A guest it moved is left alone for {hours(preset.guest_cooldown_hours)}.</li>
               <li>It only acts when the <span className="text-text">busy-hours score</span> is below {preset.trigger_score}, and only for moves worth {preset.min_benefit}+ points. That score uses each node&apos;s busy level over the last 7 days, not the number right now, so a server that is only busy in business hours is never treated as idle at night. It waits for 24 hours of history on every node.</li>
+              <li>A move must narrow the gap between the two hosts by at least 5 points. Moves that would only trade places (a guest from a busy host to a quiet one of the same size) are skipped.</li>
               <li>A guest is never moved back to a host it left in the last 3 days, and a guest that has already moved twice in a week is left alone, so nothing bounces between hosts.</li>
               <li>{cfg.windows.length === 0 ? "It may act at any time of day." : `It acts only inside the time window${cfg.windows.length === 1 ? "" : "s"} below.`}</li>
               <li>{locked > 0 ? `${locked} running guest${locked === 1 ? " is" : "s are"} marked Do not move or pinned to their host and will never be touched.` : "No guest is marked Do not move or pinned to its host right now, so every running VM can be moved."}</li>
@@ -233,7 +240,18 @@ function Cluster({ initial }: { initial: AutoBalanceView }) {
         {isAdmin && view.config.mode !== "off" && (paused
           ? <button disabled={busy} onClick={() => call(`/api/auto-balance/${view.cluster_id}/pause`, "DELETE")} className="px-3 py-1.5 rounded text-sm border border-border text-text hover:bg-surface2">Resume</button>
           : <button disabled={busy} onClick={() => call(`/api/auto-balance/${view.cluster_id}/pause`, "POST", { hours: 24 })} className="px-3 py-1.5 rounded text-sm border border-border text-text hover:bg-surface2">Pause for 24 h</button>)}
-        {saved && !dirty && <span className="text-xs text-good">Saved</span>}
+        {isAdmin && savedAuto && (
+          <button
+            disabled={busy}
+            onClick={() => call(`/api/auto-balance/${view.cluster_id}/revoke`, "POST")}
+            title="Switches this cluster back to Recommend only right now and drops the confirmation, so turning auto-approve on again asks again. A move that has not started is cancelled; one already running finishes."
+            className="px-3 py-1.5 rounded text-sm font-medium border border-bad text-bad hover:bg-bad/10 disabled:opacity-50"
+          >
+            Revoke auto-approve
+          </button>
+        )}
+        {saved && !dirty && !notice && <span className="text-xs text-good">Saved</span>}
+        {notice && <span className="text-xs text-warn">{notice}</span>}
         {error && <span className="text-xs text-bad">{error}</span>}
       </div>
 
