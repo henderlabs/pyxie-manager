@@ -8,9 +8,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from pyxie_core.audit import write_audit_event
+from pyxie_core.notifications import dispatch_event
 from pyxie_core.auto_balance import AUTOMATIC_ACTOR, LIVE_STATUSES
 from pyxie_core.balance_config import (
-    PRESETS, ConfigError, balance_score, get_config, get_state, resolve_metric, save_config, smoothed_loads, smoothed_view, utcnow,
+    PRESETS, ConfigError, balance_score, get_config, get_state, resolve_metric, save_config, save_state, smoothed_loads, smoothed_view, utcnow,
 )
 from pyxie_core.models import AppSettings, Cluster, Node, Operation, Workload
 
@@ -135,6 +136,45 @@ def pause_auto_balance(cluster_id: uuid.UUID, payload: PauseRequest, db: Session
     write_audit_event(db, event_category="settings", event_type="balance.auto_paused", actor=user.email, actor_type="user",
                       cluster_id=cluster_id, state_after={"paused_until": until})
     return _cluster_view(db, cluster)
+
+
+@router.post("/{cluster_id}/revoke", dependencies=[Depends(require_admin)])
+def revoke_auto_approve(cluster_id: uuid.UUID, db: Session = Depends(get_db), user=Depends(get_current_user)):
+    """The off switch for auto-approve: back to Recommend only at once, the confirmation is dropped (turning it on again asks again),
+    and an automatic move that was approved but has not started is cancelled. A migration already running finishes: there is no
+    safe point to stop it halfway."""
+    from datetime import datetime
+    cluster = _cluster_or_404(db, cluster_id)
+    before = get_config(db, cluster_id)
+    if before["mode"] != "auto_approve":
+        raise HTTPException(409, "auto-approve is not on for this cluster")
+    after = save_config(db, cluster_id, {**before, "mode": "recommend"})
+    state = get_state(db, cluster_id)
+    save_state(db, cluster_id, {**state, "last_result": "revoked", "last_reason": f"auto-approve revoked by {user.email}", "last_checked_at": utcnow().isoformat()})
+    stopped, running = [], []
+    for o in db.query(Operation).filter(Operation.operation_type_id == "cluster.rebalance", Operation.status.in_(("approved", "revalidating", "evacuating", "executing", "monitoring", "verifying")), Operation.dismissed.is_(False)).all():
+        ctx = o.context or {}
+        if not (ctx.get("automatic") and ctx.get("auto_approved") and ctx.get("cluster_id") == str(cluster_id)):
+            continue
+        # The run checks this between moves, so a move that has not started yet never starts.
+        o.context = {**ctx, "cancel_requested": True}
+        db.commit()
+        (stopped if o.status in ("approved", "revalidating") else running).append(str(o.id))
+    write_audit_event(
+        db, event_category="settings", event_type="balance.auto_revoked", actor=user.email, actor_type="user", cluster_id=cluster_id,
+        state_before=before, state_after=after, metadata={"cancel_requested_for": stopped, "still_running": running},
+    )
+    dispatch_event(
+        db, severity="warning", category="balance", recovered=False, observed_at=utcnow(),
+        title=f"Auto-approve was revoked on {cluster.name} by {user.email}. Automatic balancing is back to Recommend only.",
+    )
+    view = _cluster_view(db, cluster)
+    view["revoke_note"] = (
+        "Auto-approve revoked. This cluster is back to Recommend only." +
+        (" A move that was approved but had not started is cancelled." if stopped else "") +
+        (" A migration that is already running will finish; it cannot be stopped halfway." if running else "")
+    )
+    return view
 
 
 @router.delete("/{cluster_id}/pause", dependencies=[Depends(require_admin)])

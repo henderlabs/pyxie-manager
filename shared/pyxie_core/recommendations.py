@@ -327,7 +327,7 @@ def _placement_recommendations(
         def _swaps(wl, cand) -> tuple[bool, float]:
             if not guard_on or not wl.memory_bytes or wl.node_id not in sim_pct or cand.node_id not in sim_pct:
                 return False, 0.0
-            return swaps_imbalance(sim_pct[wl.node_id], sim_pct[cand.node_id], wl.memory_bytes, node_by_id[cand.node_id].mem_total_bytes)
+            return swaps_imbalance(sim_pct[wl.node_id], sim_pct[cand.node_id], wl.memory_bytes, node_by_id[cand.node_id].mem_total_bytes, node_by_id[wl.node_id].mem_total_bytes)
 
         with client:
             workloads = (
