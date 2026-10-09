@@ -73,3 +73,5 @@ ready, auto-approved, or revoked; a stop after a failure is critical. Audit even
 The design notes and the reasoning are in [auto-balance-design.md](auto-balance-design.md).
 
 **Rule colors.** Each affinity rule has a color that paints its line and its guest pills (here and in the "where the guests sit" card). Pick one of the swatches, or any color, when creating or editing a rule; "Default" goes back to the automatic color. (v0.36.6)
+
+**Storage in the plan.** Each plan line shows where the disks are now and where they will land, e.g. `local-lvm → intel-ssd-103`, or `on nas-ds01 (stays)` for a guest on shared storage. It follows the rules: a guest on shared storage stays put; a guest on local storage goes to the destination host's preferred (pinned) storage, else its local pool with the most free space. Changing the destination host updates it. It is informational: to steer it, set the host's default storage on the Nodes page or the guest's storage preference. (v0.36.6)
