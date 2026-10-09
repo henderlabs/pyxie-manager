@@ -13,9 +13,15 @@ export type PlacementRule = {
   tag: string;
   strict: boolean;
   description: string | null;
+  color?: string | null;
 };
 
 // One color per rule, cycled. Fixed hues (not theme tokens) so a rule keeps its color in light and dark mode.
+/** The rule's own color if the operator picked one, else the cycled default. */
+export function ruleColor(r: { color?: string | null }, rules: unknown[], i: number): string {
+  return r.color || PALETTE[(rules.length - 1 - i) % PALETTE.length];
+}
+
 export const PALETTE = ["#f97316", "#3b82f6", "#a855f7", "#14b8a6", "#ec4899", "#eab308", "#22c55e", "#06b6d4"];
 
 export function ruleLabel(r: PlacementRule, byId: Map<string, Workload>): string {
@@ -97,7 +103,7 @@ export default function AffinityPlacement({ rules, workloads, nodes }: { rules: 
 
   const info = rules.map((r, i) => {
     const members = ruleMembers(r, workloads);
-    return { rule: r, color: PALETTE[(rules.length - 1 - i) % PALETTE.length], members, problem: ruleViolation(r, members, nodeName) };
+    return { rule: r, color: ruleColor(r, rules, i), members, problem: ruleViolation(r, members, nodeName) };
   });
   const rulesOf = new Map<string, typeof info>();
   for (const x of info) for (const m of x.members) rulesOf.set(m.id, [...(rulesOf.get(m.id) || []), x]);

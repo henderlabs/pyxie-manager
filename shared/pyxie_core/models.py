@@ -968,6 +968,7 @@ class PlacementAffinityRule(Base):
     tag = Column(String, nullable=True)  # for tag_group
     strict = Column(Boolean, nullable=False, default=True)
     description = Column(Text, nullable=True)
+    color = Column(String, nullable=True)  # #rrggbb chosen by the operator; NULL = default palette color
     created_by = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)

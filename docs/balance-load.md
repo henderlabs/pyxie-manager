@@ -71,3 +71,5 @@ ready, auto-approved, or revoked; a stop after a failure is critical. Audit even
 `balance.auto_plan_approved`, `balance.auto_stopped`, `balance.auto_revoked`.
 
 The design notes and the reasoning are in [auto-balance-design.md](auto-balance-design.md).
+
+**Rule colors.** Each affinity rule has a color that paints its line and its guest pills (here and in the "where the guests sit" card). Pick one of the swatches, or any color, when creating or editing a rule; "Default" goes back to the automatic color. (v0.36.6)
