@@ -249,9 +249,16 @@ export default function BalanceLoadWorkspace({ nodes, workloads, initialNodeId, 
       {ops.map((op) => (
         <div key={op.id}>
           {earlier && op.status === "awaiting_approval" && (
-            <div className="mb-3 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-text">
-              This plan was prepared {agoText(op.created_at)}{op.created_by ? ` by ${op.created_by}` : ""} and is still waiting for approval.
-              The numbers are from then; use <em>Re-score</em> in the plan or start a new preview to refresh them.
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-text">
+              <span>
+                This plan was prepared {agoText(op.created_at)}{op.created_by ? ` by ${op.created_by}` : ""} and is still waiting for approval.
+                The memory chart and the refused moves are from then. <em>Re-score</em> in the plan card below only re-checks the destination of each planned move; a new preview re-reads the whole cluster.
+              </span>
+              {isAdmin && (
+                <button onClick={evaluate} disabled={busy} className="shrink-0 px-3 py-1 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50">
+                  {busy ? "Evaluating…" : "Start a new preview"}
+                </button>
+              )}
             </div>
           )}
           <BalanceProjection op={op} />

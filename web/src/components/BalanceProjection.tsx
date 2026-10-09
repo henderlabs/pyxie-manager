@@ -59,28 +59,31 @@ export default function BalanceProjection({ op }: { op: Operation }) {
     };
   });
 
+  const dense = rows.length > 6;
   const counts = { no_gain: 0, redirected: 0, blocked: 0 };
   for (const b of blocked) counts[kindOf(b)] += 1;
   const shown = showAll ? blocked : blocked.slice(0, REFUSED_SHOWN);
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-3 items-start">
-      <div className="xl:col-span-3 border border-border rounded-lg p-5 bg-surface">
+    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 mb-3 items-start">
+      <div className="border border-border rounded-lg p-5 bg-surface">
         <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-4">Memory by node: now → after plan</div>
-        <div className="space-y-6">
+        {/* Taller rows and bigger bars, but the card is only as wide as its neighbour. A cluster with many hosts gets
+            tighter rows and, past eight, a scroll area, so this card never runs away from the planned-moves card. */}
+        <div className={`${dense ? "space-y-3" : "space-y-6"} ${rows.length > 8 ? "max-h-[36rem] overflow-y-auto pr-2" : ""}`}>
           {rows.map((n) => (
             <div key={n.node_id}>
               <div className="flex items-baseline justify-between gap-3 mb-1.5">
                 <div className="text-base font-medium text-text truncate" title={n.name}>{n.name}</div>
-                <div className="text-lg font-semibold text-text tabular-nums">
+                <div className={`${dense ? "text-base" : "text-lg"} font-semibold text-text tabular-nums`}>
                   {Math.round(n.before_pct)}% <span className="text-muted">→</span> {Math.round(n.after_pct)}%
                 </div>
               </div>
               <div className="space-y-1.5">
-                <div className="h-3 rounded bg-border overflow-hidden" title={`Today: ${Math.round(n.before_pct)}%`}>
+                <div className={`${dense ? "h-2" : "h-3"} rounded bg-border overflow-hidden`} title={`Today: ${Math.round(n.before_pct)}%`}>
                   <div className="h-full rounded bg-muted/60" style={{ width: `${n.before_pct}%` }} />
                 </div>
-                <div className="h-3 rounded bg-border overflow-hidden" title={`After the plan: ${Math.round(n.after_pct)}%`}>
+                <div className={`${dense ? "h-2" : "h-3"} rounded bg-border overflow-hidden`} title={`After the plan: ${Math.round(n.after_pct)}%`}>
                   <div className="h-full rounded" style={{ width: `${n.after_pct}%`, background: colorForPct(n.after_pct) }} />
                 </div>
               </div>
@@ -102,7 +105,7 @@ export default function BalanceProjection({ op }: { op: Operation }) {
         </p>
       </div>
 
-      <div className="xl:col-span-2 border border-border rounded-lg p-4 bg-surface">
+      <div className="border border-border rounded-lg p-4 bg-surface">
         <div className="text-xs font-semibold uppercase tracking-wider text-muted mb-3">
           {moves.length > 0 ? `Planned moves (${moves.length})` : "No moves planned"}
         </div>
