@@ -20,19 +20,21 @@ const PRIVS: [string, string][] = [
   ["VM.Console (optional)", "The embedded console. Added only if you choose it in the script builder."],
 ];
 
+// In the order you meet them: each Proxmox account (account, token, role), the file the script writes, then each host.
 const NAMES: [string, string, string][] = [
-  ["Proxmox account", "pyxie-ro@pve", "The read-only account. Holds the inventory token."],
-  ["Proxmox token", "pyxie-ro@pve!inventory", "Token ID inventory. PyXie credential purpose: inventory."],
-  ["Proxmox role", "PVEAuditor", "Built into Proxmox. Granted at / to the read-only user and its token."],
-  ["Proxmox account", "pyxie-admin@pve", "The write-capable account. Holds the maintenance token."],
-  ["Proxmox token", "pyxie-admin@pve!maintenance", "Token ID maintenance. PyXie credential purpose: maintenance (admin)."],
-  ["Proxmox role", "PyXieAdmin", "Custom role you create (the script does it): the 12 privileges listed above. Granted at / to the admin user and its token."],
-  ["Proxmox account", "pyxie-console@pve", "Optional: only if you choose a separate console token."],
-  ["Proxmox role", "PVEVMConsole", "Built into Proxmox. Only for that optional console token, at /vms."],
+  ["Proxmox account (required)", "pyxie-ro@pve", "The read-only account. Holds the inventory token."],
+  ["Proxmox token (required)", "pyxie-ro@pve!inventory", "Token ID inventory. PyXie credential purpose: inventory."],
+  ["Proxmox role (required)", "PVEAuditor", "Built into Proxmox. Granted at / to the read-only user and its token."],
+  ["Proxmox account (required)", "pyxie-admin@pve", "The write-capable account. Holds the maintenance token."],
+  ["Proxmox token (required)", "pyxie-admin@pve!maintenance", "Token ID maintenance. PyXie credential purpose: maintenance."],
+  ["Proxmox role (required)", "PyXieAdmin", "Custom role the script creates: the privileges listed below. Granted at / to the admin user and its token. Gets VM.Console too if you choose that in the builder."],
+  ["On the node you ran it on", "/root/pyxie-tokens.txt", "Where the account script saves the token secrets (root only). Copy them into PyXie, then delete the file with shred -u."],
+  ["Proxmox account (optional)", "pyxie-console@pve", "Only if you choose a separate console token. Holds the console token."],
+  ["Proxmox token (optional)", "pyxie-console@pve!console", "Token ID console. PyXie credential purpose: console."],
+  ["Proxmox role (optional)", "PVEVMConsole", "Built into Proxmox. Only for that optional console token, at /vms."],
   ["Each host", "pyxie-hostmaint", "The SSH identity PyXie uses to patch and reboot a node (no shell, seven fixed commands)."],
   ["Each host", "/usr/local/sbin/pyxie-maint", "The wrapper that identity may run. Its sudoers entry is /etc/sudoers.d/pyxie-maint."],
-  ["On the node", "/root/pyxie-tokens.txt", "Where the account script saves the token secrets (root only). Copy them, then delete it with shred -u."],
-]
+];
 
 function chip(done: boolean | undefined, doneText: string, todoText: string) {
   return (
@@ -51,7 +53,7 @@ export default async function QuickStartPage() {
     <div className="max-w-5xl">
       <PageHeader
         title="Quick start"
-        subtitle="New installation? About 15 minutes: create two Proxmox accounts, give PyXie one token from each, and test them. Nothing in Proxmox changes until you switch writes on."
+        subtitle="New installation? About 15 minutes: create two required Proxmox accounts (read-only and admin; an optional third is for the console), give PyXie one token from each, and test them. Nothing in Proxmox changes until you switch writes on."
         icon={<LightbulbIcon className="w-5 h-5" />}
       />
 
@@ -61,7 +63,7 @@ export default async function QuickStartPage() {
             {progress ? `${progress.done} of ${progress.total} setup steps done.` : "Setup status is not available right now."}
           </div>
           <Link href="/platform/providers" className="ml-auto px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10">
-            Open the setup guide
+            Open the Setup guide
           </Link>
         </div>
       </Card>
@@ -87,7 +89,7 @@ export default async function QuickStartPage() {
             "Live VM and memory data, and the \"is this VM really responding\" check",
           ]} />
           <Facts title="It cannot" items={["Start, stop, migrate or resize anything", "List pending package updates (Proxmox wants Sys.Modify for that)"]} />
-          <Facts title="In PyXie" items={["Setup guide step 3: Connect your cluster (Integrations page)", "Token user pyxie-ro@pve, token ID inventory, the secret, then Test connection"]} />
+          <Facts title="In PyXie" items={["Setup guide step 3: Connect your cluster", "Token user pyxie-ro@pve, token ID inventory, the secret, then Test connection"]} />
         </Card>
 
         <Card>
@@ -117,14 +119,15 @@ export default async function QuickStartPage() {
         <CardTitle>The 6 steps</CardTitle>
         <ol className="space-y-2 text-sm text-text">
           <Row n={1} title="Add a site" body="A location or grouping, such as Lab. Setup guide step 1." />
-          <Row n={2} title="Create both accounts in Proxmox" body="Easiest: open the script builder on the Integrations page, tick the inventory and maintenance tokens, and paste the script into a root shell on any Proxmox node. It is safe to paste and safe to re-run; if something fails it says STOPPED at line N. Prefer clicking? See Doing it by hand, below." />
+          <Row n={2} title="Create both accounts in Proxmox" body="Easiest: open the Script builder (Proxmox accounts) on the Setup guide page, tick the inventory and admin tokens (nothing is ticked at first), and paste the script into a root shell on any Proxmox node. It is safe to paste and safe to re-run; if something fails it says STOPPED at line N. Prefer clicking? See Doing it by hand, below." />
           <Row n={3} title="Save the two token secrets" body="Proxmox shows each secret exactly once, when the token is created. The script saves its output, secrets included, to /root/pyxie-tokens.txt (root only): copy the two secrets from it, then delete it with shred -u. If you lose a secret, regenerate it: Datacenter > Permissions > API Tokens > select the token > Regenerate Secret." />
-          <Row n={4} title="Connect the cluster with token 1" body="Integrations > Add PVE target: the hostname or IP of any one node, Verify TLS off for a stock self-signed certificate, token user, token ID and secret. Click Test connection, then Sync now." />
-          <Row n={5} title="Add token 2" body="Credentials > Add credential purpose > maintenance (admin). Click Test connection on that row. The target-level test only checks token 1." />
-          <Row n={6} title="Connect each host and switch features on" body="To apply updates and reboot hosts: generate the host key pair, run the host script from the builder on every node, pin each node's SSH host key. Then, when you are ready, Settings > Allow PyXie to write to Proxmox VE." />
+          <Row n={4} title="Connect the cluster with token 1" body="Setup guide > Add PVE target: the hostname or IP of any one node, Verify TLS off for a stock self-signed certificate, token user, token ID and secret. Click Test connection, then Sync now." />
+          <Row n={5} title="Add token 2" body="A new Proxmox account does not appear in PyXie by itself. Credentials > + Add Credential Purpose > maintenance, token user and token ID exactly as the script created them (pyxie-admin@pve and maintenance), the secret from /root/pyxie-tokens.txt. Click Test connection on that row (a failure now says why). The target-level test only checks token 1." />
+          <Row n={6} title="Connect each host and switch features on" body="To apply updates and reboot hosts: generate the host key pair, then run the script from the Script builder (Host wrapper) yourself, as root, on every node (PyXie does not install it for you), and pin each node's SSH host key. Applying updates later can reboot a node, so use maintenance mode. For the embedded console, choose VM.Console in the admin role (or a separate console token) in the accounts builder, then switch it on in Settings. When you are ready: Settings > Allow PyXie to write to Proxmox VE." />
         </ol>
         <div className="flex gap-2 mt-3 flex-wrap">
-          <Link href="/platform/providers#builder" className="px-3 py-1.5 rounded border border-border text-sm hover:bg-surface2">Open the script builder</Link>
+          <Link href="/platform/providers#builder-accounts" className="px-3 py-1.5 rounded border border-border text-sm hover:bg-surface2">Script builder: Proxmox accounts</Link>
+          <Link href="/platform/providers#builder-host" className="px-3 py-1.5 rounded border border-border text-sm hover:bg-surface2">Script builder: Host wrapper</Link>
           <Link href="/platform/credentials" className="px-3 py-1.5 rounded border border-border text-sm hover:bg-surface2">Credentials</Link>
           <Link href="/platform/settings" className="px-3 py-1.5 rounded border border-border text-sm hover:bg-surface2">Settings</Link>
         </div>
@@ -132,7 +135,7 @@ export default async function QuickStartPage() {
 
       <Card className="mb-4">
         <CardTitle>Names used in this guide</CardTitle>
-        <p className="text-xs text-muted mb-2">Everything the setup creates, in one place. The names are only labels: pick your own in the script builder if you prefer.</p>
+        <p className="text-xs text-muted mb-2">Everything the setup creates, in the order you will meet it. These are the default names; they are only labels. You can pick your own in the Script builder, and an existing install may use others (for example pyxie-maint@pve): PyXie works with whatever names you enter on the Credentials page.</p>
         <table className="w-full text-xs">
           <thead><tr className="text-left text-muted"><th className="py-1 pr-3">Where</th><th className="pr-3">Name</th><th>What it is</th></tr></thead>
           <tbody>
@@ -149,7 +152,7 @@ export default async function QuickStartPage() {
 
       <Card className="mb-4">
         <CardTitle>Putting the host kit on a node</CardTitle>
-        <p className="text-xs text-muted mb-2">The script builder (Integrations page) writes the script and shows the exact commands with your node address filled in. The three ways, in short:</p>
+        <p className="text-xs text-muted mb-2">The Script builder (Host wrapper, on the Setup guide page) writes the script and shows the exact commands with your node address filled in. The three ways, in short:</p>
         <ol className="list-decimal pl-5 text-sm text-text space-y-1.5">
           <li><span className="font-medium">Paste on the node (simplest).</span> <span className="text-muted text-xs">Log in to the node as root, paste the generated script into a file with <code>nano</code>, run it with <code>bash</code>. It downloads one installer from a 30-minute link and refuses to run unless the checksum matches.</span></li>
           <li><span className="font-medium">Copy the installer file.</span> <span className="text-muted text-xs">Download <code>pyxie-host-kit.sh</code>, <code>scp</code> it to the node, compare <code>sha256sum</code> with the checksum PyXie shows, run <code>bash pyxie-host-kit.sh</code>. Nothing to unzip.</span></li>
@@ -190,11 +193,11 @@ export default async function QuickStartPage() {
       <Card className="mb-8">
         <CardTitle>Good to know</CardTitle>
         <ul className="list-disc pl-5 text-sm text-text space-y-1.5">
-          <li>PyXie never sees a Proxmox password. It only holds the two token secrets, stored encrypted.</li>
+          <li>PyXie never sees a Proxmox password. It only holds the token secrets, stored encrypted.</li>
           <li>Two independent gates guard every change: the admin credential and the Settings write switch. Both must allow it, plus your approval on the action.</li>
           <li>Rotate a secret: regenerate it on the token in Proxmox, then paste the new secret in Credentials &gt; Edit.</li>
           <li>Accounts created earlier with other names (for example pyxie-manager@pve and a role called PyXieMaintenanceW1) keep working: those are only labels in Proxmox.</li>
-          <li>Run the checks at any time: Integrations &gt; step 8, Check everything.</li>
+          <li>Run the checks at any time: Setup guide &gt; step 8, Check everything.</li>
         </ul>
       </Card>
     </div>

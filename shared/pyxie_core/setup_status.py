@@ -42,8 +42,9 @@ def build_steps(inp: dict) -> list[dict]:
     have_inv = any(t.get("inventory_status") for t in targets)
     add("accounts", "Create the Proxmox accounts", "done" if have_inv else "todo",
         "Read-only account and token created." if have_inv else
-        "PyXie never creates accounts itself. Tick what you need in the script builder, copy the script to any Proxmox node, run it as root, and keep the token secrets it prints.",
-        action={"label": "Open the script builder", "anchor": "builder"})
+        "PyXie never creates accounts itself. In the Script builder (Proxmox accounts) tick what you need, copy the script to any Proxmox node, run it as root, "
+        "and keep the token secrets it prints: you then add them to PyXie yourself (a new account does not appear in PyXie on its own).",
+        action={"label": "Open the Script builder", "anchor": "builder-accounts"})
 
     # 3. cluster
     if not targets:
@@ -102,7 +103,7 @@ def build_steps(inp: dict) -> list[dict]:
         {"key": "script", "label": "Run the host script on every node",
          "state": "done" if wrap_done else ("waiting" if not key_done else "todo"),
          "detail": f"{wrapper_ok} of {n_nodes} nodes have the current wrapper." if key_done else "Needs the key pair first.",
-         "action": None if wrap_done or not key_done else {"kind": "anchor", "anchor": "builder", "label": "Open the host script builder"}},
+         "action": None if wrap_done or not key_done else {"kind": "anchor", "anchor": "builder-host", "label": "Open the Host wrapper builder"}},
         {"key": "pin", "label": "Pin each node's SSH host key (compare the fingerprint)",
          "state": "done" if pin_done else ("waiting" if not key_done else "todo"),
          "detail": f"{pinned} of {n_nodes} nodes pinned." if key_done else "Needs the key pair first.",
@@ -122,7 +123,17 @@ def build_steps(inp: dict) -> list[dict]:
 
     # 6. features
     writes, console = bool(st.get("pve_mutations_enabled")), bool(st.get("console_enabled"))
-    feat = [f"Writes to Proxmox: {'on' if writes else 'off'}", f"Embedded console: {'on' if console else 'off'}"]
+    have_console_cred = any(t.get("console_credential") for t in targets)
+    maint_ok = bool(maint) and all(m == "valid" for m in maint)
+    if console and not (have_console_cred or maint_ok):
+        console_txt = "on, but there is no credential that can open a console yet (add a console token, or a tested admin token whose role includes VM.Console)"
+    elif console:
+        console_txt = "on"
+    elif have_console_cred or maint_ok:
+        console_txt = "off (a credential is ready: switch it on in Settings to use the VM console)"
+    else:
+        console_txt = "off, and no console credential yet (in the Proxmox accounts builder either add VM.Console to the admin role or create a separate console token, then add it on Credentials)"
+    feat = [f"Writes to Proxmox: {'on' if writes else 'off'}", f"Embedded console: {console_txt}"]
     add("features", "Turn features on", "done" if writes else "optional",
         "Both are off until you switch them on in Settings. " + "; ".join(feat) + ".", action={"label": "Open settings", "href": "/platform/settings"})
 

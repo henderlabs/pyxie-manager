@@ -5,7 +5,7 @@ import type { Node, Workload } from "@/lib/api";
 import { Card, CardTitle, EmptyState } from "@/components/Card";
 import { useMe } from "@/lib/useMe";
 import WorkloadSearchSelect from "@/components/WorkloadSearchSelect";
-import AffinityPlacement, { GuestPill, PALETTE, ruleStatus, ruleTail } from "@/components/AffinityPlacement";
+import AffinityPlacement, { GuestPill, PALETTE, ruleColor, ruleStatus, ruleTail } from "@/components/AffinityPlacement";
 
 type Rule = {
   id: string;
@@ -15,10 +15,11 @@ type Rule = {
   tag: string;
   strict: boolean;
   description: string | null;
+  color?: string | null;
   created_by: string | null;
 };
 
-const EMPTY_FORM = { ruleType: "keep_apart", scopeType: "tag_group", workloadA: "", workloadB: "", tag: "", strict: true, description: "" };
+const EMPTY_FORM = { ruleType: "keep_apart", scopeType: "tag_group", workloadA: "", workloadB: "", tag: "", strict: true, description: "", color: "" };
 
 export default function AffinityRuleManager({ initialRules, workloads, nodes }: { initialRules: Rule[]; workloads: Workload[]; nodes: Node[] }) {
   const [rules, setRules] = useState(initialRules);
@@ -49,6 +50,7 @@ export default function AffinityRuleManager({ initialRules, workloads, nodes }: 
       tag: r.tag || "",
       strict: r.strict,
       description: r.description || "",
+      color: r.color || "",
     });
     setError(null);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 0);
@@ -69,6 +71,7 @@ export default function AffinityRuleManager({ initialRules, workloads, nodes }: 
         scope_type: form.scopeType,
         strict: form.strict,
         description: form.description || null,
+        color: form.color || null,
       };
       if (form.scopeType === "workload_pair") {
         if (!form.workloadA || !form.workloadB || form.workloadA === form.workloadB) {
@@ -117,7 +120,7 @@ export default function AffinityRuleManager({ initialRules, workloads, nodes }: 
     <>
       <p className="text-sm text-muted mb-4 max-w-3xl">
         A <span className="text-text">keep apart</span> rule stops guests from sharing a node (for example two domain controllers, so one host failing can&apos;t take both). A{" "}
-        <span className="text-text">keep together</span> rule keeps guests on one node (for example an app and its cache). Below: where every guest sits today, then the rules, each with its current status.
+        <span className="text-text">keep together</span> rule keeps guests on one node (for example an app and its cache). Below: where every guest sits today, then the rules, each with its current status. Click a swatch (or pick any color) when creating or editing a rule to change the color of its line and guest pills.
       </p>
       <AffinityPlacement rules={rules} workloads={workloads} nodes={nodes} />
       {isAdmin && (
@@ -184,6 +187,18 @@ export default function AffinityRuleManager({ initialRules, workloads, nodes }: 
               placeholder="why this rule exists"
             />
           </div>
+          <div>
+            <label className="block text-xs text-muted mb-1">Color (rule line and guest pills)</label>
+            <div className="flex items-center gap-1.5">
+              {PALETTE.map((c) => (
+                <button key={c} type="button" title={c} aria-label={`Use ${c}`} onClick={() => setForm((f) => ({ ...f, color: c }))}
+                  className={`w-5 h-5 rounded-full border ${form.color === c ? "border-text ring-2 ring-accent" : "border-border"}`} style={{ background: c }} />
+              ))}
+              <input type="color" aria-label="Pick any color" title="Pick any color" value={form.color || "#3b82f6"}
+                onChange={(e) => setForm((f) => ({ ...f, color: e.target.value }))} className="w-7 h-6 p-0 bg-transparent border border-border rounded cursor-pointer" />
+              {form.color && <button type="button" onClick={() => setForm((f) => ({ ...f, color: "" }))} className="text-xs text-muted hover:underline">Default</button>}
+            </div>
+          </div>
           <label className="flex items-center gap-1.5 text-sm text-text pb-1.5">
             <input type="checkbox" checked={form.strict} onChange={(e) => setForm((f) => ({ ...f, strict: e.target.checked }))} />
             Hard block (uncheck for a soft scoring preference only)
@@ -225,12 +240,12 @@ export default function AffinityRuleManager({ initialRules, workloads, nodes }: 
           <div className="divide-y divide-border">
             {rules.map((r, i) => {
               const st = ruleStatus(r, workloads, nodes);
-              const color = PALETTE[(rules.length - 1 - i) % PALETTE.length];
+              const color = ruleColor(r, rules, i);
               const flag = st.problem ? (r.strict ? "broken" : "unmet") : null;
               const pair = r.scope_type !== "tag_group" ? (r.workload_ids || []).map((id) => workloadById.get(id)) : [];
               return (
               <div key={r.id} className={`flex items-center justify-between gap-3 py-3 ${editingId === r.id ? "bg-accent/5" : ""}`}>
-                <span className="w-1.5 self-stretch rounded shrink-0" style={{ background: PALETTE[(rules.length - 1 - i) % PALETTE.length] }} />
+                <span className="w-1.5 self-stretch rounded shrink-0" style={{ background: color }} />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm text-text flex flex-wrap items-center gap-x-1.5 gap-y-1">
                     {r.scope_type === "tag_group" ? (

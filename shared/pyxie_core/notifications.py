@@ -35,6 +35,7 @@ CATEGORIES = [
     {"key": "placement", "label": "Placement & affinity", "description": "An affinity rule is violated."},
     {"key": "balance", "label": "Automatic balancing", "description": "Automatic balancing has prepared a Balance Load plan that is waiting for review. Use a rule with minimum severity Warning to get these by email."},
     {"key": "liveness", "label": "VM not responding", "description": "A running VM's QEMU has stopped answering: PVE still shows it as running, but live migration of it will hang."},
+    {"key": "host_wrapper", "label": "Host wrapper", "description": "A node's host wrapper (what lets PyXie apply updates and reboot it) is older than this PyXie's. You must run the host script on that node."},
     {"key": "connectivity", "label": "Proxmox connectivity", "description": "PyXie cannot reach a Proxmox target, or has had to fall back to another cluster member."},
 ]
 CATEGORY_KEYS = {c["key"] for c in CATEGORIES}

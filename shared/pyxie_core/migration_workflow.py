@@ -74,6 +74,7 @@ from .pve_write_client import (
     SelfProtectionError,
     TaskTimeoutError,
     parse_migration_progress,
+    update_migration_progress,
 )
 from . import rollback
 
@@ -533,8 +534,8 @@ def execute_migration(db: Session, operation_id) -> Operation:
                         log_lines = []
                     if log_lines:
                         last_log_n = max(l.get("n", last_log_n) for l in log_lines)
-                        progress = parse_migration_progress(log_lines)
-                        if progress:
+                        progress = update_migration_progress(op.progress, log_lines)
+                        if progress and progress is not op.progress:
                             op.progress = progress
                             db.commit()
                     if task_result.status != "running":

@@ -43,7 +43,8 @@ async function SiteOverview({ siteId }: { siteId: string }) {
   const allocatedMemBytes = presentWorkloads.reduce((sum, w) => sum + (w.memory_bytes ?? 0), 0);
 
   return (
-    <div>
+    <div className="contents">
+      <div className="min-w-0">
       <PageHeader
         title={site.name}
         subtitle={`Site · ${siteClusters.length} cluster${siteClusters.length === 1 ? "" : "s"} · ${siteNodes.length} node${siteNodes.length === 1 ? "" : "s"}`}
@@ -58,7 +59,8 @@ async function SiteOverview({ siteId }: { siteId: string }) {
         <StatTile label="Allocated vCPU" value={allocatedVcpu} />
         <StatTile label="Allocated RAM" value={formatBytes(allocatedMemBytes)} />
       </div>
-      <p className="text-xs text-muted">Click a cluster in the tree for its own detail and node table.</p>
+      </div>
+      <p className="col-span-2 text-xs text-muted">Click a cluster in the tree for its own detail and node table.</p>
     </div>
   );
 }
@@ -99,7 +101,8 @@ async function ClusterOverview({ clusterId }: { clusterId?: string }) {
     clusterPolicies.find((p) => p.key === "placement.storage_preference" && p.scope_id === cluster.id)?.value ?? null;
 
   return (
-    <div>
+    <div className="contents">
+      <div className="min-w-0">
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
@@ -135,6 +138,9 @@ async function ClusterOverview({ clusterId }: { clusterId?: string }) {
         <ClusterStoragePreference clusterId={cluster.id} initialValue={storagePref as string | null} />
       </Card>
 
+      </div>
+
+      <div className="col-span-2 min-w-0">
       <div className="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">Nodes in this cluster</div>
       <NodesTable
         nodes={clusterNodes}
@@ -143,6 +149,7 @@ async function ClusterOverview({ clusterId }: { clusterId?: string }) {
         storage={storage}
         defaultStorageByNode={defaultStorageByNode}
       />
+      </div>
     </div>
   );
 }

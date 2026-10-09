@@ -9,6 +9,7 @@ Nothing is ever hard-deleted, so history survives.
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from .models import AppSettings, Cluster, Finding, Node, Notification, PlacementAffinityRule, Policy, Provider, PveTarget, PveTask, Storage, Workload, WorkloadLiveness
@@ -132,6 +133,7 @@ def _reconcile(db: Session, current: list[dict], now: datetime | None = None) ->
             existing.last_observed = now
             existing.active = True
             existing.resolved_at = None
+            existing.category = f["category"]
             existing.severity = f["severity"]
             existing.title = f["title"]
             existing.evidence = f.get("evidence")
@@ -315,7 +317,9 @@ def evaluate_findings(db: Session) -> dict:
     cutoff = datetime.now(timezone.utc) - timedelta(days=TASK_LOOKBACK_DAYS)
     recent_tasks = (
         db.query(PveTask)
-        .filter(PveTask.exit_status.isnot(None), PveTask.last_seen >= cutoff)
+        # Age by when the task RAN, not when discovery last listed it: PVE keeps old tasks in its list, so last_seen is bumped
+        # every pass and a failure from months ago would otherwise never age out. (An operator can also Dismiss a finding.)
+        .filter(PveTask.exit_status.isnot(None), func.coalesce(PveTask.started_at, PveTask.last_seen) >= cutoff)
         .order_by(PveTask.started_at.desc())
         .all()
     )
@@ -345,8 +349,37 @@ def evaluate_findings(db: Session) -> dict:
     current.extend(_liveness_findings(db))
     current.extend(_wrapper_findings(db))
     current.extend(_stale_inventory_findings(db))
+    current.extend(_edge_findings(db))
 
     return _reconcile(db, current)
+
+
+def _edge_findings(db: Session) -> list[dict]:
+    """The edge proxy is running an older config than the code on disk (see edge_probe): the console websocket 502s."""
+    from . import edge_probe
+
+    status = edge_probe.probe_from_app()
+    if status is None or edge_probe.console_route_ok(status):
+        return []
+    target = db.query(PveTarget).first()
+    if target is None:
+        return []
+    return [
+        {
+            "dedupe_key": "edge.console_route_missing",
+            "object_type": "pve_target",
+            "object_id": target.id,
+            "category": "connectivity",
+            "severity": "warning",
+            "title": "Caddy config is out of date: the console route is missing",
+            "evidence": {
+                "probe_status": status,
+                "fix": "The web proxy (Caddy) is still running a configuration from before the last update, so the embedded VM console "
+                       "cannot connect (HTTP 502). On the PyXie server run: docker compose up -d --force-recreate pyxie-manager-caddy "
+                       "(a few seconds of HTTPS downtime; certificates are kept). The in-app updater does this automatically from v0.36.6.",
+            },
+        }
+    ]
 
 
 def _stale_inventory_findings(db: Session) -> list[dict]:
@@ -378,17 +411,44 @@ def _stale_inventory_findings(db: Session) -> list[dict]:
 
 
 def _wrapper_findings(db: Session) -> list[dict]:
-    """A node whose host-maintenance wrapper is older than the one this PyXie ships. Updates still work through the
-    old wrapper, but newer features (live host output) need the new one. Low-key: info severity."""
+    """The host wrapper (what lets PyXie apply updates and reboot a node over SSH) is behind the one this PyXie ships, or
+    has not been seen on a node yet. Updates through an old wrapper still work, but newer features (live host output)
+    need the new one, so this is a warning that can be e-mailed (category host_wrapper). "Not seen yet" is only raised
+    for clusters where the host key pair exists (the operator has started on host patching) and stays low-key (info):
+    it shows on Health and the Dashboard but does not e-mail. Cleared by running the host script on the node (Integrations
+    > Host wrapper) and checking the node."""
     from . import host_kit
     from pathlib import Path
+
+    from .models import HostMaintenanceCredential
 
     kit_dir = Path(__file__).resolve().parents[1] / "host_maintenance_kit"
     if not (kit_dir / "pyxie-maint").exists():
         return []
     expected = host_kit.wrapper_version(kit_dir)
+    started = {t for (t,) in db.query(HostMaintenanceCredential.pve_target_id).all()}
+    cluster_target = {c.id: c.pve_target_id for c in db.query(Cluster).all()}
     out: list[dict] = []
-    for node in db.query(Node).filter(Node.is_missing.is_(False), Node.wrapper_version.isnot(None)).all():
+    for node in db.query(Node).filter(Node.is_missing.is_(False)).all():
+        if node.wrapper_version is None:
+            if cluster_target.get(node.cluster_id) not in started:
+                continue
+            out.append(
+                {
+                    "dedupe_key": f"host.wrapper_unseen:{node.id}",
+                    "object_type": "node",
+                    "object_id": node.id,
+                    "category": "host_wrapper",
+                    "severity": "info",
+                    "title": f"Host wrapper not seen on {node.name} yet (current {expected})",
+                    "evidence": {
+                        "node": node.name, "expected": expected,
+                        "fix": "Integrations > Host wrapper: generate the host script, run it as root on this node (you run it; PyXie does not), "
+                               "then pin the node's SSH host key on the Credentials page. Until then PyXie cannot apply updates or reboot this node.",
+                    },
+                }
+            )
+            continue
         if not host_kit.is_outdated(node.wrapper_version, expected):
             continue
         out.append(
@@ -396,12 +456,12 @@ def _wrapper_findings(db: Session) -> list[dict]:
                 "dedupe_key": f"host.wrapper_outdated:{node.id}",
                 "object_type": "node",
                 "object_id": node.id,
-                "category": "version",
-                "severity": "info",
+                "category": "host_wrapper",
+                "severity": "warning",
                 "title": f"Host wrapper on {node.name} is outdated ({node.wrapper_version}, current {expected})",
                 "evidence": {
                     "node": node.name, "installed": node.wrapper_version, "expected": expected,
-                    "fix": "Integrations > Prepare a host: generate the host script and run it as root on this node. "
+                    "fix": "Integrations > Host wrapper: generate the host script and run it as root on this node. "
                            "Updates still work meanwhile; live host output needs the new wrapper.",
                 },
             }

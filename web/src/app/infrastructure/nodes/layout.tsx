@@ -31,7 +31,9 @@ export default async function HostsClustersLayout({ children }: { children: Reac
             <HostsClustersTree sites={sites} clusters={clusters} nodes={nodes} />
           </Suspense>
         </div>
-        <div className="min-w-0">{children}</div>
+        {/* `contents` lets a page place its own pieces in this grid: the cluster page puts its summary beside the tree and its
+            nodes table on the next row across the full width (col-span-2). Other pages keep one block beside the tree. */}
+        <div className="contents">{children}</div>
       </div>
     </div>
   );

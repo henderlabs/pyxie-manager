@@ -1,5 +1,6 @@
 "use client";
 
+import MigrationBars from "@/components/MigrationBars";
 import { useState } from "react";
 import OperationLogPanel from "@/components/OperationLogPanel";
 import type { Operation } from "@/lib/api";
@@ -212,6 +213,8 @@ type MigratePlanItem = {
   candidates?: PlanCandidate[];
   currently_on_shared?: boolean;
   current_storage?: string | null;
+  destination_storage?: string | null;
+  destination_storage_scope?: string | null;
   source_node?: string;
   memory_bytes?: number | null;
   pinned_node?: string | null;
@@ -440,12 +443,23 @@ function MigratePlanEditor({ op, planKey, onUpdated }: { op: Operation; planKey:
                 {item.pinned_node === item.destination_node ? "moving to its pin" : `pinned to ${item.pinned_node}`}
               </span>
             )}
-            {item.current_storage && (
+            {item.transport !== "skip" && item.transport !== "shutdown_in_place" && (item.current_storage || item.destination_storage) && (
               <span
                 className="text-muted shrink-0 hidden sm:inline"
-                title={`Current storage${item.currently_on_shared ? " (shared -- reachable from any node)" : " (node-local)"}`}
+                title={
+                  `Storage: now ${item.current_storage || "unknown"}${item.currently_on_shared ? " (shared -- reachable from any node)" : " (node-local)"}. ` +
+                  (item.destination_storage
+                    ? `After the move: ${item.destination_storage} (${item.destination_storage_scope === "cluster-shared" ? "shared" : "node-local on the destination"}); the disks are copied there. Informational: it follows the destination host's preferred storage.`
+                    : "No storage change planned: the disks stay where they are.")
+                }
               >
-                on {item.current_storage}
+                {item.destination_storage ? (
+                  <>
+                    {item.current_storage || "?"} → <span className="text-text">{item.destination_storage}</span>
+                  </>
+                ) : (
+                  <>on {item.current_storage} (stays)</>
+                )}
               </span>
             )}
             <select
@@ -611,7 +625,9 @@ export default function OperationCard({
 
       {op.status === "monitoring" && (
         <div className="mb-3">
-          {progress && progress.pct != null ? (
+          {op.operation_type_id === "vm.live_migrate" ? (
+            <MigrationBars op={op} />
+          ) : progress && progress.pct != null ? (
             <>
               <div className="h-1.5 rounded-full bg-border overflow-hidden">
                 <div className="h-full rounded-full bg-proxmox transition-all" style={{ width: `${Math.min(100, progress.pct)}%` }} />

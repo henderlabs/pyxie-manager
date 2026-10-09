@@ -19,7 +19,7 @@ noted with what changed.
   Permissions), to create the service accounts below. PyXie cannot
   create these for you -- it only ever authenticates as a token you
   hand it, never provisions PVE-side identities itself.
-- A Site already added in PyXie (Platform -> Integrations -> Step 1).
+- A Site already added in PyXie (Platform -> Setup guide -> Step 1).
 
 ## 1. Create dedicated PVE service accounts **[manual, in PVE's own UI]**
 
@@ -44,7 +44,7 @@ rush it.
 
 ## 2. Create the maintenance role
 
-(The script builder on the Integrations page does steps 1 to 4 for you. It is safe to paste into a root shell: it runs inside its own `bash`, saves the token secrets to `/root/pyxie-tokens.txt`, and prints `STOPPED at line N` if something fails.), if you haven't already **[manual]**
+(The Script builder (Proxmox accounts card) on the Setup guide page does steps 1 to 4 for you. It is safe to paste into a root shell: it runs inside its own `bash`, saves the token secrets to `/root/pyxie-tokens.txt`, and prints `STOPPED at line N` if something fails.), if you haven't already **[manual]**
 
 `inventory` uses PVE's own built-in **`PVEAuditor`** role -- nothing to
 create. `maintenance` needs a custom role that doesn't exist by default:
@@ -88,7 +88,7 @@ not per-resource -- see README.md's Safety Contract section for why.
 
 ## 5. Add the PVE Target in PyXie
 
-Platform -> Integrations -> Step 2 -> **+ Add PVE Target**:
+Platform -> Setup guide -> Step 2 -> **+ Add PVE Target**:
 
 - **Name**: your own label for this connection -- not required to match
   the PVE cluster's real name, which PyXie auto-detects on first sync
@@ -101,7 +101,7 @@ Platform -> Integrations -> Step 2 -> **+ Add PVE Target**:
   real (non-self-signed) certificate. A stock PVE install uses a
   self-signed cert, which correctly fails verification -- uncheck this
   box, or fix it after the fact via the target's **Edit** link on the
-  Integrations page (no need to delete and recreate).
+  Setup guide page (no need to delete and recreate).
 - **Token user / Token ID / Token secret**: the `inventory` token from
   step 3.
 
@@ -125,6 +125,13 @@ package updates -- a real PVE API quirk), but PyXie's own
 "Allow PyXie to write to Proxmox VE") is a separate, independent gate.
 Both the credential *and* that switch have to allow it before any
 actual write reaches PVE, no matter what gets approved in between.
+
+**Credentials page details.** The purpose is a fixed list (`inventory`, `maintenance`, `console`); the account script
+creates a token whose id **equals the purpose name** (`pyxie-ro@pve!inventory`, `pyxie-admin@pve!maintenance`,
+`pyxie-console@pve!console`), so enter the token id exactly as the script created it -- the form pre-fills it. A wrong
+token id is the usual cause of `401`. **Test Connection** now shows the reason when it fails (for example *401:
+invalid token id or secret*). A credential added under the wrong purpose can be removed with **Delete** on its row
+(the `inventory` credential can only be replaced with Edit); deleting only removes PyXie's stored copy, never anything in Proxmox.
 
 ## 7. Connect each host for patching **[manual, once per node -- required to apply updates]**
 
@@ -151,9 +158,7 @@ it stays a deliberate manual step (or part of your own configuration
 management). Budget for it: a 16-node cluster means 16 installs and 16 host
 key pins.
 
-**Easiest way (v0.27.1+): Platform > Integrations > Step 3, "Prepare a host".** Tick what you need and PyXie writes
-the scripts: one for the Proxmox account (user, roles, tokens, optional console access), and one for the host
-wrapper (install, upgrade or remove). Copy a script to a node and run it as root. The wrapper script downloads a
+**Easiest way: Platform > Setup guide > the two "Script builder" cards.** *Proxmox accounts* (once per cluster) writes the script for the user, roles, tokens and optional console access; *Host wrapper* (every node) writes the install, upgrade or remove script. Nothing is ticked at first. Copy a script to a node and run it as root yourself; PyXie never runs it for you. The wrapper script downloads a
 single self-contained installer from a 30-minute link and refuses to run unless its SHA-256 matches the one PyXie
 computed, so it is safe to use even over a connection the node does not trust. Running the same script again
 upgrades the wrapper; `bash pyxie-host-kit.sh --check` (on the node) shows installed vs available without changing

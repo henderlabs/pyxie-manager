@@ -612,8 +612,11 @@ def recommend_storage_for_candidate(
     default_storage_id = get_node_default_storage_id(db, candidate_node_id)
     pinned = next((s for s in node_storages if str(s.id) == str(default_storage_id)), None) if default_storage_id else None
     if pinned:
-        if pinned.scope == "cluster-shared" and currently_on_shared:
-            return None  # already on shared, pin agrees -- "keep current" is the real no-copy path
+        if currently_on_shared and storage_preference != "local":
+            # A guest already on shared storage stays where it is, whatever this node's pinned default is: the pin is the
+            # preferred LOCAL storage for guests that arrive from local storage, and re-homing a shared guest onto one
+            # node's local disk would lock it to that node. (Only the guest's own explicit "local" preference overrides.)
+            return None  # "keep current" is the real no-copy path
         return {"id": str(pinned.id), "name": pinned.name, "scope": pinned.scope,
                 "reason": "pinned as this node's default storage"}
 

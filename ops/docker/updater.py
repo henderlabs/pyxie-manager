@@ -38,11 +38,14 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 REPO = Path(os.environ.get("PYXIE_REPO") or Path(__file__).resolve().parents[2])  # PYXIE_REPO: for testing against another checkout
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "shared"))
+from pyxie_core import edge_probe  # noqa: E402  (stdlib only)
 UPDATE_DIR = Path(os.environ.get("PYXIE_UPDATE_DIR") or (REPO / "update"))
 SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 TAG = re.compile(r"^v(\d+\.\d+\.\d+)$")
 SVC = ("pyxie-manager-api", "pyxie-manager-worker", "pyxie-manager-web")
 DB = "pyxie-manager-db"
+CADDY = "pyxie-manager-caddy"
 API = "pyxie-manager-api"
 HEALTH_TIMEOUT = 240
 TERMINAL = ("completed", "failed", "blocked", "cancelled")
@@ -460,7 +463,55 @@ def restore_db(dump: Path) -> None:
             stdin_file=dump, timeout=900, check=True)
 
 
-def rebuild_and_start(state: State, version: str, *, inject: bool = True) -> None:
+# Caddy bind-mounts the ops/caddy DIRECTORY. When an update replaces that directory the running container keeps the old
+# (deleted) inode: /etc/caddy looks empty and it serves a stale in-memory config (no /console-ws route -> console 502).
+# So after the code switch we recreate Caddy when its config changed, or when the container cannot see its Caddyfile.
+def caddy_needs_recreate(prev_sha: str | None) -> str | None:
+    """Why Caddy should be recreated, or None. Never raises."""
+    try:
+        if prev_sha and git("diff", "--name-only", prev_sha, "HEAD", "--", "ops/caddy", check=False).strip():
+            return "ops/caddy changed in this update"
+        ps = compose("ps", "-q", CADDY, timeout=30, check=False).strip()
+        if ps and subprocess.run(["docker", "exec", CADDY, "test", "-s", "/etc/caddy/Caddyfile"], capture_output=True, timeout=30).returncode != 0:
+            return "the Caddy container cannot see its config (stale bind mount)"
+    except Exception as e:  # noqa: BLE001
+        log(f"[caddy] could not check the proxy config: {e}")
+    return None
+
+
+def refresh_caddy(prev_sha: str | None) -> None:
+    """Recreate Caddy if its config is stale. Best effort: never fails an update."""
+    why = caddy_needs_recreate(prev_sha)
+    if why:
+        log(f"[caddy] recreating the web proxy: {why}")
+        try:
+            compose("up", "-d", "--force-recreate", "--no-deps", CADDY, timeout=300)
+        except Exception as e:  # noqa: BLE001
+            log(f"[caddy] recreate failed: {e}")
+
+
+def check_console_route() -> None:
+    """After the app is healthy: a websocket for a made-up console ticket must reach the API (403). A 502 means Caddy
+    is still on an old config. Best effort: warns, never fails an update."""
+    host = env().get("PYXIE_HOSTNAME", "").strip()
+    if not host:
+        return
+    status = None
+    for _ in range(5):
+        status = edge_probe.probe_console_route("127.0.0.1", host)
+        if status is None or edge_probe.console_route_ok(status):
+            break
+        time.sleep(3)
+    if edge_probe.console_route_ok(status):
+        log("[caddy] console route OK (a made-up ticket is refused with 403)")
+    elif status is not None:
+        log(f"[caddy] WARNING: the console websocket route answered {status}, expected 403 -- the embedded console will not connect")
+        notify("warning", "PyXie web proxy check failed",
+               f"After the update the proxy answered {status} for the console websocket route (expected 403). "
+               f"Try: docker compose up -d --force-recreate {CADDY}\n{settings_url()}", subject_tag="update")
+
+
+def rebuild_and_start(state: State, version: str, *, inject: bool = True, prev_sha: str | None = None) -> None:
     state.step("build", "running")
     log("[build] building images (the running version stays up)")
     compose("build", *SVC, timeout=1800)
@@ -470,11 +521,13 @@ def rebuild_and_start(state: State, version: str, *, inject: bool = True) -> Non
     state.step("restart", "running")
     log("[restart] docker compose up -d")
     compose("up", "-d", timeout=900)
+    refresh_caddy(prev_sha)
     if inject:
         maybe_fail("restart")
     state.step("restart", "done")
     state.step("health", "running")
     wait_healthy(version)
+    check_console_route()
     if inject:
         maybe_fail("health")
     state.step("health", "done")
@@ -493,9 +546,10 @@ def restore_previous(state: State, *, prev_sha: str, prev_version: str, dump: Pa
     else:
         state.step("restore", "skipped")
     state.step("code", "running")
+    from_sha = git("rev-parse", "HEAD")
     git("reset", "--hard", prev_sha)
     state.step("code", "done")
-    rebuild_and_start(state, prev_version, inject=False)
+    rebuild_and_start(state, prev_version, inject=False, prev_sha=from_sha)
 
 
 # ----------------------------------------------------------------------------- update
@@ -558,7 +612,7 @@ def do_update(version: str | None, requested_by: str = "cron", dry_run: bool = F
         state.step("code", "done")
         maybe_fail("code")
 
-        rebuild_and_start(state, v)
+        rebuild_and_start(state, v, prev_sha=prev_sha)
         after = alembic_head()
         migrated = after != before
         entry = {"id": now(), "action": "update", "from_version": cur, "from_sha": prev_sha, "to_version": v, "to_sha": git("rev-parse", "HEAD"),

@@ -1,3 +1,4 @@
+import re
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -63,6 +64,7 @@ def _serialize_rule(r: PlacementAffinityRule) -> dict:
         "tag": r.tag,
         "strict": r.strict,
         "description": r.description,
+        "color": r.color,
         "created_by": r.created_by,
         "created_at": r.created_at.isoformat(),
     }
@@ -80,6 +82,7 @@ class AffinityRuleCreate(BaseModel):
     tag: str | None = None
     strict: bool = True
     description: str | None = None
+    color: str | None = None  # #rrggbb, or empty/None for the default
 
 
 def _validate_affinity_payload(payload: AffinityRuleCreate):
@@ -89,6 +92,8 @@ def _validate_affinity_payload(payload: AffinityRuleCreate):
         raise HTTPException(400, "workload_pair rules need exactly 2 workload_ids")
     if payload.scope_type == "tag_group" and not payload.tag:
         raise HTTPException(400, "tag_group rules need a tag")
+    if payload.color and not re.fullmatch(r"#[0-9a-fA-F]{6}", payload.color):
+        raise HTTPException(400, "color must look like #rrggbb")
 
 
 @router.post("/affinity-rules", dependencies=[Depends(require_admin)])
@@ -102,6 +107,7 @@ def create_affinity_rule(payload: AffinityRuleCreate, user=Depends(get_current_u
         tag=payload.tag,
         strict=payload.strict,
         description=payload.description,
+        color=payload.color.lower() if payload.color else None,
         created_by=user.email,
     )
     db.add(rule)
@@ -131,6 +137,7 @@ def update_affinity_rule(
     rule.tag = payload.tag
     rule.strict = payload.strict
     rule.description = payload.description
+    rule.color = payload.color.lower() if payload.color else None
     db.commit()
     db.refresh(rule)
     write_audit_event(

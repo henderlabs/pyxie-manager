@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from pyxie_core import host_kit
+from pyxie_core import edge_probe, host_kit
 from pyxie_core.credentials import CredentialNotConfigured, load_pve_credentials, resolve_pve_endpoints
 from pyxie_core.models import (
     AppSettings, Cluster, HostMaintenanceCredential, Node, NotificationRule, PveCredential, PveTarget, Site, Workload,
@@ -63,7 +63,7 @@ def _inputs(db: Session) -> dict:
 @router.get("/status")
 def setup_status(db: Session = Depends(get_db)):
     steps = build_steps(_inputs(db))
-    return {"steps": steps, "progress": progress(steps)}
+    return {"steps": steps, "progress": progress(steps), "tls_mode": edge_probe.tls_mode()}
 
 
 def _chk(group, label, status, detail="", fix=""):

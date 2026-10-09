@@ -7,7 +7,7 @@ import PveTargetRow from "@/components/PveTargetRow";
 import AddSiteForm from "@/components/AddSiteForm";
 import SiteRow from "@/components/SiteRow";
 import { PlugIcon } from "@/components/Icons";
-import HostSetupBuilder from "@/components/HostSetupBuilder";
+import { HostWrapperBuilder, PveAccountsBuilder } from "@/components/HostSetupBuilder";
 import SetupGuide from "@/components/SetupGuide";
 import type { SetupStatus } from "@/components/SetupGuide";
 
@@ -34,11 +34,12 @@ export default async function ProvidersPage() {
   return (
     <div>
       <PageHeader
-        title="Integrations"
-        subtitle="Follow the steps below from top to bottom. Each step says what to do, why, and whether it is already done."
+        title="Setup guide"
+        subtitle="Integrations and setup. Follow the steps below from top to bottom: each says what to do, why, and whether it is already done."
         icon={<PlugIcon className="w-5 h-5" />}
       />
 
+      <div id="setup-guide" />
       <SetupGuide initial={setupStatus} />
 
       {organization && (
@@ -53,12 +54,15 @@ export default async function ProvidersPage() {
         </Card>
       )}
 
-      <Card className="mb-4" id="builder">
-        <CardTitle>Steps 2 and 5 · Setup scripts (Proxmox accounts, host wrapper)</CardTitle>
-        <p className="text-xs text-muted mb-3 normal-case">
-          Tick what you need and PyXie writes the scripts: the Proxmox service account, roles and tokens, and the host wrapper that lets PyXie patch and reboot a node. You copy them onto a node and run them yourself.
-        </p>
-        <HostSetupBuilder targets={targets.map((t) => ({ id: t.id, name: t.name }))} />
+      <div id="builder" />
+      <Card className="mb-4" id="builder-accounts">
+        <CardTitle>Steps 2 and 4 · Script builder: Proxmox accounts</CardTitle>
+        <PveAccountsBuilder />
+      </Card>
+
+      <Card className="mb-4" id="builder-host">
+        <CardTitle>Step 5 · Script builder: Host wrapper (on each node)</CardTitle>
+        <HostWrapperBuilder targets={targets.map((t) => ({ id: t.id, name: t.name }))} tlsMode={setupStatus.tls_mode ?? ""} />
       </Card>
 
       <Card className="mb-4" id="targets">

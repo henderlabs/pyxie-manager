@@ -44,6 +44,12 @@ for f in pyxie-maint pyxie-maint-ssh-dispatch pyxie-maint.sudoers; do
   fi
 done
 
+# An earlier install leaves the identity, wrapper and key behind: then this run is an upgrade and the PyXie side is already done.
+UPGRADE=0
+if id "$SERVICE_USER" >/dev/null 2>&1 && [ -x /usr/local/sbin/pyxie-maint ] && [ -s "$SERVICE_HOME/.ssh/authorized_keys" ]; then
+  UPGRADE=1
+fi
+
 echo "==> [1/6] sudo"
 if command -v sudo >/dev/null 2>&1; then
   echo "    already installed"
@@ -92,9 +98,14 @@ echo "    installed and syntax-validated"
 echo "==> [6/6] verification"
 if sudo -u "$SERVICE_USER" sudo /usr/local/sbin/pyxie-maint version; then
   echo ""
-  echo "OK: $(hostname) is provisioned for PyXie Stage W4."
-  echo "Next: pin this node's SSH host key in PyXie, then register the"
-  echo "private key as the host-maintenance credential (once per cluster)."
+  if [ "$UPGRADE" -eq 1 ]; then
+    echo "OK: $(hostname) was already set up for PyXie; the wrapper is now upgraded."
+    echo "Nothing more to do in PyXie: this node's SSH host key stays pinned and the credential is unchanged."
+  else
+    echo "OK: $(hostname) is provisioned for PyXie."
+    echo "Next, in PyXie: pin this node's SSH host key (Credentials page: probe, compare the fingerprint, confirm),"
+    echo "and make sure the host-maintenance key pair exists for the cluster (once per cluster)."
+  fi
 else
   echo "!! Verification call failed -- see output above." >&2
   exit 1

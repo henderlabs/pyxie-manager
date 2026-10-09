@@ -34,12 +34,15 @@ function ScriptBox({ title, hint, text, filename }: { title: string; hint: strin
   );
 }
 
-function UserField({ label, value, onChange, ok }: { label: string; value: string; onChange: (v: string) => void; ok: boolean }) {
+const INPUT = "w-full max-w-xs bg-canvas border border-border rounded px-2 py-1.5 text-sm text-text font-mono";
+
+/** A named, editable account field with a visible box. The default is what the guide and docs use; change it if you want another name. */
+function UserField({ label, value, onChange, ok, def }: { label: string; value: string; onChange: (v: string) => void; ok: boolean; def: string }) {
   return (
     <label className="block text-xs text-muted space-y-1 pl-6">
-      <span>{label}</span>
-      <input className="input" value={value} onChange={(e) => onChange(e.target.value)} />
-      {!ok && <span className="text-bad">Use the form name@pve.</span>}
+      <span className="text-text">{label}</span>
+      <input className={`${INPUT} ${ok ? "" : "border-bad"}`} value={value} onChange={(e) => onChange(e.target.value)} spellCheck={false} />
+      <span className="block">{ok ? `Editable. Default: ${def}. Any name works; it is only a label in Proxmox.` : <span className="text-bad">Use the form name@pve.</span>}</span>
     </label>
   );
 }
@@ -113,7 +116,7 @@ function AfterGenerate({ targetId, sha256, mode }: { targetId: string; sha256: s
       {method !== "paste" && (
         <label className="block text-xs text-muted space-y-1 max-w-xs">
           <span>Node address (fills in the commands)</span>
-          <input className="input" placeholder="192.168.1.101" value={node} onChange={(e) => setNode(e.target.value)} />
+          <input className={INPUT} placeholder="192.168.1.101" value={node} onChange={(e) => setNode(e.target.value)} />
         </label>
       )}
       {method === "paste" && <CodeBlock text={pasteCmds} />}
@@ -148,30 +151,25 @@ function AfterGenerate({ targetId, sha256, mode }: { targetId: string; sha256: s
   );
 }
 
-/** Tick what you need, get scripts to copy onto a node. Nothing here runs anything: PyXie never provisions hosts itself. */
-export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
+const SETUP_LINK = (
+  <a href="#setup-guide" className="text-accent hover:underline">Back to the Setup guide</a>
+);
+
+/** The first card: Proxmox accounts, tokens and roles. Once per cluster. Nothing is ticked until you choose. */
+export function PveAccountsBuilder() {
   const me = useMe();
   const isAdmin = me === undefined || me?.is_admin === true;
-  const [targetId, setTargetId] = useState(targets[0]?.id ?? "");
   const [roUser, setRoUser] = useState("pyxie-ro@pve");
   const [adminUser, setAdminUser] = useState("pyxie-admin@pve");
   const [consoleUser, setConsoleUser] = useState("pyxie-console@pve");
-  const [inventory, setInventory] = useState(true);
+  const [inventory, setInventory] = useState(false);
   const [maintenance, setMaintenance] = useState(false);
   const [consoleOpt, setConsoleOpt] = useState<ConsoleOpt>("none");
-  const noTarget = targets.length === 0;
-  const [hostMode, setHostMode] = useState<"none" | "install" | "uninstall">(targets.length === 0 ? "none" : "install");
-  const [insecure, setInsecure] = useState(false);
-  const [link, setLink] = useState<Link | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   const [generated, setGenerated] = useState(false);
-  const [needKey, setNeedKey] = useState(false);
 
   const okName = (u: string) => /^[A-Za-z0-9._-]+@pve$/.test(u);
   const effConsole: ConsoleOpt = consoleOpt === "maintenance" && !maintenance ? "none" : consoleOpt;
   const anyPve = inventory || maintenance || effConsole === "separate";
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
   const namesOk = (!inventory || okName(roUser)) && (!maintenance || okName(adminUser)) && (effConsole !== "separate" || okName(consoleUser));
   const pve = useMemo(
     () => (namesOk && anyPve ? pveScript({ roUser, adminUser, consoleUser, inventory, maintenance, console: effConsole }) : ""),
@@ -179,22 +177,120 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
   );
   const touch = () => setGenerated(false);
 
+  if (!isAdmin) return <p className="text-sm text-muted">Admin accounts can generate setup scripts.</p>;
+
+  const rows: [string, string, string, string][] = [];
+  if (inventory) rows.push(["inventory", roUser, "inventory", "Step 3, Connect your cluster (PVE target form), or Credentials if the target already exists"]);
+  if (maintenance) rows.push(["maintenance", adminUser, "maintenance", "Credentials > + Add Credential Purpose" + (effConsole === "maintenance" ? " (also covers the console: VM.Console is in this role)" : "")]);
+  if (effConsole === "separate") rows.push(["console", consoleUser, "console", "Credentials > + Add Credential Purpose"]);
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted">
+        Run <b>once per cluster</b>. It creates the service accounts, roles and API tokens <i>inside Proxmox</i>. You copy the script to any Proxmox node and run it yourself; PyXie never creates Proxmox accounts. Nothing is ticked yet: choose what you want PyXie to have. {SETUP_LINK}
+      </p>
+
+      <div className="space-y-3">
+        <div className="space-y-1">
+          <Check checked={inventory} onChange={(v) => { setInventory(v); touch(); }} label="Inventory token (read-only)" sub="Built-in PVEAuditor role. Discovery and monitoring. Needed for PyXie to work at all." />
+          {inventory && <UserField label="Read-only account name" value={roUser} def="pyxie-ro@pve" onChange={(v) => { setRoUser(v); touch(); }} ok={okName(roUser)} />}
+        </div>
+        <div className="space-y-1">
+          <Check checked={maintenance} onChange={(v) => { setMaintenance(v); touch(); }} label="Admin (Maintenance) token (write)" sub="Role PyXieAdmin: migrations, power, reboots. Still gated by PyXie's own Settings switch and your approval of each action." />
+          {maintenance && <UserField label="Admin account name" value={adminUser} def="pyxie-admin@pve" onChange={(v) => { setAdminUser(v); touch(); }} ok={okName(adminUser)} />}
+        </div>
+        <div className="space-y-1">
+          <div className="text-sm text-text">Embedded VM console</div>
+          <div className="pl-6 space-y-1">
+            {([
+              ["none", "Not needed"],
+              ["maintenance", "Add VM.Console to the admin role (needs the admin token above; no extra account)"],
+              ["separate", "Separate console token (VM.Console only, smaller blast radius)"],
+            ] as [ConsoleOpt, string][]).map(([v, label]) => (
+              <label key={v} className={`flex items-center gap-2 text-sm ${v === "maintenance" && !maintenance ? "opacity-50" : ""}`}>
+                <input type="radio" name="console-opt" checked={effConsole === v} disabled={v === "maintenance" && !maintenance}
+                  onChange={() => { setConsoleOpt(v); touch(); }} />
+                {label}
+              </label>
+            ))}
+          </div>
+          {effConsole === "separate" && <UserField label="Console account name" value={consoleUser} def="pyxie-console@pve" onChange={(v) => { setConsoleUser(v); touch(); }} ok={okName(consoleUser)} />}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3">
+        <button type="button" disabled={!pve} onClick={() => setGenerated(true)}
+          className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50">
+          Generate the account script
+        </button>
+        {!anyPve && <span className="text-xs text-muted">Tick at least one token first.</span>}
+      </div>
+
+      {generated && pve && (
+        <div className="space-y-3">
+          <ScriptBox title="Proxmox accounts script (run once, as root, on any node)"
+            hint={`Paste it into a root shell on any node (safe to paste: an error prints "STOPPED at line ..." and cannot close your session; safe to re-run). Proxmox shows each token secret only once, so the output is also saved to ${TOKEN_FILE}.`}
+            text={pve} filename="pyxie-pve-setup.sh" />
+          <div className="border border-border rounded p-3 space-y-2">
+            <div className="text-sm font-medium text-text">After it runs: put each token into PyXie</div>
+            <p className="text-xs text-muted">
+              A new Proxmox account does <b>not</b> appear in PyXie by itself. For each token below, copy its <b>secret</b> from <code>{TOKEN_FILE}</code> and enter it in PyXie as shown, using the token user and token id exactly as listed (the script names the token after its purpose).
+            </p>
+            <table className="w-full text-xs">
+              <thead><tr className="text-left text-muted"><th className="py-1 pr-3">Purpose</th><th className="pr-3">Token user</th><th className="pr-3">Token ID</th><th>Where in PyXie</th></tr></thead>
+              <tbody>
+                {rows.map(([purpose, user, id, where]) => (
+                  <tr key={purpose} className="border-t border-border align-top">
+                    <td className="py-1.5 pr-3 font-mono text-text">{purpose}</td>
+                    <td className="pr-3 font-mono">{user}</td>
+                    <td className="pr-3 font-mono">{id}</td>
+                    <td className="text-muted">{where}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <ol className="list-decimal pl-5 text-xs text-muted space-y-0.5">
+              <li>In <a className="text-accent hover:underline" href="/platform/credentials">Credentials</a>, choose <b>+ Add Credential Purpose</b>, pick the purpose from the list, and paste the secret. Then press <b>Test Connection</b> on that row: if it fails, the reason is shown.</li>
+              <li>When every secret is in PyXie, delete the file on the node: <code>shred -u {TOKEN_FILE}</code></li>
+              {effConsole === "maintenance" && <li>The console uses the admin (maintenance) credential, so there is no separate console credential to add. Turn the console on in Settings afterwards.</li>}
+              {effConsole === "separate" && <li>Turn the console on in Settings after the console credential tests as valid.</li>}
+            </ol>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The second card: the wrapper on each node. YOU run the script on the node; PyXie never installs it itself. */
+export function HostWrapperBuilder({ targets, tlsMode }: { targets: Target[]; tlsMode: string }) {
+  const me = useMe();
+  const isAdmin = me === undefined || me?.is_admin === true;
+  const [targetId, setTargetId] = useState(targets[0]?.id ?? "");
+  const noTarget = targets.length === 0;
+  const selfSigned = tlsMode === "internal";
+  const [hostMode, setHostMode] = useState<"" | "install" | "uninstall">("");
+  const [insecure, setInsecure] = useState(selfSigned);
+  const [link, setLink] = useState<Link | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [generated, setGenerated] = useState(false);
+  const [needKey, setNeedKey] = useState(false);
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const touch = () => setGenerated(false);
+
   async function generate() {
     setError(null);
     setBusy(true);
     try {
-      if (hostMode !== "none") {
-        const r = await fetch(`/api/pve-targets/${targetId}/host-kit/link`, { method: "POST" });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          if (r.status === 409 && /key pair|host-maintenance credential/i.test(d.error || "")) setNeedKey(true);
-          throw new Error(r.status === 409 ? "The host key pair has not been generated yet." : d.error || `Request failed (${r.status})`);
-        }
-        setNeedKey(false);
-        setLink(d);
-      } else {
-        setLink(null);
+      const r = await fetch(`/api/pve-targets/${targetId}/host-kit/link`, { method: "POST" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (r.status === 409 && /key pair|host-maintenance credential/i.test(d.error || "")) setNeedKey(true);
+        throw new Error(r.status === 409 ? "The host key pair has not been generated yet." : d.error || `Request failed (${r.status})`);
       }
+      setNeedKey(false);
+      setLink(d);
       setGenerated(true);
     } catch (e) {
       setError((e as Error).message);
@@ -224,64 +320,61 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
 
   return (
     <div className="space-y-4">
+      <div className="text-xs text-muted space-y-1.5">
+        <p>
+          <b>You run this script yourself, as root, on each Proxmox node.</b> PyXie does not connect to the node to install it. Run it on <b>every</b> node you want PyXie to patch and reboot; running it again later upgrades the wrapper. {SETUP_LINK}
+        </p>
+        <p>
+          <b>What it installs on the node:</b> a locked-down SSH identity <code>pyxie-hostmaint</code> (key only, no shell, seven fixed commands), the wrapper <code>/usr/local/sbin/pyxie-maint</code>, and a sudoers entry <code>/etc/sudoers.d/pyxie-maint</code>. It lets PyXie list and apply package updates, show live update output, and reboot the node. It does nothing else.
+        </p>
+        <p className="text-warn">
+          Impact to know about: once the wrapper is installed, applying updates from PyXie can <b>reboot that node</b> (kernel updates need it). Plan it through maintenance mode so its VMs are moved off first. Installing the wrapper itself does not reboot anything.
+        </p>
+      </div>
+
+      {noTarget && <p className="text-xs text-warn">The host script needs a connected PVE target (step 3), so it is not available yet.</p>}
       {targets.length > 1 && (
-        <label className="block text-xs text-muted space-y-1 max-w-xs">
-          <span>PVE target</span>
-          <select className="input" value={targetId} onChange={(e) => { setTargetId(e.target.value); touch(); }}>
+        <label className="block text-xs text-muted space-y-1">
+          <span className="text-text">PVE target</span>
+          <select className={INPUT} value={targetId} onChange={(e) => { setTargetId(e.target.value); touch(); }}>
             {targets.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select>
         </label>
       )}
 
-      <div className="grid md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <div className="text-xs uppercase tracking-wide text-muted">1. Proxmox account, once per cluster</div>
-          <Check checked={inventory} onChange={(v) => { setInventory(v); touch(); }} label="Inventory token (read-only)" sub="Built-in PVEAuditor role. Discovery and monitoring." />
-          {inventory && <UserField label="Read-only user" value={roUser} onChange={(v) => { setRoUser(v); touch(); }} ok={okName(roUser)} />}
-          <Check checked={maintenance} onChange={(v) => { setMaintenance(v); touch(); }} label="Maintenance (Admin) token (write)" sub="Role PyXieAdmin: migrations, power, reboots. Still gated by PyXie's own Settings switch." />
-          {maintenance && <UserField label="Admin user" value={adminUser} onChange={(v) => { setAdminUser(v); touch(); }} ok={okName(adminUser)} />}
-          <div className="pl-6 space-y-1">
-            <div className="text-xs text-muted">Embedded VM console</div>
-            {([
-              ["none", "Not needed"],
-              ["maintenance", "Add VM.Console to the admin role"],
-              ["separate", "Separate console token (VM.Console only, smaller blast radius)"],
-            ] as [ConsoleOpt, string][]).map(([v, label]) => (
-              <label key={v} className={`flex items-center gap-2 text-sm ${v === "maintenance" && !maintenance ? "opacity-50" : ""}`}>
-                <input type="radio" name="console-opt" checked={effConsole === v} disabled={v === "maintenance" && !maintenance}
-                  onChange={() => { setConsoleOpt(v); touch(); }} />
-                {label}
-              </label>
-            ))}
-            {effConsole === "separate" && <UserField label="Console user" value={consoleUser} onChange={(v) => { setConsoleUser(v); touch(); }} ok={okName(consoleUser)} />}
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <div className="text-xs uppercase tracking-wide text-muted">2. On each node</div>
-          {noTarget && <p className="text-xs text-warn">The host script needs a connected PVE target (step 3), so it is not available yet. Do step 2 first, then come back for this part.</p>}
-          {([
-            ["install", "Install or upgrade the host wrapper", "Lets PyXie apply updates and reboot this node, with live output. Running it again upgrades."],
-            ["uninstall", "Remove the host wrapper", "Removes the PyXie SSH identity, wrapper and sudoers entry from this node."],
-            ["none", "Skip this part", ""],
-          ] as ["install" | "uninstall" | "none", string, string][]).map(([v, label, sub]) => (
-            <label key={v} className="flex items-start gap-2 text-sm">
-              <input type="radio" name="host-opt" className="mt-1" checked={hostMode === v} disabled={noTarget && v !== "none"} onChange={() => { setHostMode(v); touch(); }} />
-              <span><span className="text-text">{label}</span>{sub && <span className="block text-xs text-muted">{sub}</span>}</span>
-            </label>
-          ))}
-          {hostMode !== "none" && (
-            <Check checked={insecure} onChange={(v) => { setInsecure(v); touch(); }} label="This node does not trust PyXie's certificate"
-              sub="Adds curl -k. Safe here: the script verifies the downloaded file against the checksum PyXie gives it." />
-          )}
-        </div>
+      <div className="space-y-2">
+        <div className="text-xs uppercase tracking-wide text-muted">What do you want to do on the node?</div>
+        {([
+          ["install", "Install or upgrade the host wrapper", "Safe to run again: an up-to-date node just reports that nothing changed."],
+          ["uninstall", "Remove the host wrapper", "Removes the PyXie SSH identity, wrapper and sudoers entry from the node."],
+        ] as ["install" | "uninstall", string, string][]).map(([v, label, sub]) => (
+          <label key={v} className="flex items-start gap-2 text-sm">
+            <input type="radio" name="host-opt" className="mt-1" checked={hostMode === v} disabled={noTarget} onChange={() => { setHostMode(v); touch(); }} />
+            <span><span className="text-text">{label}</span><span className="block text-xs text-muted">{sub}</span></span>
+          </label>
+        ))}
       </div>
 
+      {hostMode !== "" && (
+        <div className="space-y-1">
+          <Check checked={insecure} onChange={(v) => { setInsecure(v); touch(); }} label="This node does not trust PyXie's certificate"
+            sub="Adds curl -k to the download. The script still verifies the downloaded file against the checksum PyXie gives it, so a tampered file is refused." />
+          <p className="text-xs text-muted pl-6">
+            {selfSigned
+              ? "This PyXie uses its own internal certificate authority (self-signed), which your nodes do not know, so this is ticked for you. Without it the download fails with “curl: (60) SSL certificate problem”."
+              : tlsMode
+                ? "This PyXie serves a certificate your nodes will usually trust, so it is not ticked. If the download fails with “curl: (60) SSL certificate problem”, tick it and generate again."
+                : "If the download fails with “curl: (60) SSL certificate problem”, the node does not trust this PyXie's certificate: tick this and generate again."}
+          </p>
+        </div>
+      )}
+
       <div className="flex items-center gap-3">
-        <button type="button" disabled={busy || (!pve && hostMode === "none")} onClick={generate}
+        <button type="button" disabled={busy || noTarget || hostMode === ""} onClick={generate}
           className="px-3 py-1.5 rounded text-sm font-medium bg-ink text-on-ink border border-accent hover:bg-accent/10 disabled:opacity-50">
-          {busy ? "Generating…" : "Generate scripts"}
+          {busy ? "Generating…" : "Generate the host script"}
         </button>
+        {hostMode === "" && !noTarget && <span className="text-xs text-muted">Choose what to do first.</span>}
         {error && <span className="text-sm text-bad">{error}</span>}
         {needKey && (
           <button type="button" onClick={generateKeyThenRetry} disabled={busy}
@@ -289,18 +382,15 @@ export default function HostSetupBuilder({ targets }: { targets: Target[] }) {
         )}
       </div>
 
-      {generated && (
+      {generated && link && hostMode !== "" && (
         <div className="space-y-3">
-          {pve && <ScriptBox title="Script 1: Proxmox accounts (run once, as root, on any node)" hint={`Paste it into a root shell on any node (it is safe to paste: an error prints "STOPPED at line ..." and cannot close your session). Proxmox shows each token secret only once, so the output is also saved to ${TOKEN_FILE}: copy the secrets from there into PyXie, then delete the file.`} text={pve} filename="pyxie-pve-setup.sh" />}
-          {hostMode !== "none" && link && (
-            <ScriptBox
-              title={`Script ${pve ? 2 : 1}: host wrapper (${hostMode === "install" ? "install or upgrade" : "remove"}, run as root on every node)`}
-              hint={`The link expires in ${Math.round(link.expires_in / 60)} minutes (generate again after that). Expected checksum ${link.sha256.slice(0, 16)}…`}
-              text={hostScript({ origin, link, mode: hostMode, insecure })} filename="pyxie-host-setup.sh" />
-          )}
-          {hostMode !== "none" && link && <AfterGenerate targetId={targetId} sha256={link.sha256} mode={hostMode} />}
+          <ScriptBox
+            title={`Host wrapper script (${hostMode === "install" ? "install or upgrade" : "remove"}; run as root on the node)`}
+            hint={`The download link expires in ${Math.round(link.expires_in / 60)} minutes (generate again after that). Expected checksum ${link.sha256.slice(0, 16)}…`}
+            text={hostScript({ origin, link, mode: hostMode, insecure })} filename="pyxie-host-setup.sh" />
+          <AfterGenerate targetId={targetId} sha256={link.sha256} mode={hostMode} />
           <p className="text-xs text-muted">
-            After the wrapper is on a node, pin its SSH host key on the Credentials page. Nothing on this page runs anything on your hosts; you review and run the scripts yourself.
+            Nothing on this page runs anything on your nodes; you review and run the scripts yourself. After the wrapper is installed, pin the node&apos;s SSH host key on the Credentials page (shown above). On an <i>upgrade</i> of a node that was already set up, the script says so and there is nothing more to do.
           </p>
         </div>
       )}

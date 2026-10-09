@@ -105,7 +105,7 @@ def test_hosts_substeps_after_keypair_point_at_builder_then_pinning():
                             "expected_wrapper": "1.1.0", "settings": {}}))
     sub = {x["key"]: x for x in s["hosts"]["substeps"]}
     assert sub["keypair"]["state"] == "done"
-    assert sub["script"]["state"] == "todo" and sub["script"]["action"]["anchor"] == "builder"
+    assert sub["script"]["state"] == "todo" and sub["script"]["action"]["anchor"] == "builder-host"
     assert "1 of 2" in sub["script"]["detail"]
     assert sub["pin"]["state"] == "todo" and sub["pin"]["action"]["href"] == "/platform/credentials"
     assert "1 of 2" in sub["pin"]["detail"]
@@ -144,3 +144,17 @@ def test_server_checks_disk_levels():
     assert _sc(disk_free_gb=4, disk_total_gb=100)["Disk"]["status"] == "fail"  # under 5 GB and 4%
     assert _sc(disk_free_gb=5, disk_total_gb=100)["Disk"]["status"] == "warn"
     assert "about 40 GB" in _sc(objects=100)["Disk"]["detail"]  # 30 + 0.1 x 100
+
+
+def _features(settings, targets):
+    steps = build_steps({"sites": 1, "targets": targets, "nodes": [], "hostmaint": [], "expected_wrapper": "1.1.0", "settings": settings})
+    return next(s for s in steps if s["key"] == "features")["summary"]
+
+
+def test_features_step_says_why_the_console_is_not_ready():
+    t = [{"id": "t1", "name": "c", "inventory_status": "valid", "maintenance_status": None, "console_credential": False, "nodes": 1}]
+    assert "no console credential yet" in _features({}, t)
+    assert "no credential that can open a console" in _features({"console_enabled": True}, t)
+    t[0]["console_credential"] = True
+    assert "a credential is ready" in _features({}, t)
+    assert "Embedded console: on" in _features({"console_enabled": True}, t)

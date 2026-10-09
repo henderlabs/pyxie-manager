@@ -54,6 +54,30 @@ def _actor_label(op: Operation, value):
     return cache[value]
 
 
+def _with_storage_names(op: Operation) -> dict | None:
+    """The operation's context with each plan line's destination storage spelled out (name and scope), so the plan can
+    show WHERE a disk will land, not only which node. Read-only: a copy, nothing is written back."""
+    ctx = op.context
+    if not isinstance(ctx, dict):
+        return ctx
+    db = object_session(op)
+    out = ctx
+    for key in ("migrate_plan", "plan"):
+        items = ctx.get(key)
+        if db is None or not isinstance(items, list):
+            continue
+        ids = {i.get("destination_storage_id") for i in items if isinstance(i, dict) and i.get("destination_storage_id")}
+        if not ids:
+            continue
+        names = {str(s.id): s for s in db.query(Storage).filter(Storage.id.in_(list(ids))).all()}
+        enriched = []
+        for i in items:
+            st = names.get(str(i.get("destination_storage_id"))) if isinstance(i, dict) else None
+            enriched.append({**i, "destination_storage": st.name, "destination_storage_scope": st.scope} if st else i)
+        out = {**out, key: enriched}
+    return out
+
+
 def _serialize(op: Operation) -> dict:
     initiator = _resolve_actor(op, "created_by")
     approver = _resolve_actor(op, "approved_by")
@@ -76,7 +100,7 @@ def _serialize(op: Operation) -> dict:
         "stage": op.stage,
         "stages_completed": op.stages_completed,
         "stages_pending": op.stages_pending,
-        "context": op.context,
+        "context": _with_storage_names(op),
         "dry_run_result": op.dry_run_result,
         "progress": op.progress,
         "precondition_snapshot": op.precondition_snapshot,

@@ -352,6 +352,50 @@ def update_credential(
     return item
 
 
+def _explain_pve_error(e: Exception) -> str:
+    """A test-connection failure in words an operator can act on (PVE's own 401 body is often empty)."""
+    msg = str(e).strip()
+    head = msg[:3]
+    if head == "401":
+        return "401 Unauthorized: Proxmox rejected this token. Check the token user, the token id (the account script names it after the purpose: inventory, maintenance or console) and the secret. " + msg[4:].strip()
+    if head == "403":
+        return "403 Forbidden: the token signed in but lacks a permission. Check the role is granted to the TOKEN as well as the user (privilege separation). " + msg[4:].strip()
+    return msg or e.__class__.__name__
+
+
+@router.delete(
+    "/pve-targets/{target_id}/credentials/{credential_id}",
+    dependencies=[Depends(require_admin)],
+)
+def delete_credential(
+    target_id: uuid.UUID, credential_id: uuid.UUID,
+    user=Depends(get_current_user), db: Session = Depends(get_db),
+):
+    """Remove a credential purpose (e.g. one added by mistake under the wrong name). The `inventory` credential is what
+    discovery runs on, so it can only be replaced (Edit), never removed. The secret is deleted with the row."""
+    cred = (
+        db.query(PveCredential)
+        .filter(PveCredential.id == credential_id, PveCredential.pve_target_id == target_id)
+        .one_or_none()
+    )
+    if cred is None:
+        raise HTTPException(404, "credential not found")
+    if cred.slot_name == "inventory":
+        raise HTTPException(400, "the inventory credential is what PyXie reads your cluster with and cannot be deleted; use Edit to replace it")
+    target = db.query(PveTarget).filter(PveTarget.id == target_id).one_or_none()
+    write_audit_event(
+        db,
+        event_category="credential",
+        event_type="credential.deleted",
+        actor=user.email, actor_type="user",
+        provider_id=target.provider_id if target else None,
+        metadata={"pve_target_id": str(target_id), "slot_name": cred.slot_name, "token_user": cred.token_user, "token_id": cred.token_id},
+    )
+    db.delete(cred)
+    db.commit()
+    return {"status": "deleted"}
+
+
 @router.post(
     "/pve-targets/{target_id}/credentials/{credential_id}/test-connection",
     dependencies=[Depends(require_admin)],
@@ -402,7 +446,7 @@ def test_credential(target_id: uuid.UUID, credential_id: uuid.UUID, db: Session 
                 # signal until a discovery run gives us a real node.
                 ok = True if node is None else client.node_apt_update_count(node.name) is not None
     except Exception as e:
-        return {"status": "failed", "error": str(e)}
+        return {"status": "failed", "error": _explain_pve_error(e)}
 
     if not ok:
         return {

@@ -15,7 +15,7 @@ type Step = {
   substeps?: SubStep[];
   action?: { label: string; anchor?: string; href?: string };
 };
-export type SetupStatus = { steps: Step[]; progress: { done: number; total: number } };
+export type SetupStatus = { steps: Step[]; progress: { done: number; total: number }; tls_mode?: string };
 type Check = { group: string; label: string; status: "ok" | "warn" | "fail" | "info"; detail: string; fix: string };
 type CheckResult = { checks: Check[]; summary: Record<string, number>; ran_at: string };
 
