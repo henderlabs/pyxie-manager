@@ -114,8 +114,11 @@ export default function NodeOverview({
   nodeId,
   initialNode,
   rebootRequired,
+  header,
 }: {
   nodeId: string;
+  /** Page title block, rendered at the top of the block that sits beside the inventory tree. */
+  header?: React.ReactNode;
   initialNode: Node;
   /** From the host-maintenance readiness check; null when that check could not run. */
   rebootRequired: boolean | null;
@@ -149,7 +152,10 @@ export default function NodeOverview({
   const load = s?.loadavg ?? [];
 
   return (
-    <div>
+    <div className="contents">
+      {/* Top block sits beside the inventory tree; everything from the graphs down spans the full width under it. */}
+      <div className="min-w-0">
+      {header}
       {node.maintenance_mode && (
         <div className="mb-3 px-3 py-2 rounded border border-warn/40 bg-surface text-sm text-warn flex items-center gap-2">
           <WrenchIcon className="w-4 h-4" />
@@ -186,7 +192,9 @@ export default function NodeOverview({
         <Tile label="Load average" value={load[0] != null ? load[0]!.toFixed(1) : "—"}
           sub={s ? `${load.map((x) => (x != null ? x.toFixed(1) : "—")).join(" / ")} · swap ${formatBytes(s.swap_used)} of ${formatBytes(s.swap_total)}` : "1 / 5 / 15 min"} />
       </div>
+      </div>
 
+      <div className="col-span-2 min-w-0">
       <div className="flex items-center justify-between mb-2">
         <div className="text-xs text-muted">Graphs are PVE's own rrd series for this host, read live.</div>
         <label className="text-sm text-muted flex items-center gap-2">
@@ -311,6 +319,7 @@ export default function NodeOverview({
           })()
         )}
       </Card>
+      </div>
     </div>
   );
 }

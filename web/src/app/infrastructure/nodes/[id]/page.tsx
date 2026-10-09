@@ -18,7 +18,12 @@ export default async function NodeDetailPage({ params }: { params: { id: string 
 
   return (
     <div className="contents">
-      <div className="min-w-0">
+      <NodeOverview
+        nodeId={params.id}
+        initialNode={node}
+        rebootRequired={hostMaintenance ? hostMaintenance.reboot_required ?? null : null}
+        header={
+          <>
       <div className="flex items-start justify-between gap-3">
         <PageHeader title={node.name} subtitle="Host · live status from PVE" icon={<ServerIcon className="w-5 h-5" />} />
         <Link
@@ -30,9 +35,9 @@ export default async function NodeDetailPage({ params }: { params: { id: string 
           Manage in Maintenance
         </Link>
       </div>
-
-      <NodeOverview nodeId={params.id} initialNode={node} rebootRequired={hostMaintenance ? hostMaintenance.reboot_required ?? null : null} />
-      </div>
+          </>
+        }
+      />
 
       <div className="col-span-2 min-w-0">
       <Card className="mb-4">
