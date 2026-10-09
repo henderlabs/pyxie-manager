@@ -1,6 +1,6 @@
 # Automatic load balancing (DRS-style): design proposal
 
-Status: **proposal, nothing built.** Written 2026-10-08 for discussion; no code changes accompany it. Updated the same day with Phil's first answers (see "Decisions so far").
+Status: **phases 1 to 3 are built (v0.33.0 to v0.36.5).** Written 2026-10-08 as a proposal and kept up to date as each phase shipped; the "as built" sections come first and the original reasoning follows. For how to *use* these features see [balance-load.md](balance-load.md).
 
 ## Decisions so far (Phil, 2026-10-08)
 
@@ -10,7 +10,7 @@ Status: **proposal, nothing built.** Written 2026-10-08 for discussion; no code 
 - **What the planner balances is selectable: CPU, memory, or both.** The default is the **most limited resource**: whichever of CPU and memory has the least headroom on the busiest node, so the cluster is balanced on the thing that will run out first. Memory still wins ties, because it is what limits where a VM can move.
 - **Scope is selectable**: the whole cluster by default, or a chosen set of nodes (and later tags), and per cluster rather than one global switch.
 
-The sections below are updated to match; the remaining open questions are at the end.
+The "as built" sections below record what shipped; the questions that were open are answered at the end.
 
 ## Phase 1 as built (v0.33.0, recommend only)
 
@@ -41,7 +41,46 @@ are left for a person; and **one move at a time, re-evaluated from fresh data be
   compatibility and HA are the planner's own hard rules, unchanged.
 - First failed or blocked automatic move: `balance.auto_stopped` audit event, a critical notification (category `balance`), mode back to
   `recommend`. Nothing retries unattended.
-- Not built: a second concurrent migration for Aggressive, smoothed-memory trigger, per-tag do-not-move, blackout dates.
+- Not built here: a second concurrent migration for Aggressive (moves always run one at a time).
+
+## Phase 3 as built (v0.34.0 to v0.36.5, safeguards and tuning)
+
+Found by running phases 1 and 2 against the real lab (st-pyxie) and by Phil's review.
+
+- **Pinned host (v0.34.0).** The soft "Preferred host" on the workload page is now presented as **Pinned host (soft)**. Balance Load, the recommendations
+  and automatic balancing never consider a guest that sits on its pin (`recommendations.left_alone_reason`); a guest away from its pin may still move
+  toward it. Maintenance and evacuation can still move a pinned guest, and the placement scorer still strongly prefers the pin when it chooses.
+  Balance Load shows "N locked" per node, "pinned to X" on plan rows, and a "Left alone on purpose" list (pinned, Do not move, moved recently,
+  settled). Containers are not balanced, so they are not counted.
+- **Never swap the imbalance (v0.33.1, in the planner from v0.34.1, tightened in v0.36.3).** The scorer ranks destinations by headroom and could send a big
+  guest to a small quiet node so that node ended fuller than the one it left. A move is now rejected when the destination would end fuller than the source,
+  or when it does not narrow the gap between the two nodes by at least **5 percentage points** (`balance_config.swaps_imbalance`, using both nodes' real sizes).
+  The check runs inside the planner, so a rejected move never uses up headroom that other guests could have had, and the next-best destination is tried.
+  Rejected moves show as "No gain" in the preview.
+- **Size-aware gauge (v0.34.3).** Balance score = 100 minus twice the memory-size-weighted standard deviation of node load (CPU too, once the busiest node
+  passes 50%). Two equal nodes at 90% and 10% still score 20; a small quiet node among large ones counts for little. Backend `balance_score()` and frontend
+  `computeBalance()` are kept in step. The label for 60 to 79 reads "A little uneven", and the Balance Load page says what the automatic level will do.
+- **Busy-hours scoring (v0.36.0).** Automatic runs judge the cluster, the swap guard and the 80% ceiling by each node's **7-day 90th-percentile** load
+  from `metric_points`, not by right now, so a server that is only busy in business hours never looks idle at night and never attracts guests it cannot
+  carry at 10 a.m. Auto-approve waits for 24 hours of history on every node; recommend falls back to live numbers. Manual previews stay live.
+- **Loop breaker (v0.36.0, v0.36.1).** A guest is never planned back onto a host it left in the last **72 hours**; a guest that has moved **twice in 7 days**
+  is left alone ("settled"); the level's per-guest cooldown still applies. Moves made by maintenance mode (children of `node.evacuate`,
+  `node.enter_maintenance`, `maintenance.run`) do not count toward any of these, so guests can be balanced straight back onto a node after maintenance.
+- **Revoke (v0.36.3, route fixed v0.36.5).** `POST /api/auto-balance/{cluster}/revoke` and the red button on the card: back to Recommend only at once, the
+  confirmation is dropped, an approved-but-not-started automatic move is cancelled (the run checks before each move), a migration already running
+  finishes. Audit event `balance.auto_revoked`, and a notification. Pause and the global write switch also stop it.
+- **Notifications (v0.34.1).** The plan-ready event was raised at severity "info", which no rule can match; it is now "warning", and **Automatic balancing**
+  is a selectable category in Settings > Notifications. A rule needs minimum severity Warning (or lower) to email it.
+- **Stale plans (v0.34.2).** A plan nobody approved for 12 hours no longer blocks automatic runs: automatic plans (own cluster) and manual Balance Load
+  plans are cancelled and replaced. Bulk Migrate plans never are.
+- **Balance Load page.** One waiting plan is shown on load with who prepared it and when; a new preview replaces it (audited). Memory by node and Planned moves
+  are two equal-width cards: the plan first, then one summary line for everything considered but not made, the first four, and a Show all button.
+
+Lab findings (2026-10-09): the lab's score reads about 75 live and 73 busy-hours (st-pve103 is small and quiet); at all three levels the raw proposals were swaps
+or needed a storage change, so automatic balancing correctly did nothing, and the one Aggressive plan was left for a person because it changed storage.
+
+Still not built: per-tag Do not move, blackout dates (change freezes), advanced per-number overrides, a second concurrent migration for Aggressive,
+and a Dashboard gauge that follows the CPU/memory choice.
 
 ## Goal
 
@@ -159,26 +198,19 @@ Balancing every few minutes on noisy numbers causes ping-pong. Mitigations, all 
 
 ## Phasing
 
-1. **Phase 1, recommend-only** (small): settings + worker job + "automatic" plan creation + card + notification +
-   tests (gating, cooldowns, anti-thrash, kill switch). Nothing here moves a VM without a click. Validate on st-pyxie
-   for a few weeks and tune the presets against real behavior.
-2. **Phase 2, auto-approve** (opt-in): separate admin toggle with its own confirmation text, Conservative level only
-   at first, plus the stricter limits above. Needs Phil's explicit go after phase 1 data.
-3. **Later**: CPU in the score (the planner is memory-led today), scheduled windows (only balance 22:00-05:00),
-   per-tag exclusions, "balance this node only" automation.
+1. **Phase 1, recommend-only: built (v0.33.0).** Settings, worker job, automatic plan, card, notification, audit events.
+2. **Phase 2, auto-approve: built (v0.35.0, opt-in, off by default).** See "Phase 2 as built".
+3. **Phase 3, safeguards and tuning: built (v0.34.0 to v0.36.5).** See "Phase 3 as built".
+4. **Later:** per-tag exclusions, blackout dates, advanced per-number overrides, "balance this node only" automation.
 
-## Open questions for Phil
+## Questions that were open, and how they were answered
 
-1. **Auto-approve on production.** Decided: wanted, with warnings. Still open: allowed on every cluster, or only ones marked "lab" until trusted?
-2. **Do-not-move flag.** Decided: yes, per guest. Open: per tag as well (proposed follow-up)? Also hides the guest from manual suggestions?
-3. **Windows.** Decided: customizable. Open: just allowed windows, or also blackout dates (change freezes)?
-4. **Level names and numbers.** Are Conservative/Moderate/Aggressive the right words, and are the starting numbers
-   (above) sensible to you? A fourth "Custom" preset?
-5. **CPU vs memory.** Decided: selectable, default most-limited resource. Open: should the gauge on the Dashboard follow the same choice?
-6. **Scope.** Decided: selectable. Open: is per-cluster plus a node selection enough, or do you also want tag-based scope?
-7. **Notifications.** Email via the existing rules only, or also an in-app banner on the Dashboard while an automatic
-   plan is waiting?
-8. **Failure policy.** On a failed automatic move: stop and alert (proposed), or also disable automatic mode until a
-   person re-enables it?
-9. **Storage moves.** Leave any plan that changes storage to humans (proposed), or allow when the preference is
-   already satisfied by shared storage?
+1. **Auto-approve on production.** Allowed on any cluster behind an explicit confirmation (asked again on every re-enable); no lab/production flag.
+2. **Do-not-move.** Per guest is built; per tag is still a follow-up. A pinned host is built as a related soft lock.
+3. **Windows.** Allowed windows are built; blackout dates are not.
+4. **Level names and numbers.** Kept: Conservative / Moderate / Aggressive (trigger 60 / 70 / 80, minimum benefit 25 / 15 / 10). In auto-approve every run is one move.
+5. **CPU vs memory.** Selectable, default most limited resource. The Dashboard gauge uses the shared size-aware score and does not yet follow the choice.
+6. **Scope.** Per cluster plus a node selection is built; tag-based scope is not.
+7. **Notifications.** Email through the existing rules (category Automatic balancing, minimum severity Warning); no in-app banner beyond the waiting plan.
+8. **Failure policy.** Stop at the first failed or blocked move, alert (critical), and drop back to Recommend only.
+9. **Storage moves.** Left for a person: an automatic plan that changes storage is prepared but never auto-approved.
