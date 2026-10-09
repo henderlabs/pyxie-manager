@@ -99,7 +99,8 @@ async function ClusterOverview({ clusterId }: { clusterId?: string }) {
     clusterPolicies.find((p) => p.key === "placement.storage_preference" && p.scope_id === cluster.id)?.value ?? null;
 
   return (
-    <div>
+    <div className="contents">
+      <div className="min-w-0">
       <PageHeader
         title={
           <span className="inline-flex items-center gap-2">
@@ -135,6 +136,9 @@ async function ClusterOverview({ clusterId }: { clusterId?: string }) {
         <ClusterStoragePreference clusterId={cluster.id} initialValue={storagePref as string | null} />
       </Card>
 
+      </div>
+
+      <div className="col-span-2 min-w-0">
       <div className="text-[11px] uppercase tracking-wider text-muted font-semibold mb-2">Nodes in this cluster</div>
       <NodesTable
         nodes={clusterNodes}
@@ -143,6 +147,7 @@ async function ClusterOverview({ clusterId }: { clusterId?: string }) {
         storage={storage}
         defaultStorageByNode={defaultStorageByNode}
       />
+      </div>
     </div>
   );
 }
