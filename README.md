@@ -51,13 +51,15 @@ Captured from the running app against a fictional demo dataset (no real hostname
 
 ![Maintenance](docs/screenshots/maintenance.png)
 
-**Balance Load** -- node load and a suggestion up front, then a preview with memory per node before and after the plan, each planned move checked on its own, and any move a rule refused explained:
+**Balance Load** -- node load and a suggestion up front, then a preview with memory per node before and after the plan (with real GB figures and which guests leave and arrive), the planned moves, and a short, expandable list of moves that were considered but not made (no gain, blocked by a rule, redirected), plus the guests left alone on purpose (pinned, Do not move, moved recently). A per-cluster **Automatic balancing** card can prepare plans for you (Recommend only) or approve and run them one move at a time (Auto-approve, off by default, with a Revoke button). See [docs/balance-load.md](docs/balance-load.md):
 
 ![Balance Load](docs/screenshots/balance-load.png)
 
-**Affinity Rules** -- where every guest sits now, and each keep-together / keep-apart rule in plain words with its current status; enforced on migrations, evacuations and rebalancing:
+**Affinity Rules** -- where every guest sits now, shown as coloured pills that link to the guest, and each keep-together / keep-apart rule in plain words with its current status (a soft preference that is not met shows amber, a broken hard rule red); tag rules suggest the tags in use and show which guests they cover; enforced on migrations, evacuations and rebalancing:
 
 ![Affinity Rules](docs/screenshots/affinity-rules.png)
+
+The screenshots above are from the fictional demo dataset and are refreshed when the layouts change; the text next to each one describes the current behaviour.
 
 ## Versioning
 
