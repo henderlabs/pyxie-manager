@@ -43,7 +43,8 @@ async function SiteOverview({ siteId }: { siteId: string }) {
   const allocatedMemBytes = presentWorkloads.reduce((sum, w) => sum + (w.memory_bytes ?? 0), 0);
 
   return (
-    <div>
+    <div className="contents">
+      <div className="min-w-0">
       <PageHeader
         title={site.name}
         subtitle={`Site · ${siteClusters.length} cluster${siteClusters.length === 1 ? "" : "s"} · ${siteNodes.length} node${siteNodes.length === 1 ? "" : "s"}`}
@@ -58,7 +59,8 @@ async function SiteOverview({ siteId }: { siteId: string }) {
         <StatTile label="Allocated vCPU" value={allocatedVcpu} />
         <StatTile label="Allocated RAM" value={formatBytes(allocatedMemBytes)} />
       </div>
-      <p className="text-xs text-muted">Click a cluster in the tree for its own detail and node table.</p>
+      </div>
+      <p className="col-span-2 text-xs text-muted">Click a cluster in the tree for its own detail and node table.</p>
     </div>
   );
 }
