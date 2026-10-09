@@ -179,6 +179,66 @@ def parse_migration_progress(log_lines: list[dict]) -> Optional[dict]:
     return None
 
 
+# A live migration with node-local disks first MIRRORS each disk to the target storage, then moves the VM's memory/state:
+#   "mirror-scsi0: transferred 10.5 GiB of 100.0 GiB (10.48%) in 1m"            (one line per drive, repeated)
+#   "mirror-scsi0: transferred 100.0 GiB of 100.0 GiB (100.00%) in 9m 19s, ready"
+#   "migration active, transferred 94.8 MiB of 10.0 GiB VM-state, 106.6 MiB/s"
+_MIRROR_RE = re.compile(r"^(mirror-\S+?): transferred ([\d.]+) ([KMGT]?i?B) of ([\d.]+) ([KMGT]?i?B) \(([\d.]+)%\) in ((?:\d+h )?(?:\d+m )?\d+s|\d+m)")
+
+
+def _elapsed_seconds(text: str) -> int:
+    total = 0
+    for n, unit in re.findall(r"(\d+)([hms])", text):
+        total += int(n) * {"h": 3600, "m": 60, "s": 1}[unit]
+    return total
+
+
+def update_migration_progress(prev: Optional[dict], log_lines: list[dict]) -> Optional[dict]:
+    """Fold new task-log lines into the running progress. Two phases can be present: `storage` (the disks being mirrored to
+    the target storage, summed over every drive, with an average rate) and `vm` (memory/state). Top-level pct/bytes/rate/
+    raw_line stay the ACTIVE phase's, so older readers of this field keep working. Returns `prev` when nothing new parsed."""
+    prog = dict(prev) if isinstance(prev, dict) else {}
+    drives: dict = dict((prog.get("storage") or {}).get("drives") or {})
+    changed = False
+    for entry in log_lines:
+        line = entry.get("t", "")
+        m = _MIRROR_RE.search(line)
+        if m:
+            done, total = _to_bytes(m.group(2), m.group(3)), _to_bytes(m.group(4), m.group(5))
+            drives[m.group(1)] = {"transferred_bytes": done, "total_bytes": total, "elapsed_seconds": _elapsed_seconds(m.group(7))}
+            prog["raw_line"], prog["log_line_n"] = line, entry.get("n")
+            changed = True
+            continue
+        if "switching mirror jobs to actively synced mode" in line or "start migrate command" in line:
+            if drives:
+                prog["storage_done"] = True
+                changed = True
+    if drives:
+        done = sum(d["transferred_bytes"] or 0 for d in drives.values())
+        total = sum(d["total_bytes"] or 0 for d in drives.values())
+        secs = max((d["elapsed_seconds"] for d in drives.values()), default=0)
+        if prog.get("storage_done"):
+            done = total
+        prog["storage"] = {
+            "drives": drives, "transferred_bytes": done, "total_bytes": total,
+            "pct": round(100 * done / total, 1) if total else None,
+            "rate_bytes_per_sec": int(done / secs) if secs and done else None, "done": bool(prog.get("storage_done")),
+        }
+    vm = parse_migration_progress(log_lines)
+    if vm:
+        prog["vm"] = {k: vm[k] for k in ("transferred_bytes", "total_bytes", "rate_bytes_per_sec", "pct")}
+        prog["raw_line"], prog["log_line_n"] = vm["raw_line"], vm["log_line_n"]
+        changed = True
+    if not changed and not prog.get("storage"):
+        return prev
+    active = prog["vm"] if prog.get("vm") else prog.get("storage")
+    if active:
+        prog["phase"] = "vm" if prog.get("vm") else "storage"
+        for k in ("transferred_bytes", "total_bytes", "rate_bytes_per_sec", "pct"):
+            prog[k] = active.get(k)
+    return prog
+
+
 @dataclass
 class TaskResult:
     upid: str

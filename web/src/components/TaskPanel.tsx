@@ -5,6 +5,7 @@ import { useEffect, useState, type MouseEvent } from "react";
 import type { Operation } from "@/lib/api";
 import { OPERATION_TYPE_LABELS, operationTypeLabel } from "@/components/OperationCard";
 import StatusBadge from "@/components/StatusBadge";
+import MigrationBars from "@/components/MigrationBars";
 import { ChecklistIcon, SpinnerIcon, HourglassIcon, HistoryIcon, PinIcon } from "@/components/Icons";
 import { onOperationsChanged } from "@/lib/operationsBus";
 import { useMe } from "@/lib/useMe";
@@ -280,7 +281,7 @@ function TaskRow({ op, onApproved, isAdmin }: { op: Operation; onApproved: () =>
       {op.approver && op.approver !== op.initiated_by && (
         <div className="text-[11px] text-muted truncate mt-0.5">approved by {op.approver}</div>
       )}
-      {inFlight && <ProgressBar pct={op.progress?.pct ?? null} />}
+      {inFlight && op.operation_type_id === "vm.live_migrate" ? <MigrationBars op={op} /> : inFlight && <ProgressBar pct={op.progress?.pct ?? null} />}
       {op.status === "failed" && op.error && <div className="text-[11px] text-bad mt-1">{op.error}</div>}
       {op.status === "awaiting_approval" && isAdmin && (
         <div className="mt-1.5 flex items-center gap-2">
@@ -351,6 +352,13 @@ function Section({
   extraCount?: number; renderExtra?: (op: Operation) => React.ReactNode; isAdmin: boolean;
 }) {
   const totalCount = ops.length + extraCount;
+  // A task whose parent is in this same list is shown under it, not beside it.
+  const ids = new Set(ops.map((o) => o.id));
+  const roots = ops.filter((o) => !o.parent_operation_id || !ids.has(o.parent_operation_id));
+  const childrenOf = new Map<string, Operation[]>();
+  for (const o of ops) {
+    if (o.parent_operation_id && ids.has(o.parent_operation_id)) childrenOf.set(o.parent_operation_id, [...(childrenOf.get(o.parent_operation_id) || []), o]);
+  }
   return (
     <div className={`mb-3 ${divider ? "mt-5 pt-4 border-t border-border" : ""}`}>
       <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-proxmox flex items-center justify-between">
@@ -364,12 +372,25 @@ function Section({
         <div className="px-3 py-2 text-xs text-muted italic">{emptyText}</div>
       ) : (
         <div>
-          {ops.map((op) => (
-            <div key={op.id}>
-              <TaskRow op={op} onApproved={onApproved} isAdmin={isAdmin} />
-              {renderExtra?.(op)}
-            </div>
-          ))}
+          {roots.map((op) => {
+            const kids = childrenOf.get(op.id) || [];
+            const extra = renderExtra?.(op);
+            return (
+              <div key={op.id}>
+                <TaskRow op={op} onApproved={onApproved} isAdmin={isAdmin} />
+                {/* Sub-tasks (each migration of a Balance Load, evacuation or maintenance run, and the steps still
+                    queued) sit under their parent, indented. */}
+                {(kids.length > 0 || extra) && (
+                  <div className="ml-3 border-l-2 border-proxmox/40">
+                    {kids.map((k) => (
+                      <TaskRow key={k.id} op={k} onApproved={onApproved} isAdmin={isAdmin} />
+                    ))}
+                    {extra}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

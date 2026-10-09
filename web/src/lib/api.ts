@@ -530,7 +530,12 @@ export type Operation = {
     vmid?: number; workload_name?: string | null; node?: string;
     [key: string]: unknown;
   } | null;
-  progress: { transferred_bytes: number | null; total_bytes: number | null; rate_bytes_per_sec: number | null; pct: number | null; raw_line: string } | null;
+  progress: { transferred_bytes: number | null; total_bytes: number | null; rate_bytes_per_sec: number | null; pct: number | null; raw_line: string;
+    // live migration with node-local disks: the disk copy and the VM memory move are tracked separately
+    phase?: "storage" | "vm";
+    storage?: { transferred_bytes: number | null; total_bytes: number | null; rate_bytes_per_sec: number | null; pct: number | null; done?: boolean };
+    vm?: { transferred_bytes: number | null; total_bytes: number | null; rate_bytes_per_sec: number | null; pct: number | null };
+  } | null;
   pve_upid: string | null;
   verification_result: Record<string, unknown> | null;
   rollback_classification: string | null;

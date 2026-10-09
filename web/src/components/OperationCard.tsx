@@ -1,5 +1,6 @@
 "use client";
 
+import MigrationBars from "@/components/MigrationBars";
 import { useState } from "react";
 import OperationLogPanel from "@/components/OperationLogPanel";
 import type { Operation } from "@/lib/api";
@@ -624,7 +625,9 @@ export default function OperationCard({
 
       {op.status === "monitoring" && (
         <div className="mb-3">
-          {progress && progress.pct != null ? (
+          {op.operation_type_id === "vm.live_migrate" ? (
+            <MigrationBars op={op} />
+          ) : progress && progress.pct != null ? (
             <>
               <div className="h-1.5 rounded-full bg-border overflow-hidden">
                 <div className="h-full rounded-full bg-proxmox transition-all" style={{ width: `${Math.min(100, progress.pct)}%` }} />
