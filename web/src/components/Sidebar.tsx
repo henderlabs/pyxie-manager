@@ -44,12 +44,12 @@ const SECTIONS: NavSection[] = [
     label: "Operations",
     items: [
       { label: "Health", href: "/operations/health", icon: <HealthIcon /> },
-      { label: "Rightsizing", href: "/operations/recommendations", icon: <LightbulbIcon /> },
       { label: "Maintenance", href: "/operations/maintenance", icon: <WrenchIcon /> },
       { label: "Balance Load", href: "/operations/balance", icon: <MigrateIcon /> },
       { label: "Affinity Rules", href: "/operations/affinity-rules", icon: <LinkIcon /> },
       { label: "Protection", href: "/operations/protection", icon: <ShieldIcon /> },
       { label: "Capacity", href: "/operations/capacity", icon: <GaugeIcon /> },
+      { label: "Rightsizing", href: "/operations/recommendations", icon: <LightbulbIcon /> },
     ],
   },
   {
@@ -77,7 +77,7 @@ const SECTIONS: NavSection[] = [
           { label: "Email (SMTP)", href: "/platform/settings/email", icon: <MailIcon /> },
           { label: "Updates", href: "/platform/settings/updates", icon: <PackageIcon /> },
           { label: "Quick start", href: "/platform/quick-start", icon: <LightbulbIcon /> },
-          { label: "Integrations", href: "/platform/providers", icon: <PlugIcon /> },
+          { label: "Setup guide", href: "/platform/providers", icon: <PlugIcon /> },
           { label: "Credentials", href: "/platform/credentials", icon: <KeyIcon /> },
           { label: "Users", href: "/platform/users", icon: <UsersIcon />, adminOnly: true },
           { label: "Policies", href: "/platform/policies", icon: <SlidersIcon /> },

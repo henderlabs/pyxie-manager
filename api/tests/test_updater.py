@@ -128,3 +128,20 @@ def test_history_and_log_readers_tolerate_missing_and_damaged_files():
         assert [h["a"] for h in read_history(p / "h.jsonl")] == [2, 1]  # newest first, bad line skipped
         (p / "l.log").write_text("\n".join(str(i) for i in range(200)))
         assert tail_lines(p / "l.log", 3) == ["197", "198", "199"]
+
+
+def test_console_route_probe_logic():
+    from pyxie_core import edge_probe
+
+    assert edge_probe.console_route_ok(403)  # made-up ticket refused by the API: the route reaches it
+    assert not edge_probe.console_route_ok(502)  # fell through to the web layer: stale Caddy config
+    assert not edge_probe.console_route_ok(None)
+    assert edge_probe.probe_console_route("127.0.0.1", "x.example", port=1, timeout=0.5) is None  # nothing listening
+
+
+def test_caddy_recreate_decision(monkeypatch):
+    monkeypatch.setattr(upd, "git", lambda *a, **k: "ops/caddy/Caddyfile\n")
+    assert "changed" in upd.caddy_needs_recreate("abc123")
+    monkeypatch.setattr(upd, "git", lambda *a, **k: "")
+    monkeypatch.setattr(upd, "compose", lambda *a, **k: "")  # no caddy container (native install): nothing to recreate
+    assert upd.caddy_needs_recreate("abc123") is None

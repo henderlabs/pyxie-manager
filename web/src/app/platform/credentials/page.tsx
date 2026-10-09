@@ -6,6 +6,7 @@ import ActionButton from "@/components/ActionButton";
 import HostMaintenanceSetup from "@/components/HostMaintenanceSetup";
 import AddCredentialForm from "@/components/AddCredentialForm";
 import EditCredentialForm from "@/components/EditCredentialForm";
+import DeleteCredentialButton from "@/components/DeleteCredentialButton";
 import { KeyIcon } from "@/components/Icons";
 import Link from "next/link";
 
@@ -40,7 +41,7 @@ export default async function CredentialsPage() {
               <>
                 No PVE targets configured yet.{" "}
                 <Link href="/platform/providers" className="text-accent hover:underline">
-                  Add one under Integrations
+                  Add one in the Setup guide
                 </Link>
                 .
               </>
@@ -68,7 +69,10 @@ export default async function CredentialsPage() {
                   </div>
                   <ActionButton href={`/api/pve-targets/${t.id}/credentials/${c.id}/test-connection`} label="Test Connection" />
                 </div>
-                <EditCredentialForm targetId={t.id} credential={c} />
+                <div className="flex items-start gap-3">
+                  <EditCredentialForm targetId={t.id} credential={c} />
+                  <DeleteCredentialButton targetId={t.id} credentialId={c.id} slotName={c.slot_name} />
+                </div>
               </div>
             ))}
           </div>

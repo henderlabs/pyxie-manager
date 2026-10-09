@@ -8,7 +8,7 @@ import QuickStartBanner from "@/components/QuickStartBanner";
 import DashboardNodesList from "@/components/DashboardNodesList";
 import { HalfGauge } from "@/components/HalfGauge";
 import { BalanceGauge, NodeBalanceStrip } from "@/components/ClusterBalance";
-import { ClusterIcon, StorageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon } from "@/components/Icons";
+import { ServerIcon, ClusterIcon, StorageIcon, CpuIcon, MemoryIcon, DashboardIcon, ShieldIcon, HealthIcon, WrenchIcon } from "@/components/Icons";
 import { formatBytes } from "@/lib/format";
 
 export default async function DashboardPage() {
@@ -25,6 +25,7 @@ export default async function DashboardPage() {
     apiFetch<ProtectionResultRow[]>("/api/protection/results"),
   ]);
 
+  const wrapperFindings = findings.filter((f) => f.category === "host_wrapper" && f.triage !== "dismissed");
   const issueCount = findings.filter((f) => f.severity === "critical" || f.severity === "warning").length;
   const criticalCount = findings.filter((f) => f.severity === "critical").length;
   const topFindings = [...findings]
@@ -61,6 +62,22 @@ export default async function DashboardPage() {
               </span>
               <Link href="/operations/maintenance" className="text-xs text-accent hover:underline ml-auto">
                 Go to Maintenance →
+              </Link>
+            </div>
+          </Card>
+        )}
+        {wrapperFindings.length > 0 && (
+          <Card className="border-warn/40 flex-1 min-w-[280px]">
+            <div className="flex items-center gap-2 text-sm text-warn flex-wrap">
+              <ServerIcon className="w-4 h-4" />
+              <span className="font-medium">
+                Host wrapper needs attention on {wrapperFindings.length} {wrapperFindings.length === 1 ? "node" : "nodes"}:{" "}
+                {wrapperFindings.map((f) => (f.evidence as { node?: string } | null)?.node ?? f.title).slice(0, 4).join(", ")}
+                {wrapperFindings.length > 4 ? "…" : ""}
+              </span>
+              <span className="text-xs text-muted">Run the host script on the node to install or upgrade it.</span>
+              <Link href="/platform/providers#builder-host" className="text-xs text-accent hover:underline ml-auto">
+                Open the host script builder →
               </Link>
             </div>
           </Card>

@@ -33,6 +33,10 @@ export default function ActionButton({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setError(data.error || `Request failed (${res.status})`);
+      } else if (data?.status === "failed" && typeof data.error === "string") {
+        // test-connection style endpoints answer 200 with {status:"failed", error}: show why, don't pretend it worked
+        setError(data.error);
+        router.refresh();
       } else {
         router.refresh();
       }
@@ -57,7 +61,7 @@ export default function ActionButton({
       >
         {pending ? pendingLabel || "Working…" : label}
       </button>
-      {error && <span className="text-xs text-bad mt-1">{error}</span>}
+      {error && <span className="text-xs text-bad mt-1 max-w-xs break-words">{error}</span>}
     </div>
   );
 }

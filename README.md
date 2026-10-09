@@ -20,7 +20,7 @@ PyXie runs as one Docker stack (web, API, worker, PostgreSQL, Redis and Caddy fo
 1. **Install it:** follow [`docs/docker-caddy.md`](docs/docker-caddy.md). It covers what you need first (VM size,
    network, certificate choice) and a step-by-step first-time setup, from `git clone` to creating your admin account.
 2. **Connect your Proxmox cluster:** on first sign-in PyXie shows a **New here?** banner on the Dashboard that opens
-   **Platform > Quick start**, and **Platform > Integrations** walks the same setup in 8 steps with live status. Written
+   **Platform > Quick start**, and **Platform > Setup guide** walks the same setup in 8 steps with live status. Written
    up in [`docs/setup-guide.md`](docs/setup-guide.md); installing the host wrapper on each node is in
    [`docs/host-kit.md`](docs/host-kit.md) and [`docs/adding-a-host.md`](docs/adding-a-host.md).
 3. **Keep it current:** [`docs/updates.md`](docs/updates.md) (Settings > Updates) and

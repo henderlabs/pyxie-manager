@@ -4,7 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useMe } from "@/lib/useMe";
 
-const ALL_SLOTS = ["inventory", "maintenance", "administrative", "console"];
+// The purposes PyXie uses. The Proxmox account script creates a token whose id equals the purpose name, so the token id is
+// pre-filled to match; the user names are the defaults the script builder proposes (yours may differ).
+const ALL_SLOTS = ["inventory", "maintenance", "console"];
+const DEFAULT_USER: Record<string, string> = { inventory: "pyxie-ro@pve", maintenance: "pyxie-admin@pve", console: "pyxie-console@pve" };
 
 export default function AddCredentialForm({ targetId, existingSlots }: { targetId: string; existingSlots: string[] }) {
   const router = useRouter();
@@ -14,8 +17,8 @@ export default function AddCredentialForm({ targetId, existingSlots }: { targetI
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     slot_name: available[0] ?? "",
-    token_user: "",
-    token_id: "",
+    token_user: DEFAULT_USER[available[0] ?? ""] ?? "",
+    token_id: available[0] ?? "",
     token_secret: "",
   });
   const me = useMe();
@@ -66,7 +69,7 @@ export default function AddCredentialForm({ targetId, existingSlots }: { targetI
         <select
           className="input"
           value={form.slot_name}
-          onChange={(e) => setForm({ ...form, slot_name: e.target.value })}
+          onChange={(e) => setForm({ ...form, slot_name: e.target.value, token_user: DEFAULT_USER[e.target.value] ?? "", token_id: e.target.value })}
         >
           {available.map((s) => (
             <option key={s} value={s}>
@@ -77,12 +80,11 @@ export default function AddCredentialForm({ targetId, existingSlots }: { targetI
       </label>
       <div className="text-xs text-muted">
         {form.slot_name === "inventory"
-          ? "Read-only -- only used to discover and monitor this target. Same purpose as the token on the Integrations page."
+          ? "Read-only -- only used to discover and monitor this target. Same purpose as the token used when connecting the cluster in the Setup guide."
           : form.slot_name === "maintenance"
           ? "Required for any write action (migration, maintenance, rightsizing apply, etc). Do not use root@pam."
-          : form.slot_name === "console"
-          ? "Only for the embedded VM console: a token holding just VM.Console (plus VM.Audit) so a leak cannot power off or migrate anything."
-          : "Full administrative-scope token, if this deployment needs one beyond maintenance."}
+          : "Only for the embedded VM console: a token holding just VM.Console (plus VM.Audit) so a leak cannot power off or migrate anything. Not needed if VM.Console is part of the admin (maintenance) role."}
+        {" "}Use the user name and token id exactly as the Proxmox account script created them (it names the token after its purpose); the secret is in /root/pyxie-tokens.txt on the node you ran it on.
       </div>
       <div className="grid grid-cols-2 gap-3">
         <label className="block text-xs text-muted space-y-1">

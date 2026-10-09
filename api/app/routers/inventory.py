@@ -358,6 +358,8 @@ def get_node_host_maintenance_status(node_id: uuid.UUID, db: Session = Depends(g
     kit_wrapper = _hk.wrapper_version(_KIT_DIR)
     node.wrapper_version = version_info.get("wrapper_version")
     node.wrapper_checked_at = datetime.now(timezone.utc)
+    cred_row.last_seen_wrapper_version = version_info.get("wrapper_version")  # keep the credential's copy fresh too
+    cred_row.last_seen_contract_version = contract_version
     db.commit()
     return {
         **base,

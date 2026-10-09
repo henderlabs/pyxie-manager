@@ -22,7 +22,7 @@ unchanged. Pick one per host; don't run both against the same database.
   metrics is 30 to 60 MB per object, plus backups; Docker build cache can reach 15 GB where images are built by hand
   repeatedly; the updater caps it at 3 GB after each update, and `docker builder prune` clears it any time). Measured on a 4-node, 24-guest lab: the whole stack used about 0.5 GB RAM and almost
   no CPU. On an 8-node, 130-guest production install: about 0.9 GB RAM, a 2.9 GB database, 22 GB of disk in use. The updater builds a new version beside
-  the running one for about a minute, so keep at least 2 vCPU and 4 GB. Run check (Integrations, step 8) compares the VM
+  the running one for about a minute, so keep at least 2 vCPU and 4 GB. Run check (Setup guide, step 8) compares the VM
   with these numbers.
 - **Network**: a DNS name for the VM; users reach 443 (80 redirects). VM to every Proxmox node on TCP 8006, and 22 if
   you patch hosts through PyXie. VM out to GitHub (HTTPS) and your mail relay. A node reaches the VM on 443 once, to get
@@ -102,7 +102,7 @@ A new installation takes about 15 minutes. Commands run as the login user on the
 5. **Create your admin account.** Open `https://<PYXIE_HOSTNAME>`. With `internal` certificates the browser warns
    until you trust Caddy's root certificate (see TLS modes). The first visit shows **Create the administrator account**; once one exists, that form is gone for good.
 6. **Connect your cluster.** The Dashboard shows a **New here?** banner linking to **Platform > Quick start**;
-   **Platform > Integrations** then walks you through eight steps (site, Proxmox accounts and tokens, cluster, admin
+   **Platform > Setup guide** then walks you through eight steps (site, Proxmox accounts and tokens, cluster, admin
    token, host wrapper, features, notifications, Run check). See [`setup-guide.md`](setup-guide.md) and
    [`host-kit.md`](host-kit.md). PyXie never creates Proxmox accounts for you; the script builder prints the commands
    for someone with root on a node to run.
@@ -162,6 +162,19 @@ category/severity filters are not applied) and **Settings > Email (SMTP)**.
 the fallback if the database is unreachable. SMTP authentication is not
 supported (internal relay assumed). A host that is completely down cannot alert
 about itself; monitor it externally too.
+
+## Caddy keeps an old config after an update?
+
+Caddy mounts the `ops/caddy` directory. If that directory is replaced (a manual `git pull`, an older updater), the
+container keeps the old copy: `docker exec pyxie-manager-caddy ls /etc/caddy` comes back **empty** and new routes such as
+`/console-ws` are missing (the console fails with a 502). PyXie's Health page flags this ("Caddy config is out of date")
+and the in-app updater (v0.36.6+) recreates Caddy automatically. Manual fix:
+
+```
+docker compose up -d --force-recreate pyxie-manager-caddy
+```
+
+This takes a few seconds of HTTPS downtime; certificates live in the `caddy_data` volume and are kept.
 
 ## Notes
 

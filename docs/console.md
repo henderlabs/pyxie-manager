@@ -6,24 +6,33 @@ PyXie can show a guest's screen (noVNC) inside the Console tab of a workload, an
 ## One-time setup (per PVE target; done by a PVE admin, not by PyXie)
 
 Two options. PyXie uses the `console` credential if one is saved and otherwise falls back to the
-`maintenance` credential.
+`maintenance` credential. The easiest way is the **Script builder: Proxmox accounts** card on
+**Platform > Setup guide**: it writes the script for either option (nothing is ticked at first).
 
-**Reuse the maintenance token:** add `VM.Console` to the role the `pyxie-manager@pve!maintenance`
-token holds (`pveum acl list` shows it; privilege separation means the grant is on the token),
-e.g. `pveum role modify <ROLE> --privs VM.Console --append 1`. No PyXie credential change needed.
+| Builder choice ("Embedded VM console") | What the script does | PyXie credential to add |
+|---|---|---|
+| Not needed | nothing | none; the console stays unusable |
+| **Add VM.Console to the admin role** | adds `VM.Console` to the `PyXieAdmin` role that the admin token (default `pyxie-admin@pve!maintenance`) holds | none beyond the `maintenance` credential: it is used for the console too |
+| **Separate console token** | creates `pyxie-console@pve` (default name), token id `console`, built-in role `PVEVMConsole` at `/vms` | Credentials > + Add Credential Purpose > `console` (token user as created, token id `console`) |
 
-**Or a dedicated token** (smaller blast radius if it leaks):
+The separate token has the smaller blast radius if it leaks: it cannot power off, migrate or reconfigure anything.
 
-Create a token with only console rights, on a PVE node:
+Either way, then switch on **Settings > Allow the embedded VM console**. The Setup guide's "Turn features on" step says
+whether the console is off, and whether a credential that can open a console exists yet.
+
+**By hand instead** (same result): for the admin-role option, `pveum role modify PyXieAdmin --privs VM.Console --append 1`
+(the grant is on the token because of privilege separation: `pveum acl list` shows it). For a dedicated token:
 
 ```
-pveum user token add pyxie-manager@pve console --privsep 1
-pveum role add PyXieConsole --privs "VM.Console,VM.Audit"
-pveum acl modify /vms --tokens 'pyxie-manager@pve!console' --roles PyXieConsole
+pveum user token add pyxie-console@pve console --privsep 1
+pveum acl modify /vms --tokens 'pyxie-console@pve!console' --roles PVEVMConsole
 ```
 
-Then in PyXie: **Credentials > add credential > slot `console`** (token user `pyxie-manager@pve`,
-token id `console`, the secret), and **Settings > Allow the embedded VM console**.
+The account names are only labels; an install made earlier may use others (for example `pyxie-manager@pve`).
+
+**If the console fails with 502 / "malformed HTTP status code"** in the Caddy log, the web proxy is running an old
+configuration without the `/console-ws` route (see "Caddy keeps an old config" in docker-caddy.md). Health shows
+"Caddy config is out of date" and the updater fixes it automatically from v0.36.6.
 
 ## How it works
 

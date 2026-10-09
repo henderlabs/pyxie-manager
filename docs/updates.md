@@ -28,7 +28,11 @@ than the running version, and fast-forward the checked-out `main`. Nothing else 
 3. Fetch, then **fast-forward** the code to the tag.
 4. **Build** the new images while the old containers keep running (a build failure changes nothing that is running).
 5. `docker compose up -d`; the API applies any new migrations on start.
-6. **Health check**: api and web healthy and the app reports the new version, within 4 minutes.
+   If anything under `ops/caddy` changed in the update, or the Caddy container can no longer see its config, Caddy is
+   **recreated** too (a few seconds of HTTPS downtime; certificates are kept). See "Caddy and updates" below.
+6. **Health check**: api and web healthy and the app reports the new version, within 4 minutes. Then a **console route
+   check**: a websocket for a made-up console ticket is sent through Caddy and must be refused by the API (403). A 502
+   means Caddy is on an old config; the update still succeeds but you get a warning notification and the log says so.
 
 If steps 3 to 6 fail, the previous version is restored automatically: code reset to the commit it was at, and
 **the database restored from the backup if the new version had changed its schema** (migrations cannot be
@@ -36,6 +40,16 @@ safely run backwards). Changes made in the few minutes in between are lost in th
 
 **Restore previous version** (Settings > Updates) does the same on request for the last update, while it is
 still the running version.
+
+## Caddy and updates
+
+Caddy mounts the `ops/caddy` **directory**. An update that replaces that directory leaves the running container holding
+the old, deleted copy: it sees an empty `/etc/caddy` and keeps serving the configuration it loaded before the update.
+Everything looks fine until a new route is needed -- on a server updated this way the embedded console failed with
+`502` / `malformed HTTP status code "Server"` in the Caddy log because the `/console-ws` route did not exist in the
+running config. Since v0.36.6 the updater recreates Caddy in that situation, and **Health** shows a warning
+*"Caddy config is out of date: the console route is missing"* if it ever happens anyway (for example after a manual
+`git pull`). Fix by hand with `docker compose up -d --force-recreate pyxie-manager-caddy`.
 
 ## Install on a server (once per host, as the user that owns the checkout)
 
