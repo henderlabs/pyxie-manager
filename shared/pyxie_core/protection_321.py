@@ -65,15 +65,18 @@ def score_guest(last_by_store: dict, stores: list[dict], covered_by: list[str], 
     problems = []
     if not covered_by:
         problems.append("No backup job includes it")
-    if not fresh:
-        problems.append("No recent backup")
-    elif not has_offsite:
-        stale_off = [c for c in copies if c["offsite"] and c["last"]]
-        problems.append(f"Offsite copy is {stale_off[0]['age_text']}" if stale_off else "No offsite copy")
-    if n_copies < 3 and fresh:
-        problems.append(f"Only {n_copies} of 3 copies")
-    if len(media) < 2 and fresh:
-        problems.append("Only one kind of storage")
+    # say exactly which place is late, how late, and what is allowed, instead of a count
+    for c, st in zip(copies, stores):
+        if c["fresh"]:
+            continue
+        limit = (st.get("max_age_h") or offsite_max_age_h) if is_offsite(st) else backup_max_age_h
+        allowed = f"{int(limit // 24)} days" if limit >= 48 and limit % 24 == 0 else f"{int(limit)} hours"
+        where = f"{c['store']}{' (offsite)' if c['offsite'] else ''}"
+        problems.append(f"{where}: no backup yet" if not c["last"] else f"{where}: newest backup is {c['age_text'].replace(' ago', '')} old, should be under {allowed}")
+    if fresh and len(media) < 2:
+        problems.append("All backups are on the same kind of storage")
+    if fresh and not has_offsite and not any(c["offsite"] for c in copies):
+        problems.append("No offsite datastore has this guest")
     ok = n_copies >= 3 and len(media) >= 2 and has_offsite
     status = "ok" if ok else ("none" if not fresh else "partial")
     return {"copies": copies, "copy_count": n_copies, "media_count": len(media), "offsite": has_offsite,
@@ -133,10 +136,12 @@ def read_pbs(client) -> dict:
         c = cfg.get(name, {})
         backend = d.get("backend-type") or ("s3" if "s3" in str(c.get("backend", "")) else "filesystem")
         newest, groups_n, snaps = None, 0, 0
-        try:
-            groups = client.groups(name) or []
-        except Exception:
-            groups = []
+        groups = []
+        for ns in (client.namespaces(name) if hasattr(client, "namespaces") else [""]):  # a copy in a namespace is still a copy on this datastore
+            try:
+                groups += (client._get(f"/admin/datastore/{name}/groups", {"ns": ns}) if ns else client.groups(name)) or []
+            except Exception:
+                continue
         for g in groups:
             groups_n += 1
             snaps += int(g.get("backup-count") or 0)

@@ -4,12 +4,12 @@ import { apiFetch, ApiError } from "@/lib/api";
 const fail = (e: unknown) => NextResponse.json({ error: (e as Error).message }, { status: e instanceof ApiError ? e.status : 500 });
 const ID = "[0-9a-fA-F-]{36}";
 const ALLOWED: Record<string, RegExp[]> = {
-  GET: [/^servers$/, new RegExp(`^servers/${ID}$`), new RegExp(`^servers/${ID}/credentials$`)],
+  GET: [/^servers$/, /^namespaces$/, new RegExp(`^servers/${ID}$`), new RegExp(`^servers/${ID}/credentials$`)],
   POST: [
     new RegExp(`^servers/${ID}/(refresh|test-access|ssh/generate|ssh/probe|ssh/check|host-kit/link|jobs/dry-run|datastores/dry-run|storage-add/dry-run|update/dry-run|reboot/dry-run|maintenance/dry-run)$`),
   ],
-  PUT: [new RegExp(`^servers/${ID}/(credentials/(inventory|administrative|restore)|ssh-host-key)$`)],
-  DELETE: [new RegExp(`^servers/${ID}/(ssh-host-key|credentials/(inventory|administrative|restore))$`)],
+  PUT: [new RegExp(`^servers/${ID}/(credentials/(inventory|administrative|restore|backup)|ssh-host-key)$`)],
+  DELETE: [new RegExp(`^servers/${ID}/(ssh-host-key|credentials/(inventory|administrative|restore|backup))$`)],
 };
 
 async function handle(req: NextRequest, params: { path: string[] }) {

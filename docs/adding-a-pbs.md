@@ -25,6 +25,7 @@ Same as for Proxmox VE: tick the tokens you want in **Settings > Credentials > P
 | `pyxie-pbs-ro@pbs` | `inventory` | `Audit` on `/`, `RemoteAudit` on `/remote` |
 | `pyxie-pbs-admin@pbs` | `administrative` | `Audit` on `/`, `DatastoreAdmin` on `/datastore`, `RemoteSyncOperator` on `/remote`, and `Admin` on `/system` (only for Reboot Node and Full Maintenance) |
 | `pyxie-pbs-restore@pbs` (optional) | `restore` | `DatastoreReader` on `/datastore` (only to add a datastore to Proxmox so you can restore from it) |
+| `pyxie-pbs-backup@pbs` (optional) | `backup` | `DatastorePowerUser` on `/datastore` (only to add a namespace to Proxmox as a place a policy's first backup can go; it writes backups and prunes the ones it owns) |
 
 The `Admin` grant on `/system` is the only way to give PBS's `Sys.PowerManagement` privilege (PBS has no custom roles); it is broader than PyXie needs, so skip it if you do not want PyXie to reboot the server (Test Connection then says so, and Reboot Node and Full Maintenance are refused). A token can never do more than its user, so both must be granted. (Granting only the token leaves it with no permissions and every check returns 403.) The `Audit` role does not include `Remote.Audit`: without `RemoteAudit` on `/remote` PBS hides sync jobs and remotes, and PyXie then shows no sync job for a job that exists.
 
@@ -33,6 +34,10 @@ Then add the server on the Protection or Setup page with the read-only token, an
 With only the read-only token PyXie shows: version, uptime, load, memory and system disk, datastore usage with the estimated full date, running and failed tasks (24 hours), pending package updates, and all sync, prune and verify jobs with their last and next run. It raises findings (category "Backup server") when the server is unreachable, a datastore is 85% full or more, tasks failed, or updates are waiting.
 
 The admin token lets PyXie create, change, delete and run sync, prune and verify jobs (**Jobs** tab) and manage each datastore (**Datastores** tab): set the garbage collection schedule, run garbage collection now, and verify every backup now. On Protection, a guest's restore points also have **Verify** (re-check one backup against its checksums) and **Protect** (a protected backup is skipped by pruning). Every change follows the Safety Contract: a preview with the exact settings that change, your confirmation, a re-check that the job is unchanged, the write, a read-back from PBS and an audit record. Deleting a job never deletes backups. The token cannot install packages or touch the operating system. The same Platform > Settings write switch that guards Proxmox changes guards these too.
+
+## Copies, namespaces and the backup plan
+
+With the admin token PyXie can also create **namespaces**, and the sync, prune and verify jobs a backup plan's copies need ([retention-policies.md](retention-policies.md), [backup-namespaces.md](backup-namespaces.md)). A copy is a sync job that pulls from the same server, so the server needs a **remote that points at itself** (PBS: Configuration > Remotes, host 127.0.0.1, for example named `localhost`, with a token that can read the datastores). The admin token creates the namespace and the jobs; it does not need a new grant.
 
 ## Step 3: SSH access (patching)
 

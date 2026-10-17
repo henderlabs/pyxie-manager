@@ -91,7 +91,7 @@ OPERATION_LABELS = {
     "workload.clone": "Clone", "workload.cdrom_change": "Change CD/DVD", "workload.ct_create": "Create container", "workload.ct_resize": "Resize container",
     "workload.ct_nic_change": "Change container network", "storage.iso_download": "Download ISO", "storage.iso_delete": "Delete ISO", "storage.iso_enable": "Enable ISO images",
     "storage.ct_template_download": "Download container template", "storage.ct_template_delete": "Delete container template", "storage.create": "Add storage",
-    "storage.remove": "Remove storage", "protection.backup_membership": "Backup job membership", "node.enter_maintenance": "Enter maintenance", "node.exit_maintenance": "Exit maintenance",
+    "storage.remove": "Remove storage", "protection.backup_membership": "Backup job membership", "protection.backup_retention": "Backup job retention", "node.enter_maintenance": "Enter maintenance", "node.exit_maintenance": "Exit maintenance",
 }
 
 

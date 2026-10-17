@@ -106,11 +106,18 @@ class PbsClient:
     def job_state(self, kind: str) -> list[dict]:
         return self._get(f"/admin/{_job_kind(kind)}") or []
 
-    def snapshots(self, store: str, backup_type: str, backup_id: str) -> list[dict]:
-        return self._get(
-            f"/admin/datastore/{store}/snapshots",
-            params={"backup-type": backup_type, "backup-id": backup_id},
-        )
+    def snapshots(self, store: str, backup_type: str, backup_id: str, ns: str = "") -> list[dict]:
+        params = {"backup-type": backup_type, "backup-id": backup_id}
+        if ns:
+            params["ns"] = ns
+        return self._get(f"/admin/datastore/{store}/snapshots", params=params)
+
+    def namespaces(self, store: str) -> list[str]:
+        """The namespaces of a datastore ('' is the datastore itself); just the root when the server cannot list them."""
+        try:
+            return [x.get("ns", "") for x in (self._get(f"/admin/datastore/{store}/namespace") or [])] or [""]
+        except Exception:  # noqa: BLE001
+            return [""]
 
 
 JOB_KINDS = ("sync", "prune", "verify")

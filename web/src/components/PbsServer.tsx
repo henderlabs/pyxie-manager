@@ -278,7 +278,7 @@ function Jobs({ s, canEdit, reload }: { s: Server; canEdit: boolean; reload: () 
 }
 
 function Access({ s, canEdit, reload }: { s: Server; canEdit: boolean; reload: () => void }) {
-  const tokenCard = (slot: "inventory" | "administrative" | "restore", title: string, why: string) => (
+  const tokenCard = (slot: "inventory" | "administrative" | "restore" | "backup", title: string, why: string) => (
     <Card>
       <CardTitle>{title}</CardTitle>
       <p className="text-xs text-muted mb-2">{why}</p>
@@ -291,6 +291,7 @@ function Access({ s, canEdit, reload }: { s: Server; canEdit: boolean; reload: (
       <Card><CardTitle>Step 0: create the accounts on the backup server</CardTitle><PbsAccountsBuilder /></Card>
       {tokenCard("inventory", "Step 1: read token", "Where the read-only token is saved. Both the user and its token carry the grants (a token can never do more than its user); RemoteAudit on /remote is what lets PyXie see sync jobs, which the Audit role does not include.")}
       {tokenCard("restore", "Step 4: restore token (optional, to restore from datastores Proxmox does not have yet)", "Read-only access to backup data (DatastoreReader). Used only to add a datastore, such as the offsite copy, to Proxmox as a backup storage so you can restore from it. It cannot write or delete backups.")}
+      {tokenCard("backup", "Step 5: backup token (optional, to back guests up into a namespace)", "DatastorePowerUser: Proxmox writes backups and prunes the ones it owns. Used only when you add a datastore or namespace to Proxmox as a backup target (Storage, Backup namespaces).")}
       {tokenCard("administrative", "Step 2: write token (to edit jobs)", "Used only for creating, changing, deleting and running sync, prune and verify jobs, and only after you confirm a preview. It cannot install packages or touch the operating system.")}
       <Card>
         <CardTitle>Step 3: SSH access (to patch)</CardTitle>

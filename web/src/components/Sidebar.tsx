@@ -47,7 +47,15 @@ const SECTIONS: NavSection[] = [
       { label: "Maintenance", href: "/operations/maintenance", icon: <WrenchIcon /> },
       { label: "Balance Load", href: "/operations/balance", icon: <MigrateIcon /> },
       { label: "Affinity & Pinning", href: "/operations/affinity-rules", icon: <LinkIcon /> },
-      { label: "Protection", href: "/operations/protection", icon: <ShieldIcon /> },
+      {
+        label: "Protection",
+        href: "/operations/protection",
+        icon: <ShieldIcon />,
+        exact: true,
+        children: [
+          { label: "Backup servers", href: "/operations/protection/servers", icon: <ShieldIcon /> },
+        ],
+      },
       { label: "Capacity", href: "/operations/capacity", icon: <GaugeIcon /> },
       { label: "Rightsizing", href: "/operations/recommendations", icon: <LightbulbIcon /> },
     ],
@@ -72,6 +80,7 @@ const SECTIONS: NavSection[] = [
         exact: true,
         children: [
           { label: "Datastores", href: "/infrastructure/storage/datastores", icon: <StorageIcon /> },
+          { label: "Backup namespaces", href: "/infrastructure/storage/namespaces", icon: <StorageIcon /> },
           { label: "ISO library", href: "/infrastructure/storage/iso", icon: <StorageIcon /> },
           { label: "Storage setup", href: "/infrastructure/storage/setup", icon: <StorageIcon /> },
         ],

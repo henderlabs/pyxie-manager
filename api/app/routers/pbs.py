@@ -32,7 +32,7 @@ from ..deps import get_db
 from .host_kit import KIT_DIR, _r
 
 router = APIRouter(prefix="/api/pbs", tags=["pbs"], dependencies=[Depends(get_current_user)])
-SLOTS = ("inventory", "administrative", "restore")
+SLOTS = ("inventory", "administrative", "restore", "backup")
 
 
 def _target(db: Session, target_id) -> ProtectionTarget:
@@ -68,6 +68,43 @@ def list_servers(db: Session = Depends(get_db)):
     return [_summary(db, t) for t in db.query(ProtectionTarget).order_by(ProtectionTarget.name).all()]
 
 
+@router.get("/namespaces")
+def namespaces_overview(db: Session = Depends(get_db)):
+    """Every backup server's datastores with their namespaces: how many guests and backups each holds, and what uses it (policy copies and PBS sync/prune jobs). Read-only."""
+    from pyxie_core.models import BackupPolicy
+    pols = db.query(BackupPolicy).all()
+    out = []
+    for t in db.query(ProtectionTarget).order_by(ProtectionTarget.name).all():
+        item = {"id": str(t.id), "name": t.name, "can_write": False, "error": None, "stores": []}
+        try:
+            slot = "administrative" if db.query(ProtectionCredential).filter(ProtectionCredential.protection_target_id == t.id, ProtectionCredential.slot_name == "administrative").count() else "inventory"
+            item["can_write"] = slot == "administrative"
+            with PbsClient(load_pbs_credentials(db, t, slot)) as c:
+                cfg = {d["name"]: d for d in (c._get("/config/datastore") or [])}
+                jobs = [("sync", j) for j in (c.job_config("sync") or [])] + [("prune", j) for j in (c.job_config("prune") or [])]
+                for d in c.datastores() or []:
+                    n = d["store"]
+                    rows = []
+                    try:
+                        nss = [x.get("ns", "") for x in (c._get(f"/admin/datastore/{n}/namespace") or [])]
+                    except Exception:  # noqa: BLE001
+                        nss = [""]
+                    for ns in nss:
+                        try:
+                            gs = c._get(f"/admin/datastore/{n}/groups", {"ns": ns}) if ns else (c.groups(n) or [])
+                        except Exception:  # noqa: BLE001
+                            gs = []
+                        used = [f"policy {p.name}: {ly.get('label')}" for p in pols for ly in (p.layers or []) if ly.get("target_id") == str(t.id) and ly.get("store") == n and (ly.get("namespace") or "") == ns]
+                        used += [f"{k} job {j['id']}" for k, j in jobs if j.get("store") == n and (j.get("ns") or "") == ns and not (ns == "" and k == "sync" and False)]
+                        rows.append({"ns": ns, "guests": len(gs), "backups": sum(int(g.get("backup-count") or 0) for g in gs), "used_by": used, "children": sum(1 for x in nss if x.startswith(ns + "/")) if ns else sum(1 for x in nss if x)})
+                    s3 = (d.get("backend-type") == "s3") or ("s3" in str(cfg.get(n, {}).get("backend", "")))
+                    item["stores"].append({"name": n, "backend": "s3" if s3 else "filesystem", "gc_schedule": cfg.get(n, {}).get("gc-schedule"), "namespaces": rows})
+        except Exception as exc:  # noqa: BLE001
+            item["error"] = f"could not read this backup server: {str(exc)[:160]}"
+        out.append(item)
+    return out
+
+
 @router.get("/servers/{target_id}")
 def server_detail(target_id: uuid.UUID, db: Session = Depends(get_db)):
     t = _target(db, target_id)
@@ -80,7 +117,7 @@ def server_detail(target_id: uuid.UUID, db: Session = Depends(get_db)):
             out["remotes"] = [r.get("name") for r in c.remotes()]
             for kind in pbs_jobs.FIELDS:
                 state = {j["id"]: j for j in c.job_state(kind)}
-                out["jobs"][kind] = [{"id": j["id"], "store": j.get("store"), "schedule": j.get("schedule"), "settings": pbs_jobs.normalize(j, kind),
+                out["jobs"][kind] = [{"id": j["id"], "ns": j.get("ns") or "", "store": j.get("store"), "schedule": j.get("schedule"), "settings": pbs_jobs.normalize(j, kind),
                                       "summary": pbs_jobs.describe(kind, j), "last_state": state.get(j["id"], {}).get("last-run-state"),
                                       "last_end": state.get(j["id"], {}).get("last-run-endtime"), "next": state.get(j["id"], {}).get("next-run")}
                                      for j in c.job_config(kind)]
@@ -176,15 +213,16 @@ def test_access(target_id: uuid.UUID, slot: str = "inventory", db: Session = Dep
     except PbsNotConfigured as exc:
         raise HTTPException(409, str(exc))
     checks = []
-    if slot == "restore":
+    if slot in ("restore", "backup"):
+        need = "Datastore.Read" if slot == "restore" else "Datastore.Backup"
         with PbsClient(creds) as c:
             checks.append(_probe("Datastores it can read", lambda: ", ".join(d["store"] for d in (c.datastores() or [])) or "none"))
             perms = _probe("Permissions", lambda: c._get("/access/permissions"))
             if perms["ok"] and isinstance(perms["detail"], dict):
                 privs = sorted({x for v in perms["detail"].values() if isinstance(v, dict) for x in v})
                 perms["detail"] = ", ".join(privs) or "none"
-                checks.append({"check": "Can read backup data (Datastore.Read, needed to restore)", "ok": "Datastore.Read" in privs,
-                               "detail": "yes" if "Datastore.Read" in privs else "no: give the user and the token the DatastoreReader role on /datastore"})
+                checks.append({"check": ("Can read backup data (Datastore.Read, needed to restore)" if slot == "restore" else "Can write backups (Datastore.Backup, needed to back guests up)"), "ok": need in privs,
+                               "detail": "yes" if need in privs else ("no: give the user and the token the DatastoreReader role on /datastore" if slot == "restore" else "no: give the user and the token the DatastorePowerUser role on /datastore")})
             checks.append(perms)
         row = db.query(ProtectionCredential).filter(ProtectionCredential.protection_target_id == t.id, ProtectionCredential.slot_name == slot).one()
         row.status = "valid" if all(x["ok"] for x in checks) else "invalid"
@@ -359,22 +397,35 @@ def datastore_dry_run(target_id: uuid.UUID, payload: DatastoreChange, user=Depen
 
 
 class StorageAdd(BaseModel):
-    workload_id: uuid.UUID
+    workload_id: uuid.UUID | None = None
+    cluster_id: uuid.UUID | None = None
+    purpose: str = "restore"
     datastore: str
     storage_id: str | None = None
+    namespace: str = ""
 
 
 @router.post("/servers/{target_id}/storage-add/dry-run", dependencies=[Depends(require_admin)])
 def storage_add_dry_run(target_id: uuid.UUID, payload: StorageAdd, user=Depends(get_current_user), db: Session = Depends(get_db)):
     from pyxie_core.models import Cluster, Workload
     t = _target(db, target_id)
-    w = db.query(Workload).filter(Workload.id == payload.workload_id).one_or_none()
-    if w is None:
-        raise HTTPException(404, "guest not found")
-    cluster = db.query(Cluster).filter(Cluster.id == w.cluster_id).one()
+    if payload.purpose not in ("restore", "backup"):
+        raise HTTPException(400, "purpose must be restore or backup")
+    cluster = None
+    if payload.workload_id:
+        w = db.query(Workload).filter(Workload.id == payload.workload_id).one_or_none()
+        if w is None:
+            raise HTTPException(404, "guest not found")
+        cluster = db.query(Cluster).filter(Cluster.id == w.cluster_id).one()
+    elif payload.cluster_id:
+        cluster = db.query(Cluster).filter(Cluster.id == payload.cluster_id).one_or_none()
+    else:
+        cluster = db.query(Cluster).filter(Cluster.is_missing.is_(False)).order_by(Cluster.name).first()
+    if cluster is None:
+        raise HTTPException(404, "cluster not found")
     if _existing_live(db, "pbs.storage_add", t.id) is not None:
         raise HTTPException(409, "adding a datastore to Proxmox is already open for this server")
-    op = dry_run_pbs_storage_add(db, t, cluster, datastore=payload.datastore, storage_id=payload.storage_id, actor=user.email)
+    op = dry_run_pbs_storage_add(db, t, cluster, datastore=payload.datastore, storage_id=payload.storage_id, actor=user.email, namespace=payload.namespace, purpose=payload.purpose)
     return {"id": str(op.id), "status": op.status, "dry_run_result": op.dry_run_result}
 
 

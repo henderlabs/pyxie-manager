@@ -43,7 +43,7 @@ def test_resolution_order():
     ]
     r = resolve_assignments(ws, asg)
     assert r["a"]["policy_id"] == "P_db" and r["b"]["policy_id"] == "P_prod" and r["c"]["policy_id"] == "P_all" and r["d"]["policy_id"] is None
-    assert r["d"]["source"] == "set on this VM" and r["c"]["source"] == "the cluster default"
+    assert r["d"]["source"] == "set for this guest" and r["c"]["source"] == "the default policy"
     assert desired_membership(r, {"a": 101, "b": 102, "c": 103, "d": 104}) == {"P_db": [101], "P_prod": [102], "P_all": [103]}
 
 
@@ -90,3 +90,13 @@ def test_other_job_that_would_be_left_empty_is_flagged():
 def test_tags_match_case_insensitively():
     r = resolve_assignments([{"id": "a", "tags": ["prod"]}], [{"policy_id": "P", "scope_type": "tag", "scope_value": "Prod", "priority": 0, "policy_name": "P"}])
     assert r["a"]["policy_id"] == "P"
+
+
+def test_default_policy_is_an_all_guests_job_minus_the_others():
+    pol = [{"id": "d", "name": "Standard", "storage": "st-pbs", "schedule": "02:00", "mode": "snapshot", "enabled": True, "job_id": "pyxie-standard", "keep_daily": 7}]
+    w = plan_job_writes(pol, {"d": [101, 102]}, [], "d", {101, 102, 103, 104})
+    assert w[0]["action"] == "create" and w[0]["params"]["all"] == 1 and w[0]["params"]["exclude"] == "103,104" and "vmid" not in w[0]["params"]
+    # a new guest (105) joins the default job on its own: nothing to change
+    live = [{**w[0]["params"], "type": "vzdump"}]
+    assert plan_job_writes(pol, {"d": [101, 102, 105]}, live, "d", {101, 102, 103, 104, 105}) == []
+    assert plan_job_writes(pol, {"d": [101, 102]}, live, "d", {101, 102, 103, 104}) == []

@@ -11,7 +11,7 @@ export const TOKEN_FILE = "/root/pyxie-tokens.txt";
 export const PBS_TOKEN_FILE = "/root/pyxie-pbs-tokens.txt";
 
 /** Proxmox Backup Server accounts: the same shape as pveScript. A token never has more than its user, so every grant is made to the user AND to the token. */
-export function pbsScript(o: { roUser: string; adminUser: string; inventory: boolean; admin: boolean; restore?: boolean; restoreUser?: string }): string {
+export function pbsScript(o: { roUser: string; adminUser: string; inventory: boolean; admin: boolean; restore?: boolean; restoreUser?: string; backup?: boolean; backupUser?: string }): string {
   const B: string[] = [
     "set -Eeuo pipefail",
     `trap 'echo "STOPPED at line $LINENO: $BASH_COMMAND" >&2' ERR`,
@@ -42,6 +42,12 @@ export function pbsScript(o: { roUser: string; adminUser: string; inventory: boo
     users.push(ru);
     B.push("", "# Restore account: restore token (read only access to backup data, so Proxmox can restore from datastores it has no storage for)",
       `ensure_user '${ru}' "PyXie restore (reads backup data)"`, `add_token '${ru}' restore`, `grant /datastore DatastoreReader '${ru}' restore`);
+  }
+  if (o.backup) {
+    const bu = o.backupUser || "pyxie-pbs-backup@pbs";
+    users.push(bu);
+    B.push("", "# Backup account: backup token (Proxmox writes backups into a namespace and prunes the ones it owns)",
+      `ensure_user '${bu}' "PyXie backup (writes backups)"`, `add_token '${bu}' backup`, `grant /datastore DatastorePowerUser '${bu}' backup`);
   }
   B.push("", 'echo ""', 'echo "DONE. Tokens on these accounts (secrets are not shown again):"');
   for (const u of users) B.push(`proxmox-backup-manager user list-tokens '${u}'`);

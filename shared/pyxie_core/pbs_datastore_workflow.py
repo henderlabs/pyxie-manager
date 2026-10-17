@@ -18,9 +18,10 @@ from .models import Operation, ProtectionTarget
 from .operations_engine import OperationError, approve_operation, block_operation, create_operation, enter_stage, fail_operation
 from .pbs_client import PbsApiError, PbsClient, PbsWriteClient
 from .pbs_server import PbsNotConfigured, load_pbs_credentials
+from .policy_layers import valid_namespace
 
 now = lambda: datetime.now(timezone.utc)
-ACTIONS = ("gc_schedule", "gc_run", "verify_run", "protect")
+ACTIONS = ("gc_schedule", "gc_run", "verify_run", "protect", "ns_create", "ns_delete")
 SCHEDULE_RE = re.compile(r"^[A-Za-z0-9 ,:*/.\-]{1,64}$")
 STORE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{1,63}$")
 
@@ -37,6 +38,11 @@ def validate_snapshot(params: dict) -> tuple[dict, list[str]]:
     errors: list[str] = []
     out: dict = {}
     t, i, ts = params.get("backup_type"), params.get("backup_id"), params.get("backup_time")
+    ns = str(params.get("ns") or "").strip().strip("/")
+    if ns:
+        if not valid_namespace(ns):
+            errors.append("the namespace is not valid")
+        out["ns"] = ns
     if t is not None:
         if t not in ("vm", "ct", "host"):
             errors.append("backup type must be vm, ct or host")
@@ -131,6 +137,52 @@ def dry_run_datastore_change(db: Session, target: ProtectionTarget, *, store: st
         else:
             clean = {**snap, "protected": want}
             reasons.append(("Protect" if want else "Remove protection from") + f" the backup on {store}: " + ("pruning and manual deletes will skip it." if want else "pruning can delete it again."))
+    elif action in ("ns_create", "ns_delete"):
+        ns = str(params.get("ns") or "").strip().strip("/")
+        clean = {"ns": ns}
+        if not ns or not valid_namespace(ns):
+            reasons.append("a namespace name uses letters, digits and . _ - (up to 7 levels separated by /)")
+            rules.append("SAFE-PBSJOB-001")
+        else:
+            try:
+                with _read(db, target) as c:
+                    have = [x.get("ns", "") for x in (c._get(f"/admin/datastore/{store}/namespace") or [])]
+                    groups = c._get(f"/admin/datastore/{store}/groups", {"ns": ns}) if ns in have else []
+                    jobs = [("sync", j) for j in c.job_config("sync")] + [("prune", j) for j in c.job_config("prune")]
+            except Exception as exc:  # noqa: BLE001
+                reasons.append(f"could not read the namespaces: {str(exc)[:140]}")
+                rules.append("SAFE-PBSJOB-002")
+                have, groups, jobs = [], [], []
+            if not rules and action == "ns_create":
+                if ns in have:
+                    reasons.append(f"the namespace {ns} already exists on {store}")
+                    rules.append("SAFE-PBSJOB-001")
+                else:
+                    parent = "/".join(ns.split("/")[:-1])
+                    if parent and parent not in have:
+                        reasons.append(f"the parent namespace {parent} does not exist yet: create it first")
+                        rules.append("SAFE-PBSJOB-001")
+                    else:
+                        reasons.append(f"Create the namespace {ns} in datastore {store}: a folder inside the datastore that shares its stored data (so nothing is stored twice) but has its own backups, jobs and retention. It costs no space and deletes nothing.")
+            elif not rules:
+                kids = [n for n in have if n.startswith(ns + "/")]
+                used = [f"{k} job {j['id']}" for k, j in jobs if j.get("store") == store and (j.get("ns") == ns or str(j.get("ns") or "").startswith(ns + "/"))]
+                from .models import BackupPolicy
+                pols = [f"policy {p.name}" for p in db.query(BackupPolicy).all() for ly in (p.layers or []) if ly.get("target_id") == str(target.id) and ly.get("store") == store and (ly.get("namespace") == ns or str(ly.get("namespace") or "").startswith(ns + "/"))]
+                if ns not in have:
+                    reasons.append(f"there is no namespace {ns} on {store}")
+                    rules.append("SAFE-PBSJOB-001")
+                if groups:
+                    reasons.append(f"the namespace still holds backups of {len(groups)} guest{'s' if len(groups) != 1 else ''}: PyXie only deletes an empty namespace")
+                    rules.append("SAFE-PBSJOB-001")
+                if kids:
+                    reasons.append(f"it still has child namespaces ({', '.join(kids)})")
+                    rules.append("SAFE-PBSJOB-001")
+                if used or pols:
+                    reasons.append("it is still used by " + ", ".join(pols + used) + ": change those first")
+                    rules.append("SAFE-PBSJOB-001")
+                if not rules:
+                    reasons.append(f"Delete the empty namespace {ns} from datastore {store}. It holds no backups.")
     if rules:
         return blocked()
     ctx = {"protection_target_id": str(target.id), "target": target.name, "node": target.name, "store": store, "action": action, "clean": clean, "before": before}
@@ -174,6 +226,12 @@ def execute_datastore_change(db: Session, operation_id) -> Operation:
                         v = clean.get("gc-schedule")
                         w.set_datastore(store, {"gc-schedule": v} if v else {}, [] if v else ["gc-schedule"])
                         result = {"set": True}
+                    elif action == "ns_create":
+                        w._send("POST", f"/admin/datastore/{store}/namespace", {"name": clean["ns"]})
+                        result = {"set": True}
+                    elif action == "ns_delete":
+                        w._send("DELETE", f"/admin/datastore/{store}/namespace?ns={clean['ns']}")
+                        result = {"set": True}
                     elif action == "gc_run":
                         result = {"upid": w.gc_run(store)}
                     elif action == "verify_run":
@@ -198,8 +256,12 @@ def execute_datastore_change(db: Session, operation_id) -> Operation:
                     got = {d["name"]: d for d in (c._get("/config/datastore") or [])}.get(store, {}).get("gc-schedule")
                     if (got or None) != (clean.get("gc-schedule") or None):
                         problems.append("the schedule does not read back as set")
+                elif action in ("ns_create", "ns_delete"):
+                    have = [x.get("ns", "") for x in (c._get(f"/admin/datastore/{store}/namespace") or [])]
+                    if (clean["ns"] in have) != (action == "ns_create"):
+                        problems.append("the namespace list does not read back as changed")
                 elif action == "protect":
-                    snaps = c.snapshots(store, clean["backup-type"], clean["backup-id"]) or []
+                    snaps = c.snapshots(store, clean["backup-type"], clean["backup-id"], clean.get("ns", "")) or []
                     s = next((x for x in snaps if x.get("backup-time") == clean["backup-time"]), None)
                     if s is None:
                         problems.append("the backup was not found after the change")

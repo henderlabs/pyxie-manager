@@ -33,3 +33,7 @@ Proxmox can only restore from a datastore it has as a storage. A copy that exist
 ## Not covered
 
 Restoring single files out of a backup stays in Proxmox or the backup server. Backups of a guest that no longer exists are not listed (restore points are per existing guest).
+
+## Restoring from a namespace
+
+Restore points that live in a namespace of a datastore show as `datastore / namespace` (see [backup-namespaces.md](backup-namespaces.md)). If Proxmox has no storage for that datastore and namespace, **Make restorable...** adds a read-only one (restore token), exactly like for an offsite datastore. A test restore of a container from a Wasabi namespace was verified on the lab: restored, config read back from Proxmox, then deleted.

@@ -542,6 +542,8 @@ class PveMaintenanceClient:
                 "password": password, "fingerprint": spec["fingerprint"], "content": "backup"}
         if spec.get("port") and int(spec["port"]) != 8007:
             data["port"] = int(spec["port"])
+        if spec.get("namespace"):
+            data["namespace"] = spec["namespace"]
         self._request("POST", "/storage", data=data)
 
     def remove_storage(self, storage: str) -> None:
@@ -782,6 +784,12 @@ class PveMaintenanceClient:
         if drop:
             data["delete"] = ",".join(drop)
         self._request("PUT", f"/cluster/backup/{job_id}", data=data)
+
+    def set_backup_job_retention(self, job_id: str, prune: Optional[str]) -> None:
+        """PUT /cluster/backup/{id} with prune-backups='keep-daily=7,...'; None removes the setting. Synchronous."""
+        if not _mutations_enabled():
+            raise MutationsDisabledError(_disabled_message("change a backup job's retention"))
+        self._request("PUT", f"/cluster/backup/{job_id}", data={"prune-backups": prune} if prune else {"delete": "prune-backups"})
 
     def delete_backup_job(self, job_id: str) -> None:
         """DELETE /cluster/backup/{id}: removes the job definition only; backups already taken stay on the datastore."""

@@ -264,6 +264,9 @@ def execute_operation_job(operation_id: str):
         elif op.operation_type_id == "cluster.rebalance":
             from pyxie_core.balance_workflow import execute_balance
             result = execute_balance(db, operation_id)
+        elif op.operation_type_id == "protection.backup_retention":
+            from pyxie_core.retention_workflow import execute_job_retention
+            result = execute_job_retention(db, operation_id)
         elif op.operation_type_id == "protection.backup_membership":
             from pyxie_core.protection_workflow import execute_backup_membership
             result = execute_backup_membership(db, operation_id)
@@ -342,6 +345,7 @@ def resume_inflight_operations():
         "node.exit_maintenance": 1800,
         "cluster.rebalance": 10800,  # same evacuation shape as node.evacuate
         "protection.backup_membership": 120,  # synchronous PVE config write, no task to wait on
+        "protection.backup_retention": 120,
         "workload.network_vlan_change": 120,  # synchronous PVE config write, no task to wait on -- same shape
     }
 

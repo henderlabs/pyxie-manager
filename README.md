@@ -13,7 +13,7 @@ rebalancing, per-workload NIC VLAN reassignment, and PBS backup-job
 membership -- and, since v0.37, creating, changing, cloning and deleting
 VMs and containers, snapshots, tags (with Proxmox's own colors), defaults
 and templates, resource pools, an ISO library and NFS storage setup (see
-[`docs/guest-management.md`](docs/guest-management.md)), and a 3-2-1 backup scorecard ([`docs/protection.md`](docs/protection.md)) and Proxmox Backup Server management: status, jobs and patching ([`docs/adding-a-pbs.md`](docs/adding-a-pbs.md)), and restoring a VM or container from any restore point ([`docs/restore.md`](docs/restore.md)). See the Safety
+[`docs/guest-management.md`](docs/guest-management.md)), and a 3-2-1 backup scorecard ([`docs/protection.md`](docs/protection.md)) and Proxmox Backup Server management: status, jobs and patching ([`docs/adding-a-pbs.md`](docs/adding-a-pbs.md)), restoring a VM or container from any restore point ([`docs/restore.md`](docs/restore.md)), and one backup plan with copies, namespaces, pruning, garbage collection and verification ([`docs/retention-policies.md`](docs/retention-policies.md), [`docs/backup-namespaces.md`](docs/backup-namespaces.md)). See the Safety
 Contract section below for exactly how every one of those is gated.
 
 ## Installation

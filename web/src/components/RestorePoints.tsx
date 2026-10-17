@@ -7,7 +7,7 @@ import { notifyOperationsChanged } from "@/lib/operationsBus";
 import { useMe } from "@/lib/useMe";
 
 type Point = {
-  datastore: string; time: number; size: number | null; verified: string | null | undefined; protected: boolean; notes?: string | null;
+  datastore: string; namespace?: string; time: number; size: number | null; verified: string | null | undefined; protected: boolean; notes?: string | null;
   offsite?: boolean; server_id?: string; volid: string | null; storage: string | null; restorable: boolean; reason: string | null;
 };
 type Options = {
@@ -62,20 +62,20 @@ export default function RestorePoints({ workloadId, name, vmid }: { workloadId: 
           <thead className="sticky top-0 bg-surface"><tr className="text-left text-xs text-muted"><th className="py-1 pr-3">Taken</th><th className="pr-3">Datastore</th><th className="pr-3">Size</th><th className="pr-3">Verified</th><th className="pr-3">Notes</th><th></th></tr></thead>
           <tbody className="divide-y divide-border">
             {data.points.map((p) => (
-              <tr key={p.datastore + p.time} className={pick === p ? "bg-accent/5" : ""}>
+              <tr key={p.datastore + (p.namespace ?? "") + p.time} className={pick === p ? "bg-accent/5" : ""}>
                 <td className="py-1.5 pr-3 whitespace-nowrap">{when(p.time)}{p.protected && <span className="text-xs text-muted ml-1">(protected)</span>}</td>
-                <td className="pr-3"><span className="text-text">{p.datastore}</span> <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${p.offsite ? "bg-accent/20 text-accent" : "bg-surface2 text-muted"}`}>{p.offsite ? "offsite" : "on site"}</span></td>
+                <td className="pr-3"><span className="text-text">{p.datastore}{p.namespace ? <span className="text-muted"> / {p.namespace}</span> : null}</span> <span className={`text-[10px] uppercase px-1.5 py-0.5 rounded ${p.offsite ? "bg-accent/20 text-accent" : "bg-surface2 text-muted"}`}>{p.offsite ? "offsite" : "on site"}</span></td>
                 <td className="pr-3">{size(p.size)}</td>
                 <td className={`pr-3 ${p.verified === "ok" ? "text-good" : p.verified === "failed" ? "text-bad" : "text-muted"}`}>{p.verified === "ok" ? "verified" : p.verified === "failed" ? "FAILED" : "not verified"}</td>
                 <td className="pr-3 text-xs text-muted">{p.notes ?? ""}</td>
                 <td className="text-right whitespace-nowrap space-x-1">
                   {canRestore && p.server_id && <button className="text-xs text-accent hover:underline" title="Have the backup server re-read this backup and check it against its checksums"
-                    onClick={() => pbsAction(p, "datastores/dry-run", { store: p.datastore, action: "verify_run", params: { backup_type: data.kind, backup_id: String(vmid), backup_time: p.time } }, "Verify now", false)}>Verify</button>}
+                    onClick={() => pbsAction(p, "datastores/dry-run", { store: p.datastore, action: "verify_run", params: { backup_type: data.kind, backup_id: String(vmid), backup_time: p.time, ns: p.namespace ?? "" } }, "Verify now", false)}>Verify</button>}
                   {canRestore && p.server_id && <button className="text-xs text-accent hover:underline" title="A protected backup is skipped by pruning and cannot be deleted by mistake"
-                    onClick={() => pbsAction(p, "datastores/dry-run", { store: p.datastore, action: "protect", params: { backup_type: data.kind, backup_id: String(vmid), backup_time: p.time, protected: !p.protected } }, p.protected ? "Remove protection" : "Protect", true)}>{p.protected ? "Unprotect" : "Protect"}</button>}
+                    onClick={() => pbsAction(p, "datastores/dry-run", { store: p.datastore, action: "protect", params: { backup_type: data.kind, backup_id: String(vmid), backup_time: p.time, ns: p.namespace ?? "", protected: !p.protected } }, p.protected ? "Remove protection" : "Protect", true)}>{p.protected ? "Unprotect" : "Protect"}</button>}
                   {p.restorable ? (canRestore && <button className={`${btn} border-proxmox`} onClick={() => setPick(pick === p ? null : p)}>{pick === p ? "Close" : "Restore…"}</button>)
                     : (canRestore && p.server_id
-                      ? <button className={`${btn} border-accent`} title={p.reason ?? ""} onClick={() => pbsAction(p, "storage-add/dry-run", { workload_id: workloadId, datastore: p.datastore }, "Add to Proxmox", true)}>Make restorable…</button>
+                      ? <button className={`${btn} border-accent`} title={p.reason ?? ""} onClick={() => pbsAction(p, "storage-add/dry-run", { workload_id: workloadId, datastore: p.datastore, namespace: p.namespace ?? "" }, "Add to Proxmox", true)}>Make restorable…</button>
                       : <span className="text-xs text-muted" title={p.reason ?? ""}>not restorable from here</span>)}
                 </td>
               </tr>
@@ -116,7 +116,7 @@ function RestoreForm({ workloadId, name, point, onDone }: { workloadId: string; 
   const gname = ct ? "container" : "VM";
   return (
     <div className="border border-border rounded p-3 bg-surface2/40 space-y-3 text-sm">
-      <div className="text-text font-medium">Restore the backup of {when(point.time)} from {point.datastore}</div>
+      <div className="text-text font-medium">Restore the backup of {when(point.time)} from {point.datastore}{point.namespace ? ` / ${point.namespace}` : ""}</div>
       <div className="flex gap-4 flex-wrap">
         <label className="flex items-center gap-2"><input type="radio" checked={mode === "new"} onChange={() => setMode("new")} />Restore as a new {gname}</label>
         <label className="flex items-center gap-2"><input type="radio" checked={mode === "overwrite"} onChange={() => setMode("overwrite")} /><span className="text-bad">Overwrite {name}</span></label>

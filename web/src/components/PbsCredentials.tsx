@@ -40,6 +40,7 @@ export default function PbsCredentials({ tlsMode = "" }: { tlsMode?: string }) {
             <PbsTokenSlot serverId={s.id} slot="inventory" token={s.credentials.inventory} onChanged={load} />
             <PbsTokenSlot serverId={s.id} slot="administrative" token={s.credentials.administrative} onChanged={load} />
             <PbsTokenSlot serverId={s.id} slot="restore" token={s.credentials.restore} onChanged={load} />
+            <PbsTokenSlot serverId={s.id} slot="backup" token={s.credentials.backup} onChanged={load} />
           </div>
           <div className="py-2 text-sm border-t border-border">
             <div className="flex items-center justify-between">

@@ -36,6 +36,7 @@ from .operations_engine import (
     fail_operation,
 )
 from .pve_write_client import MutationsDisabledError, PveMaintenanceClient
+from .retention_workflow import parse_prune
 from . import rollback
 
 
@@ -124,6 +125,7 @@ def list_pbs_backup_jobs(db: Session, cluster: Cluster) -> list[dict]:
                 "job_id": job["id"],
                 "storage": job["storage"],
                 "schedule": job.get("schedule"),
+                "prune_backups": parse_prune(job.get("prune-backups")),
                 "enabled": bool(job.get("enabled", 1)),
                 "all_guests": all_guests,
                 "exclude_vmids": sorted(exclude),

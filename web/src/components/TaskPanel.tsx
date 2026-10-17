@@ -110,7 +110,10 @@ function pageFor(operationTypeId: string, context?: Record<string, unknown> | nu
   // operations that live on the Protection page -- clicking through
   // landed an operator somewhere that had no idea what they were looking
   // at, undermining the preview-first safety pattern.
-  if (operationTypeId === "protection.backup_membership") {
+  if (operationTypeId === "protection.backup_membership" || operationTypeId === "workload.restore") {
+    return "/operations/protection";
+  }
+  if (operationTypeId === "protection.backup_retention") {
     return "/operations/protection";
   }
   if (operationTypeId === "workload.network_vlan_change") {

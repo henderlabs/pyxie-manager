@@ -1267,6 +1267,9 @@ class BackupPolicy(Base):
     keep_monthly = Column(Integer, nullable=True)
     keep_yearly = Column(Integer, nullable=True)
     job_id = Column(String, nullable=False)
+    layers = Column(JSONB, nullable=False, default=list, server_default="[]")  # copy layers after the first backup (see policy_layers.py)
+    gc_schedule = Column(String, nullable=True)  # garbage collection of the datastore the first backup goes to (older plans; new ones use maintenance)
+    maintenance = Column(JSONB, nullable=False, default=dict, server_default="{}")  # {"prune": schedule|None, "gc": schedule|None, "verify": schedule|None, "verify_after": days}
     created_by = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_utc, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc, nullable=False)

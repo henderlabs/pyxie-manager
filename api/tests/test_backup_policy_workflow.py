@@ -21,7 +21,9 @@ def test_apply_delete_and_assign():
     pols = [pol("p1", "Gold"), pol("p2", "Silver")]
     asg = [{"policy_id": "p1", "scope_type": "cluster", "scope_value": None, "priority": 0, "policy_name": "Gold"}, {"policy_id": "p2", "scope_type": "tag", "scope_value": "db", "priority": 0, "policy_name": "Silver"}]
     p2, a2, errs = apply_change(pols, asg, {"action": "delete", "policy_id": "p1"})
-    assert not errs and [p["id"] for p in p2] == ["p2"] and [a["scope_type"] for a in a2] == ["tag"]
+    assert errs and "still in use" in errs[0]  # p1 is the default: it cannot be deleted while anything uses it
+    p2, a2, errs = apply_change([pol("p1", "Gold"), pol("p3", "Spare")], asg, {"action": "delete", "policy_id": "p3"})
+    assert not errs and [p["id"] for p in p2] == ["p1"]
     _, a3, errs = apply_change(pols, asg, {"action": "assign", "set": [{"scope_type": "vm", "scope_value": "w1", "policy_id": None}], "clear": [{"scope_type": "tag", "scope_value": "db"}]})
     assert not errs and {(a["scope_type"], a["policy_id"]) for a in a3} == {("cluster", "p1"), ("vm", None)}
     assert apply_change(pols, asg, {"action": "assign", "set": [{"scope_type": "cluster", "policy_id": None}]})[2]
@@ -54,3 +56,17 @@ def test_a_name_clash_with_a_hand_made_job_is_a_conflict_not_a_crash():
     gs = [{"id": "a", "vmid": 101, "name": "a", "tags": [], "type": "vm"}]
     plan = build_plan(pols, asg, gs, [{"id": "pyxie-mine", "all": 0, "vmid": "5", "comment": "hand made"}], False)
     assert [w["action"] for w in plan["writes"]] == ["conflict"] and plan["writes"][0]["params"] == {}
+
+
+def test_save_applies_tags_and_default():
+    from pyxie_core.backup_policy_workflow import apply_scope, scope_of_save
+    asg = [{"id": None, "policy_id": "p1", "scope_type": "cluster", "scope_value": None, "priority": 0, "policy_name": "Gold"},
+           {"id": None, "policy_id": "p2", "scope_type": "tag", "scope_value": "db", "priority": 0, "policy_name": "Silver"}]
+    tags, make_default, errs = scope_of_save({"tags": ["web", " db ", ""], "make_default": True})
+    assert tags == ["db", "web"] and make_default and not errs
+    out = apply_scope(asg, "p2", "Silver", tags, make_default)
+    assert {(a["scope_type"], a["scope_value"], a["policy_id"]) for a in out} == {("cluster", None, "p2"), ("tag", "db", "p2"), ("tag", "web", "p2")}
+    # dropping a tag the policy had removes its rule; tags=None leaves rules alone
+    assert not [a for a in apply_scope(out, "p2", "Silver", ["web"], False) if a["scope_value"] == "db"]
+    assert len(apply_scope(out, "p2", "Silver", None, False)) == len(out)
+    assert scope_of_save({"tags": ["bad tag!"]})[2]

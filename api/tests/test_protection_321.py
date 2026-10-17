@@ -14,7 +14,7 @@ def test_full_3_2_1_is_ok():
 def test_stale_offsite_is_partial_and_named():
     r = p.score_guest({"2-NAS": NOW - 3600, "3-OFFSITE_Wasabi": NOW - 15 * 86400}, [NAS, OFF], ["nightly"], NOW)
     assert r["status"] == "partial" and not r["offsite"]
-    assert any("Offsite copy is 15d ago" in x for x in r["problems"])
+    assert any("(offsite): newest backup is 15d old, should be under" in x for x in r["problems"])
 
 
 def test_no_job_no_backup():

@@ -163,6 +163,25 @@ def create_backup_membership_dry_run(
     return {"id": str(op.id), "status": op.status, "dry_run_result": op.dry_run_result}
 
 
+class RetentionDryRunRequest(BaseModel):
+    cluster_id: uuid.UUID
+    job_id: str
+    keep: dict = {}
+
+
+@router.post("/backup-jobs/retention/dry-run", dependencies=[Depends(require_admin)])
+def create_retention_dry_run(payload: RetentionDryRunRequest, user=Depends(get_current_user), db: Session = Depends(get_db)):
+    from pyxie_core.retention_workflow import dry_run_job_retention
+    cluster = db.query(Cluster).filter(Cluster.id == payload.cluster_id).one_or_none()
+    if cluster is None:
+        raise HTTPException(404, "cluster not found")
+    try:
+        op = dry_run_job_retention(db, cluster, payload.job_id, payload.keep, actor=user.email)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(400, str(exc))
+    return {"id": str(op.id), "status": op.status, "dry_run_result": op.dry_run_result}
+
+
 @router.get("/scorecard")
 def scorecard(db: Session = Depends(get_db)):
     """3-2-1 posture per guest plus datastore cards and read-only job info. Reads PBS and Proxmox, writes nothing."""

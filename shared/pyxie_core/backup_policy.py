@@ -67,7 +67,16 @@ def validate_policy(spec: dict) -> tuple[dict, list[str]]:
     notes = str(spec.get("notes_template") or "").strip() or None
     if notes and (len(notes) > 200 or any(c in notes for c in "\n\r")):
         errors.append("the notes template is one line of up to 200 characters")
-    clean = {"name": name, "storage": storage, "schedule": schedule, "mode": mode, "enabled": bool(spec.get("enabled", True)), "notes_template": notes, **keep}
+    from .policy_layers import SCHED_RE as LAYER_SCHED, validate_layers
+    layers, lerrs = validate_layers(spec.get("layers"))
+    errors += lerrs
+    gc = str(spec.get("gc_schedule") or "").strip() or None
+    if gc and not LAYER_SCHED.match(gc):
+        errors.append("the garbage-collection schedule is not valid (for example daily, or sat 18:15)")
+    from .policy_layers import validate_maintenance
+    maint, merrs = validate_maintenance(spec.get("maintenance"))
+    errors += merrs
+    clean = {"name": name, "storage": storage, "schedule": schedule, "mode": mode, "enabled": bool(spec.get("enabled", True)), "notes_template": notes, **keep, "layers": layers, "gc_schedule": gc, "maintenance": maint}
     return clean, errors
 
 
@@ -97,11 +106,18 @@ def describe_retention(policy: dict) -> str:
     return "keep " + ", ".join(f"{policy[k]} {names[k]}" for k in KEEP if policy.get(k))
 
 
-def job_params(policy: dict, vmids: list[int]) -> dict:
-    """The Proxmox job definition for a policy and its VM list. Pure."""
+def job_params(policy: dict, vmids: list[int], *, exclude: list[int] | None = None) -> dict:
+    """The Proxmox job definition for a policy and its VM list. With `exclude` (a list, possibly empty) the job is an all-guests job minus those VMs: the shape of the
+    default policy, so a VM created later is covered without anyone touching the job. Pure."""
     p = {"id": policy.get("job_id") or job_id_for(policy["name"]), "storage": policy["storage"], "schedule": policy["schedule"], "mode": policy["mode"],
-         "enabled": 1 if policy.get("enabled", True) else 0, "all": 0, "vmid": ",".join(str(v) for v in sorted(set(vmids))),
-         "comment": f"{COMMENT_PREFIX} {policy['name']}"}
+         "enabled": 1 if policy.get("enabled", True) else 0, "comment": f"{COMMENT_PREFIX} {policy['name']}"}
+    if exclude is not None:
+        p["all"] = 1
+        if exclude:
+            p["exclude"] = ",".join(str(v) for v in sorted(set(exclude)))
+    else:
+        p["all"] = 0
+        p["vmid"] = ",".join(str(v) for v in sorted(set(vmids)))
     rs = retention_string(policy)
     if rs:
         p["prune-backups"] = rs
@@ -112,6 +128,10 @@ def job_params(policy: dict, vmids: list[int]) -> dict:
 
 def _vmids(job: dict) -> list[int]:
     return sorted({int(v) for v in str(job.get("vmid") or "").split(",") if v.strip().isdigit()})
+
+
+def _excluded(job: dict) -> list[int]:
+    return sorted({int(v) for v in str(job.get("exclude") or "").split(",") if v.strip().isdigit()})
 
 
 def covers(job: dict, vmid: int, all_vmids: set[int]) -> bool:
@@ -132,14 +152,14 @@ def resolve_assignments(workloads: list[dict], assignments: list[dict]) -> dict[
     for w in workloads:
         wid = str(w["id"])
         if wid in by_vm:
-            out[wid] = {"policy_id": by_vm[wid]["policy_id"], "source": "set on this VM"}
+            out[wid] = {"policy_id": by_vm[wid]["policy_id"], "source": "set for this guest"}
             continue
         tags = {str(t).lower() for t in (w.get("tags") or [])}
         mine = sorted((a for a in tag_rules if str(a["scope_value"]).lower() in tags), key=lambda a: (-int(a.get("priority") or 0), str(a.get("policy_name") or "")))
         if mine:
             out[wid] = {"policy_id": mine[0]["policy_id"], "source": f"tag {mine[0]['scope_value']}"}
         elif cluster_rule:
-            out[wid] = {"policy_id": cluster_rule["policy_id"], "source": "the cluster default"}
+            out[wid] = {"policy_id": cluster_rule["policy_id"], "source": "the default policy"}
     return out
 
 
@@ -155,7 +175,11 @@ def desired_membership(resolved: dict[str, dict], vmid_of: dict[str, int]) -> di
 def _same_job(job: dict, want: dict) -> list[str]:
     """What differs between an existing job and the wanted definition (human words). Pure."""
     diffs = []
-    if _vmids(job) != sorted(int(v) for v in want["vmid"].split(",") if v) or str(job.get("all")) in ("1", "True", "true"):
+    job_all = str(job.get("all")) in ("1", "True", "true")
+    if str(want.get("all")) in ("1", "True", "true"):
+        if not job_all or _excluded(job) != _excluded(want):
+            diffs.append("the VM list")
+    elif job_all or _vmids(job) != sorted(int(v) for v in str(want.get("vmid") or "").split(",") if v):
         diffs.append("the VM list")
     for k, label in (("storage", "datastore"), ("schedule", "schedule"), ("mode", "mode")):
         if str(job.get(k) or "") != str(want[k]):
@@ -171,7 +195,7 @@ def _same_job(job: dict, want: dict) -> list[str]:
     return diffs
 
 
-def plan_job_writes(policies: list[dict], membership: dict[str, list[int]], jobs: list[dict]) -> list[dict]:
+def plan_job_writes(policies: list[dict], membership: dict[str, list[int]], jobs: list[dict], default_id: str | None = None, all_vmids: set[int] | None = None) -> list[dict]:
     """The Proxmox job writes that make the jobs match the policies: [{"action": create|update|delete, "job_id", "params", "why"}]. A policy with no VMs has no job. Jobs whose
     id starts with 'pyxie-' but belong to no policy are deleted too. Pure."""
     existing = {j["id"]: j for j in jobs}
@@ -184,13 +208,15 @@ def plan_job_writes(policies: list[dict], membership: dict[str, list[int]], jobs
         if jid in existing and not is_pyxie_job(existing[jid]):
             writes.append({"action": "conflict", "job_id": jid, "params": {}, "why": f"a Proxmox job called {jid} already exists and PyXie did not create it: give the policy a different name"})
             continue
-        if not vmids:
+        is_default_pol = default_id is not None and pol["id"] == default_id and all_vmids is not None
+        if not vmids and not (is_default_pol and all_vmids):
             if jid in existing:
                 writes.append({"action": "delete", "job_id": jid, "params": {}, "why": f"policy {pol['name']} has no VMs left"})
             continue
-        want = job_params(pol, vmids)
+        is_default = default_id is not None and pol["id"] == default_id and all_vmids is not None
+        want = job_params(pol, vmids, exclude=sorted(all_vmids - set(vmids)) if is_default else None)
         if jid not in existing:
-            writes.append({"action": "create", "job_id": jid, "params": want, "why": f"policy {pol['name']}: new job for {len(vmids)} VM{'s' if len(vmids) != 1 else ''}"})
+            writes.append({"action": "create", "job_id": jid, "params": want, "why": f"policy {pol['name']}: new job for " + ("every guest that has no policy of its own" if is_default else f"{len(vmids)} VM{'s' if len(vmids) != 1 else ''}")})
         else:
             diffs = _same_job(existing[jid], want)
             if diffs:

@@ -30,14 +30,16 @@ now = lambda: datetime.now(timezone.utc)
 STORAGE_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9._-]{1,39}$")
 
 
-def default_storage_id(datastore: str) -> str:
-    base = re.sub(r"[^A-Za-z0-9._-]", "-", datastore).strip("-._")
-    return ("pbs-" + base)[:40]
+def default_storage_id(datastore: str, namespace: str = "", purpose: str = "restore") -> str:
+    base = re.sub(r"[^A-Za-z0-9._-]", "-", datastore + ("-" + namespace if namespace else "")).strip("-._")
+    return (("pbs-" if purpose == "restore" else "pbsb-") + base)[:40]
 
 
-def dry_run_pbs_storage_add(db: Session, pbs: ProtectionTarget, cluster: Cluster, *, datastore: str, storage_id: str | None, actor: str) -> Operation:
-    sid = (storage_id or default_storage_id(datastore)).strip()
-    ctx = {"protection_target_id": str(pbs.id), "target": pbs.name, "node": pbs.name, "datastore": datastore, "storage_id": sid}
+def dry_run_pbs_storage_add(db: Session, pbs: ProtectionTarget, cluster: Cluster, *, datastore: str, storage_id: str | None, actor: str, namespace: str = "", purpose: str = "restore") -> Operation:
+    namespace = (namespace or "").strip().strip("/")
+    purpose = "backup" if purpose == "backup" else "restore"
+    sid = (storage_id or default_storage_id(datastore, namespace, purpose)).strip()
+    ctx = {"protection_target_id": str(pbs.id), "target": pbs.name, "node": pbs.name, "datastore": datastore, "storage_id": sid, "namespace": namespace, "purpose": purpose}
     op = create_operation(db, "pbs.storage_add", cluster_id=cluster.id, created_by=actor, context=ctx)
     reasons: list[str] = []
     rules: list[str] = []
@@ -46,19 +48,19 @@ def dry_run_pbs_storage_add(db: Session, pbs: ProtectionTarget, cluster: Cluster
         reasons.append("the storage ID must start with a letter and use letters, digits, dot, dash or underscore")
         rules.append("SAFE-PBSSTORE-001")
     try:
-        rcreds = load_pbs_credentials(db, pbs, "restore")
+        rcreds = load_pbs_credentials(db, pbs, purpose)
         with PbsClient(rcreds) as rc:
             stores = {d["store"] for d in (rc.datastores() or [])}
             if datastore not in stores:
-                reasons.append(f"the restore token cannot see datastore {datastore}: give it the DatastoreReader role on it")
+                reasons.append(f"the {purpose} token cannot see datastore {datastore}: give it the {'DatastoreReader' if purpose == 'restore' else 'DatastorePowerUser'} role on it")
                 rules.append("SAFE-PBSSTORE-001")
             else:
-                rc.groups(datastore)
+                rc._get(f"/admin/datastore/{datastore}/groups", {"ns": namespace} if namespace else None)
     except PbsNotConfigured:
-        reasons.append("no restore token is saved for this backup server: create the read-only restore account (Setup guide, backup server step) and add its token under Credentials")
+        reasons.append(f"no {purpose} token is saved for this backup server: create the {'read-only restore' if purpose == 'restore' else 'backup'} account (Settings, Credentials, Proxmox Backup Server accounts) and add its token there")
         rules.append("SAFE-PBSSTORE-001")
     except Exception as exc:  # noqa: BLE001
-        reasons.append(f"the restore token could not read {datastore}: {str(exc)[:140]}")
+        reasons.append(f"the {purpose} token could not read {datastore}: {str(exc)[:140]}")
         rules.append("SAFE-PBSSTORE-001")
     if not rules:
         try:
@@ -88,9 +90,13 @@ def dry_run_pbs_storage_add(db: Session, pbs: ProtectionTarget, cluster: Cluster
             reasons.append(f"could not read the Proxmox storage list: {str(exc)[:120]}")
             rules.append("SAFE-PBSSTORE-001")
     if not rules:
-        reasons.insert(0, f"Add datastore {datastore} of {pbs.name} to Proxmox as backup storage '{sid}' (server {pbs.hostname}, certificate {fp[:23]}…), so guests can be restored from it.")
-        reasons.append("Proxmox keeps the read-only restore token's secret in its own storage configuration (cluster-wide). The storage only reads: it can restore, not write or delete backups. Remove the storage later in Storage setup; nothing on the backup server changes.")
-    result = {"target": pbs.name, "node": pbs.name, "datastore": datastore, "storage_id": sid, "eligible": not rules, "reasons": reasons, "blocking_safety_rules": sorted(set(rules))}
+        reasons.insert(0, f"Add datastore {datastore}{'/' + namespace if namespace else ''} of {pbs.name} to Proxmox as backup storage '{sid}' (server {pbs.hostname}, certificate {fp[:23]}…), so guests can be restored from it.")
+        if purpose == "backup":
+            reasons[0] = reasons[0].replace("so guests can be restored from it.", "so a backup policy can back guests up into it and restore from it.")
+            reasons.append("Proxmox keeps the backup token's secret in its own storage configuration (cluster-wide). The token can write and prune only the backups it owns (DatastorePowerUser). Remove the storage later in Storage setup; nothing on the backup server changes.")
+        else:
+            reasons.append("Proxmox keeps the read-only restore token's secret in its own storage configuration (cluster-wide). The storage only reads: it can restore, not write or delete backups. Remove the storage later in Storage setup; nothing on the backup server changes.")
+    result = {"target": pbs.name, "node": pbs.name, "datastore": datastore, "namespace": namespace, "storage_id": sid, "eligible": not rules, "reasons": reasons, "blocking_safety_rules": sorted(set(rules))}
     if rules:
         return enter_stage(db, op, status="blocked", stage="dry_run", dry_run_result=result, blocking_safety_rules=sorted(set(rules)), actor=actor)
     op.context = {**ctx, "fingerprint": fp}
@@ -127,9 +133,9 @@ def execute_pbs_storage_add(db: Session, operation_id) -> Operation:
                 return block_operation(db, op, blocking_safety_rules=["SAFE-LOCK-001"])
             op = enter_stage(db, op, status="executing", stage="executing")
         if op.status == "executing" and not op.pve_task_result:
-            cred = db.query(ProtectionCredential).filter(ProtectionCredential.protection_target_id == pbs.id, ProtectionCredential.slot_name == "restore").one()
+            cred = db.query(ProtectionCredential).filter(ProtectionCredential.protection_target_id == pbs.id, ProtectionCredential.slot_name == (ctx.get("purpose") or "restore")).one()
             spec = {"id": sid, "server": pbs.hostname, "port": pbs.api_port, "datastore": ds, "username": f"{cred.token_user}!{cred.token_id}",
-                    "fingerprint": ctx["fingerprint"]}
+                    "fingerprint": ctx["fingerprint"], "namespace": ctx.get("namespace") or ""}
             try:
                 with PveMaintenanceClient(load_pve_credentials(db, target, "maintenance")) as wc:
                     wc.create_pbs_storage(spec, decrypt_secret(cred.encrypted_secret))
@@ -148,7 +154,7 @@ def execute_pbs_storage_add(db: Session, operation_id) -> Operation:
             rc, _c = build_pve_client(db, target)
             with rc, PveMaintenanceClient(load_pve_credentials(db, target, "maintenance")) as adm:
                 got = adm._get(f"/storage/{sid}") or {}
-                if got.get("type") != "pbs" or got.get("datastore") != ds:
+                if got.get("type") != "pbs" or got.get("datastore") != ds or (got.get("namespace") or "") != (ctx.get("namespace") or ""):
                     problems.append("the storage does not read back as a backup server datastore")
                 node = next((n.name for n in db.query(Node).filter(Node.cluster_id == cluster.id, Node.status == "online", Node.is_missing.is_(False)).order_by(Node.name)), None)
                 active = next((s for s in (rc.storage_list(node) or []) if s.get("storage") == sid), None) if node else None

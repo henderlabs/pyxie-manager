@@ -365,6 +365,7 @@ _JOB_TIMEOUT_BY_TYPE = {
     "node.exit_maintenance": 1800,
     "cluster.rebalance": 10800,  # 3h -- same evacuation shape as node.evacuate
     "protection.backup_membership": 120,  # synchronous PVE config write, no task to wait on
+    "protection.backup_retention": 120,
     "workload.network_vlan_change": 120,  # synchronous PVE config write, no task to wait on -- same shape
 }
 
@@ -468,6 +469,9 @@ def _approve_for_type(db: Session, op: Operation, actor: str) -> Operation:
     if op.operation_type_id == "cluster.rebalance":
         from pyxie_core.balance_workflow import approve as approve_balance
         return approve_balance(db, op, approved_by=actor)
+    if op.operation_type_id == "protection.backup_retention":
+        from pyxie_core.retention_workflow import approve as approve_retention
+        return approve_retention(db, op, approved_by=actor)
     if op.operation_type_id == "protection.backup_membership":
         from pyxie_core.protection_workflow import approve as approve_backup_membership
         return approve_backup_membership(db, op, approved_by=actor)

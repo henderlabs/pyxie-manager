@@ -76,16 +76,16 @@ def merge_points(pve_points: list[dict], pbs_points: list[dict]) -> list[dict]:
     """One list, newest first. A point seen by Proxmox is restorable (has a volid). A PBS-only point is listed with why not."""
     out: dict = {}
     for p in pve_points:
-        out[(p.get("datastore") or p["storage"], p["time"])] = {**p, "restorable": True, "reason": None}
+        out[(p.get("datastore") or p["storage"], p.get("namespace") or "", p["time"])] = {**p, "restorable": True, "reason": None}
     for p in pbs_points:
-        key = (p["datastore"], p["time"])
+        key = (p["datastore"], p.get("namespace") or "", p["time"])
         if key in out:
             cur = out[key]
             cur.update({k: v for k, v in p.items() if v not in (None, "") and k not in ("volid", "storage")})
             cur["restorable"] = True
         else:
             out[key] = {**p, "volid": None, "storage": None, "restorable": False,
-                        "reason": "Proxmox has no storage for this datastore, so it cannot restore from it yet"}
+                        "reason": "Proxmox has no storage for this datastore" + (f" and namespace {p['namespace']}" if p.get("namespace") else "") + ", so it cannot restore from it yet"}
     return sorted(out.values(), key=lambda r: r["time"], reverse=True)
 
 
@@ -117,7 +117,8 @@ def read_restore_points(db, workload) -> dict:
                         continue
                     name = row["storage"]
                     try:
-                        ds = (adm._get(f"/storage/{name}") or {}).get("datastore")  # the storage definition needs more than the read-only token holds
+                        sdef = adm._get(f"/storage/{name}") or {}  # the storage definition needs more than the read-only token holds
+                        ds, ns_of = sdef.get("datastore"), sdef.get("namespace") or ""
                         items = adm.backup_content(node, name, workload.vmid)
                     except Exception as exc:  # noqa: BLE001
                         errors.append(f"could not list backups on {name}: {str(exc)[:100]}")
@@ -129,7 +130,7 @@ def read_restore_points(db, workload) -> dict:
                             continue
                         pve_points.append({"storage": name, "datastore": ds or name, "volid": it["volid"], "time": int(it.get("ctime") or 0),
                                            "size": it.get("size"), "verified": (it.get("verification") or {}).get("state"),
-                                           "notes": it.get("notes"), "protected": bool(it.get("protected")), "offsite": False})
+                                           "notes": it.get("notes"), "protected": bool(it.get("protected")), "offsite": False, "namespace": ns_of})
     except Exception as exc:  # noqa: BLE001
         errors.append(f"could not read backups from Proxmox: {str(exc)[:120]}")
     pbs_points: list[dict] = []
@@ -139,10 +140,11 @@ def read_restore_points(db, workload) -> dict:
                 for d in pc.datastores() or []:
                     name = d["store"]
                     store = {"name": name, "backend": d.get("backend-type") or "filesystem"}
-                    for s in pc.snapshots(name, kind, str(workload.vmid)) or []:
-                        pbs_points.append({"datastore": name, "time": int(s["backup-time"]), "size": s.get("size"),
-                                           "verified": (s.get("verification") or {}).get("state"), "protected": bool(s.get("protected")),
-                                           "notes": s.get("comment"), "offsite": is_offsite(store), "backend": store["backend"], "server": t.name, "server_id": str(t.id)})
+                    for ns in pc.namespaces(name):
+                        for s in pc.snapshots(name, kind, str(workload.vmid), ns) or []:
+                            pbs_points.append({"datastore": name, "namespace": ns, "time": int(s["backup-time"]), "size": s.get("size"),
+                                               "verified": (s.get("verification") or {}).get("state"), "protected": bool(s.get("protected")),
+                                               "notes": s.get("comment"), "offsite": is_offsite(store), "backend": store["backend"], "server": t.name, "server_id": str(t.id)})
         except Exception as exc:  # noqa: BLE001
             errors.append(f"{t.name}: could not read its backups ({type(exc).__name__})")
     return {"points": merge_points(pve_points, pbs_points), "errors": errors, "kind": kind}

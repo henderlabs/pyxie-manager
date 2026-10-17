@@ -524,6 +524,7 @@ export type BackupJob = {
   cluster_name: string;
   storage: string;
   schedule: string | null;
+  prune_backups?: Record<string, number>;
   enabled: boolean;
   all_guests: boolean;
   exclude_vmids: number[];
